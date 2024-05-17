@@ -1,0 +1,97 @@
+package SimpleL2
+
+import chisel3._
+import chisel3.util._
+import Utils.GenerateVerilog
+import SimpleL2.Configs.L2CacheConfig
+import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
+
+object LinkState {
+    def STOP = "b00".U(2.W)
+    def ACTIVATE = "b10".U(2.W)
+    def RUN = "b11".U(2.W)
+    def DEACTIVATE = "b01".U(2.W)
+}
+
+class CHIBridge extends Module {
+    val io = IO(new Bundle {
+        val chi         = CHIBundleDownstream(L2CacheConfig.chiBundleParams)
+        val chiLinkCtrl = new CHILinkCtrlIO()
+        // TODO: val deactivateTxLink = Input(Bool())
+        // TODO: ShutDown
+    })
+
+    io.chi <> DontCare
+    io.chiLinkCtrl <> DontCare
+
+    val txactivereq = io.chiLinkCtrl.txactivereq
+    val txactiveack = io.chiLinkCtrl.txactiveack
+    val rxactivereq = io.chiLinkCtrl.rxactivereq
+    val rxactiveack = io.chiLinkCtrl.rxactiveack
+
+    val resetFinish = RegInit(false.B)
+    resetFinish := true.B
+
+    val txState = RegInit(LinkState.STOP)
+    val rxState = RegInit(LinkState.STOP)
+    dontTouch(txState)
+    dontTouch(rxState)
+
+    val updateTxState = WireInit(false.B)
+    val updateRxState = WireInit(false.B)
+    dontTouch(updateTxState)
+    dontTouch(updateRxState)
+
+    // @formatter:off
+    updateTxState := (RegNext(RegNext(reset.asBool)) && resetFinish)                    ||
+                     (txactivereq  && txactiveack && txState === LinkState.ACTIVATE)    ||
+                     (!txactivereq && txactiveack && txState === LinkState.RUN)         ||
+                     (!txactivereq && !txactiveack && txState === LinkState.DEACTIVATE)
+                    //  TODO: LinkState.STOP
+    // @formatter:on
+
+    when(updateTxState && resetFinish) {
+        when(txState === LinkState.STOP) {
+            txState := LinkState.ACTIVATE
+        }.elsewhen(txState === LinkState.ACTIVATE) {
+            txState := LinkState.RUN
+        }.elsewhen(txState === LinkState.RUN) {
+            txState := LinkState.DEACTIVATE
+        }.elsewhen(txState === LinkState.DEACTIVATE) {
+            txState := LinkState.STOP
+        }
+    }
+
+    // @formatter:off
+    updateRxState := !reset.asBool && (
+                        (rxactivereq && rxState === LinkState.STOP)        ||
+                        (rxactivereq && rxactiveack && rxState === LinkState.ACTIVATE)     ||
+                        (!rxactivereq && rxactiveack && rxState === LinkState.RUN)         ||
+                        (!rxactivereq && !rxactiveack && rxState === LinkState.DEACTIVATE)
+                    )
+    // @formatter:on
+
+    when(updateRxState) {
+        when(rxState === LinkState.STOP) {
+            rxState := LinkState.ACTIVATE
+        }.elsewhen(rxState === LinkState.ACTIVATE) {
+            rxState := LinkState.RUN
+        }.elsewhen(rxState === LinkState.RUN) {
+            rxState := LinkState.DEACTIVATE
+        }.elsewhen(rxState === LinkState.DEACTIVATE) {
+            rxState := LinkState.STOP
+        }
+    }
+
+    io.chiLinkCtrl.txactivereq := txState === LinkState.ACTIVATE || txState === LinkState.RUN
+    io.chiLinkCtrl.rxactiveack := rxactivereq && rxState === LinkState.STOP || rxState === LinkState.ACTIVATE || rxState === LinkState.RUN
+
+    assert(!(txState === LinkState.RUN && txactivereq && !txactiveack), "txactiveack should keep high during RUN state")
+    assert(!(txState === LinkState.ACTIVATE && !txactivereq), "txactivereq should keep high during ACTIVATE state")
+
+    dontTouch(io)
+}
+
+object CHIBridge extends App {
+    GenerateVerilog(args, () => new CHIBridge)
+}

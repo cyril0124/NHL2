@@ -341,3 +341,6 @@ hs_err_pid*
 
 .vscode/
 .metals/
+.bloop/
+.verilua/
+vrtl_gen_src/
