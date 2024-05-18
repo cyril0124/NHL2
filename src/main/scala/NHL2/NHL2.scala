@@ -10,9 +10,7 @@ import scala.math.BigInt
 
 import chi._
 
-class NHL2(parentName: String = "L2_")(implicit p: Parameters)
-    extends LazyModule
-    with HasNHL2Params {
+class NHL2(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasNHL2Params {
 
     val xfer = TransferSizes(cacheParams.blockBytes, cacheParams.blockBytes)
 
