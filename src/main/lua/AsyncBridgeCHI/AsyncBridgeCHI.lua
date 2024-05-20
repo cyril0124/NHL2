@@ -36,6 +36,8 @@ do
     end
 end
 
+assert(cfg.simulator == "vcs")
+
 local function enq_send_data(data_signal, valid_signal, data)
     valid_signal:set(1)
     data_signal:set(data)

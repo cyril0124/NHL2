@@ -18,11 +18,6 @@ local function posedge(cycles, cycle_action_func)
         assert(cycles > 0)
 
         clock:posedge(cycles, func)
-        
-        -- for i = 1, cycles do
-            -- func(i)
-            -- await_posedge(dut.clock)
-        -- end
     end
 end
 

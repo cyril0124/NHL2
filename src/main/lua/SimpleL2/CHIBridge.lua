@@ -1,6 +1,7 @@
 local utils = require "LuaUtils"
 local env = require "env"
 
+local assert = assert
 local TEST_SUCCESS = env.TEST_SUCCESS
 local posedge = env.posedge
 local dut_reset = env.dut_reset
@@ -8,10 +9,12 @@ local dut_reset = env.dut_reset
 local bridge = dut.u_CHIBridge
 local txState = bridge.txState
 local rxState = bridge.rxState
-local txactivereq = bridge.io_chiLinkCtrl_txactivereq
-local txactiveack = bridge.io_chiLinkCtrl_txactiveack
-local rxactivereq = bridge.io_chiLinkCtrl_rxactivereq
-local rxactiveack = bridge.io_chiLinkCtrl_rxactiveack
+local txactivereq = dut.io_chiLinkCtrl_txactivereq
+local txactiveack = dut.io_chiLinkCtrl_txactiveack
+local rxactivereq = dut.io_chiLinkCtrl_rxactivereq
+local rxactiveack = dut.io_chiLinkCtrl_rxactiveack
+
+assert(cfg.simulator == "vcs")
 
 local LinkState = utils.enum_define {
     STOP = 0,
@@ -120,7 +123,8 @@ local function test_rxstate_switch()
 end
 
 verilua "mainTask" { function ()
-    -- sim.dump_wave()
+    sim.dump_wave()
+    dut_reset()
 
     test_txstate_switch()
     test_txstate_after_reset()

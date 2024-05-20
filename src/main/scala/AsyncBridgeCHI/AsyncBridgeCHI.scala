@@ -64,9 +64,9 @@ class AsyncBridgeCHI extends RawModule {
         //      enq_reset  <--/           \--> deq_reset
         //
         def apply[T <: Data](in: CHIChannelIO[T], name: String = "Unknown", depth: Int = 4, sync: Int = 3): CHIChannelIO[T] = {
-            val out = WireInit(0.U.asTypeOf(chiselTypeOf(in)))
+            val out    = WireInit(0.U.asTypeOf(chiselTypeOf(in)))
             val params = AsyncQueueParams(depth, sync)
-            val q   = Module(new AsyncQueue(chiselTypeOf(in.flit), params))
+            val q      = Module(new AsyncQueue(chiselTypeOf(in.flit), params))
             q.io.enq_clock := enq_clock
             q.io.enq_reset := enq_reset
             q.io.deq_clock := deq_clock
@@ -210,5 +210,5 @@ object AsyncBridgeCHI extends App {
         dontTouch(bridge.io)
     }
 
-    GenerateVerilog(args, () => new AsyncBridgeCHI_TB)
+    GenerateVerilog(args, () => new AsyncBridgeCHI_TB, name = "AsyncBridgeCHI_TB", split = false)
 }
