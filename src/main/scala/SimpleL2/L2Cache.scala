@@ -2,15 +2,20 @@ package SimpleL2
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
-import SimpleL2.Configs.L2CacheConfig
+import SimpleL2.Configs._
 import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
 
-class L2Cache extends Module {
-    val io_tl = IO(TLBundle(L2CacheConfig.tlBundleParams)).suggestName("master_port_0_0")
+abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param
+abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
+
+class L2Cache()(implicit p: Parameters) extends L2Module {
+    val io_tl = IO(TLBundle(tlBundleParams)).suggestName("master_port_0_0")
     val io = IO(new Bundle {
-        val chi         = CHIBundleDownstream(L2CacheConfig.chiBundleParams)
+        val chi         = CHIBundleDownstream(chiBundleParams)
         val chiLinkCtrl = new CHILinkCtrlIO()
     })
 
@@ -32,5 +37,10 @@ class L2Cache extends Module {
 }
 
 object L2Cache extends App {
-    GenerateVerilog(args, () => new L2Cache)
+    val config = new Config((_, _, _) => {
+        case L2ParamKey => L2Param()
+        case DebugOptionsKey => DebugOptions()
+    })
+
+    GenerateVerilog(args, () => new L2Cache()(config), name = "L2Cache", split = true)
 }

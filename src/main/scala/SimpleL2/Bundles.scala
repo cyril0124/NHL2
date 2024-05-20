@@ -2,10 +2,11 @@ package SimpleL2.Bundles
 
 import chisel3._
 import chisel3.util._
-import scala.concurrent.ExecutionContext.parasitic
-import scala.annotation.meta.param
+import org.chipsalliance.cde.config._
+import freechips.rocketchip.tilelink._
 import scala.collection.immutable.ListMap
-import freechips.rocketchip.diplomacy.BindingScope.add
+import SimpleL2._
+import SimpleL2.Configs._
 
 case class CHIBundleParameters(
     nodeIdBits: Int,
@@ -182,4 +183,92 @@ class CHILinkCtrlIO extends Bundle {
 
     val rxactivereq = Input(Bool())
     val rxactiveack = Output(Bool())
+}
+
+object RequestOwner {
+    val width      = 3
+    val Level1     = "b001".U
+    val CMO        = "b010".U
+    val Prefetcher = "b011".U
+    val Snoop      = "b100".U
+}
+
+object TLChannel {
+    val width    = 3
+    val ChannelA = "b001".U
+    val ChannelB = "b010".U // from CHI RXSNP
+    val ChannelC = "b100".U
+}
+
+// trait HasSetAndTag {
+//     val set = UInt(L2CacheConfig.setBits.W)
+//     val tag = UInt(L2CacheConfig.tagBits.W)
+// }
+
+class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
+    val owner     = UInt(RequestOwner.width.W)
+    val opcode    = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
+    val channel   = UInt(TLChannel.width.W)
+    val source    = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
+    val address   = UInt(addressBits.W)
+    val tmpDataID = UInt(log2Ceil(nrTmpDataEntry).W)
+
+    def txnID = source     // alias to source
+    def chiOpcode = opcode // alias to opcode
+    def isSnoop = channel === TLChannel.ChannelB
+}
+
+class TaskBundle(implicit p: Parameters) extends L2Bundle {
+    val opcode     = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
+    val channel    = UInt(TLChannel.width.W)
+    val set        = UInt(setBits.W)
+    val tag        = UInt(tagBits.W)
+    val source     = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
+    val isPrefetch = Bool()
+    val tmpDataID  = UInt(log2Ceil(nrTmpDataEntry).W)
+
+    def txnID = source     // alias to source
+    def chiOpcode = opcode // alias to opcode
+    def isSnoop = channel === TLChannel.ChannelB
+}
+
+// abstract class TaskBundle extends Bundle with HasSetAndTag
+
+// class TaskSinkA extends TaskBundle {
+//     val params = L2CacheConfig.tlBundleParams
+//     val opcode = UInt(3.W)
+
+//     val source     = UInt(params.sourceBits.W)
+//     val isPrefetch = Bool()
+//     // TODO: alias
+// }
+
+// class TaskSinkC extends TaskBundle {
+//     val params    = L2CacheConfig.tlBundleParams
+//     val opcode    = UInt(3.W)
+//     val source    = UInt(params.sourceBits.W)
+//     val tmpDataID = UInt(log2Ceil(L2CacheConfig.nrTmpDataEntry).W)
+// }
+
+// class TaskSnoop extends TaskBundle {
+//     val params = L2CacheConfig.chiBundleParams
+//     val opcode = UInt(5.W)
+//     val txnID  = UInt(12.W)
+// }
+
+// class TaskCMO extends TaskBundle {
+//     // TODO:
+// }
+
+// class TaskReplay extends TaskBundle {
+//     // TODO:
+// }
+
+// class TaskMSHR extends TaskBundle {
+//     val tmpDataID = UInt(log2Ceil(L2CacheConfig.nrTmpDataEntry).W)
+// }
+
+class DirRead(implicit p: Parameters) extends L2Bundle {
+    val set = UInt(setBits.W)
+    val tag = UInt(tagBits.W)
 }

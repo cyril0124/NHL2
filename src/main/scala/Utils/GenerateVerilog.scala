@@ -6,7 +6,13 @@ import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation
 
 object GenerateVerilog {
-    def apply(args: Array[String], gen: () => RawModule) {
+    def apply(args: Array[String], gen: () => RawModule, name: String = "Unknown", split: Boolean = false) {
+
+        var extraFirtoolOptions = Seq(FirtoolOption("--export-module-hierarchy"))
+        if (split) {
+            extraFirtoolOptions = extraFirtoolOptions ++ Seq(FirtoolOption("--split-verilog"), FirtoolOption("-o=./build/" + name))
+        }
+
         (new ChiselStage).execute(
             Array("--target", "verilog") ++ args,
             Seq(
@@ -20,9 +26,8 @@ object GenerateVerilog {
                         " disallowPortDeclSharing, disallowLocalVariables," +
                         " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
                         " disallowExpressionInliningInPorts, disallowMuxInlining"
-                ),
-                ChiselGeneratorAnnotation(gen)
-            )
+                )
+            ) ++ extraFirtoolOptions ++ Seq(ChiselGeneratorAnnotation(gen))
         )
     }
 }

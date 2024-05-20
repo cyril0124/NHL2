@@ -2,9 +2,11 @@ package SimpleL2
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
-import SimpleL2.Configs.L2CacheConfig
+import SimpleL2.Configs._
 
 object RequestOwner {
     val OwnerWidth = 2
@@ -12,25 +14,23 @@ object RequestOwner {
     def Prefetcher = "b10".U(2.W)
 }
 
-class RequestBufferEntry extends Bundle {
-    val owner = UInt(RequestOwner.OwnerWidth.W)
+class RequestBufferEntry(implicit p: Parameters) extends L2Bundle {
+    val owner  = UInt(RequestOwner.OwnerWidth.W)
     val opcode = UInt(3.W)
-    val source = UInt(L2CacheConfig.tlBundleParams.sourceBits.W)
+    val source = UInt(tlBundleParams.sourceBits.W)
 }
 
-class RequestBuffer extends Module {
-    val io = IO(new Bundle{
-        val sinkA = Flipped(Decoupled(new TLBundleA(L2CacheConfig.tlBundleParams)))
+class RequestBuffer()(implicit p: Parameters) extends L2Module {
+    val io = IO(new Bundle {
+        val sinkA = Flipped(Decoupled(new TLBundleA(tlBundleParams)))
         val owner = Input(UInt(RequestOwner.OwnerWidth.W))
     })
 
     io.sinkA <> DontCare
     io.sinkA.ready := true.B
 
-    val entrySize = L2CacheConfig.nrRequestBufferEntry
-
-    val valids = RegInit(VecInit(Seq.fill(entrySize)(false.B)))
-    val buffers = RegInit(VecInit(Seq.fill(entrySize)(0.U.asTypeOf(new RequestBufferEntry))))
+    val valids  = RegInit(VecInit(Seq.fill(nrRequestBufferEntry)(false.B)))
+    val buffers = RegInit(VecInit(Seq.fill(nrRequestBufferEntry)(0.U.asTypeOf(new RequestBufferEntry))))
     dontTouch(valids)
     dontTouch(buffers)
 
@@ -38,22 +38,20 @@ class RequestBuffer extends Module {
     assert(!(PopCount(insertVec.asUInt) > 1.U))
     dontTouch(insertVec)
 
-    buffers.zip(insertVec).foreach { 
-        case(buf, chosen) =>
-            when(chosen && io.sinkA.fire) {
-                buf.opcode := io.sinkA.bits.opcode
-                buf.source := io.sinkA.bits.source
-                buf.owner := io.owner
-            }
+    buffers.zip(insertVec).foreach { case (buf, chosen) =>
+        when(chosen && io.sinkA.fire) {
+            buf.opcode := io.sinkA.bits.opcode
+            buf.source := io.sinkA.bits.source
+            buf.owner := io.owner
+        }
     }
 
-    valids.zip(insertVec).foreach {
-        case (valid, chosen) =>
-            when(chosen && io.sinkA.fire) {
-                assert(valid === false.B)
+    valids.zip(insertVec).foreach { case (valid, chosen) =>
+        when(chosen && io.sinkA.fire) {
+            assert(valid === false.B)
 
-                valid := true.B
-            }
+            valid := true.B
+        }
     }
 
     // TODO: LFSR Arbiter output         ||
@@ -62,10 +60,14 @@ class RequestBuffer extends Module {
 
     // TODO: bypass
 
-
     dontTouch(io)
 }
 
 object RequestBuffer extends App {
-    GenerateVerilog(args, () => new RequestBuffer)
+    val config = new Config((_, _, _) => {
+        case L2ParamKey => L2Param()
+        case DebugOptionsKey => DebugOptions()
+    })
+
+    GenerateVerilog(args, () => new RequestBuffer()(config), name = "RequestBuffer", split = false)
 }
