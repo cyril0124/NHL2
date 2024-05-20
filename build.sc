@@ -98,6 +98,17 @@ trait RocketChip
 
 
 // 
+// xs-utils
+// 
+object xsutils extends SbtModule with ScalafmtModule with CommonModule {
+  override def ivyDeps = Agg(getVersion("chisel"))
+  override def millSourcePath = os.pwd / "xs-utils"
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip
+  )
+}
+
+// 
 // NHL2
 // 
 object NHL2 extends SbtModule with ScalafmtModule with CommonModule {
@@ -106,7 +117,7 @@ object NHL2 extends SbtModule with ScalafmtModule with CommonModule {
 		getVersion("chisel"),
 		getVersion("chiseltest", "edu.berkeley.cs"),
 	)
-	override def moduleDeps = super.moduleDeps ++ Seq(rocketchip)
+	override def moduleDeps = super.moduleDeps ++ Seq(rocketchip, xsutils)
 
 	object test extends SbtModuleTests with ScalafmtModule with TestModule.ScalaTest {
 		override def ivyDeps = super.ivyDeps() ++ Agg(
