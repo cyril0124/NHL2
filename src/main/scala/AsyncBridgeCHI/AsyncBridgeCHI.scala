@@ -71,7 +71,7 @@ class AsyncBridgeCHI extends RawModule {
             q.io.enq_reset := enq_reset
             q.io.deq_clock := deq_clock
             q.io.deq_reset := deq_reset
-            q.io.enq.bits := in.flit
+            q.io.enq.bits  := in.flit
             q.io.enq.valid := in.flitv
 
             // q.io.enq.ready  ==> DontCare
@@ -79,8 +79,8 @@ class AsyncBridgeCHI extends RawModule {
                 assert(!(!q.io.enq.ready && in.flitv), s"AsyncConnect [${name}] enq when AsnycQueue is not ready!")
             }
 
-            out.flit := q.io.deq.bits
-            out.flitv := q.io.deq.valid
+            out.flit       := q.io.deq.bits
+            out.flitv      := q.io.deq.valid
             q.io.deq.ready := true.B
             out
         }
@@ -102,7 +102,7 @@ class AsyncBridgeCHI extends RawModule {
                 assert(!(!q.io.enq.ready && in), s"AsyncConnect [${name}] enq when AsnycQueue is not ready!")
             }
 
-            out := q.io.deq.valid
+            out            := q.io.deq.valid
             q.io.deq.ready := true.B
             out
         }
@@ -121,9 +121,13 @@ class AsyncBridgeCHI extends RawModule {
         //                    └────┘  └────┘     │
         //                     output clock      │
         //
-        io.linkCtrl_enq.rxsactive := SynchronizerShiftReg(io.linkCtrl_deq.rxsactive, Config.numSyncReg, Some("sync_LinkCtrl_rxsactive"))
+        io.linkCtrl_enq.rxsactive   := SynchronizerShiftReg(io.linkCtrl_deq.rxsactive, Config.numSyncReg, Some("sync_LinkCtrl_rxsactive"))
         io.linkCtrl_enq.txactiveack := SynchronizerShiftReg(io.linkCtrl_deq.txactiveack, Config.numSyncReg, Some("sync_LinkCtrl_txactiveack"))
         io.linkCtrl_enq.rxactivereq := SynchronizerShiftReg(io.linkCtrl_deq.rxactivereq, Config.numSyncReg, Some("sync_LinkCrtl_rxactivereq"))
+
+        io.chi_enq.rxdat.flitpend := SynchronizerShiftReg(io.chi_deq.rxdat.flitpend, Config.numSyncReg, Some("sync_enq_rxdat_flitpend"))
+        io.chi_enq.rxrsp.flitpend := SynchronizerShiftReg(io.chi_deq.rxrsp.flitpend, Config.numSyncReg, Some("sync_enq_rxrsp_flitpend"))
+        io.chi_enq.rxsnp.flitpend := SynchronizerShiftReg(io.chi_deq.rxsnp.flitpend, Config.numSyncReg, Some("sync_enq_rxsnp_flitpend"))
 
         val RESET_FINISH_MAX       = 100
         val resetFinishCounter_enq = withReset(enq_reset.asAsyncReset)(RegInit(0.U((log2Ceil(RESET_FINISH_MAX) + 1).W)))
@@ -140,10 +144,6 @@ class AsyncBridgeCHI extends RawModule {
     io.chi_deq.txdat <> AsyncConnect(io.chi_enq.txdat, "enq_txdat_to_deq_txdat", Config.maxCreditTXDAT)
     io.chi_deq.txrsp <> AsyncConnect(io.chi_enq.txrsp, "enq_txrsp_to_deq_txrsp", Config.maxCreditTXRSP)
 
-    io.chi_deq.txreq.flitpend <> AsyncConnect.bitPulseConnect(io.chi_enq.txreq.flitpend, "enq_txreq_flitpend_to_deq_txreq_flitpend", Config.maxCreditTXREQ)
-    io.chi_deq.txdat.flitpend <> AsyncConnect.bitPulseConnect(io.chi_enq.txdat.flitpend, "enq_txdat_flitpend_to_deq_txdat_flitpend", Config.maxCreditTXDAT)
-    io.chi_deq.txrsp.flitpend <> AsyncConnect.bitPulseConnect(io.chi_enq.txrsp.flitpend, "enq_txrsp_flitpend_to_deq_txrsp_flitpend", Config.maxCreditTXRSP)
-
     io.chi_enq.txreq.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txreq.lcrdv, "deq_txreq_lcrdv_to_enq_txreq_lcrdv", Config.maxCreditTXREQ)
     io.chi_enq.txdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txdat.lcrdv, "deq_txdat_lcrdv_to_enq_txdat_lcrdv", Config.maxCreditTXDAT)
     io.chi_enq.txrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txrsp.lcrdv, "deq_txrsp_lcrdv_to_enq_txrsp_lcrdv", Config.maxCreditTXRSP)
@@ -155,10 +155,6 @@ class AsyncBridgeCHI extends RawModule {
     io.chi_enq.rxrsp <> AsyncConnect(io.chi_deq.rxrsp, "deq_rxrsp_to_enq_rxrsp", Config.maxCreditRXRSP)
     io.chi_enq.rxsnp <> AsyncConnect(io.chi_deq.rxsnp, "deq_rxsnp_to_enq_rxsnp", Config.maxCreditRXSNP)
 
-    io.chi_enq.rxdat.flitpend <> AsyncConnect.bitPulseConnect(io.chi_deq.rxdat.flitpend, "deq_rxdat_flitpend_to_enq_rxdat_flitpend", Config.maxCreditRXDAT)
-    io.chi_enq.rxrsp.flitpend <> AsyncConnect.bitPulseConnect(io.chi_deq.rxrsp.flitpend, "deq_rxrsp_flitpend_to_enq_rxrsp_flitpend", Config.maxCreditRXRSP)
-    io.chi_enq.rxsnp.flitpend <> AsyncConnect.bitPulseConnect(io.chi_deq.rxsnp.flitpend, "deq_rxsnp_flitpend_to_enq_rxsnp_flitpend", Config.maxCreditRXSNP)
-
     io.chi_deq.rxdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxdat.lcrdv, "enq_rxdat_lcrdv_to_deq_rxdat_lcrdv", Config.maxCreditRXDAT)
     io.chi_deq.rxrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxrsp.lcrdv, "enq_rxrsp_lcrdv_to_deq_rxrsp_lcrdv", Config.maxCreditRXRSP)
     io.chi_deq.rxsnp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxsnp.lcrdv, "enq_rxsnp_lcrdv_to_deq_rxsnp_lcrdv", Config.maxCreditRXSNP)
@@ -167,9 +163,13 @@ class AsyncBridgeCHI extends RawModule {
     // Output link controls
     //
     withClockAndReset(deq_clock, deq_reset) {
-        io.linkCtrl_deq.txsactive := SynchronizerShiftReg(io.linkCtrl_enq.txsactive, Config.numSyncReg, Some("sync_LinkCtrl_txsactive"))
+        io.linkCtrl_deq.txsactive   := SynchronizerShiftReg(io.linkCtrl_enq.txsactive, Config.numSyncReg, Some("sync_LinkCtrl_txsactive"))
         io.linkCtrl_deq.rxactiveack := SynchronizerShiftReg(io.linkCtrl_enq.rxactiveack, Config.numSyncReg, Some("sync_LinkCtrl_rxactiveack"))
         io.linkCtrl_deq.txactivereq := SynchronizerShiftReg(io.linkCtrl_enq.txactivereq, Config.numSyncReg, Some("sync_LinkCrtl_txactivereq"))
+
+        io.chi_deq.txreq.flitpend := SynchronizerShiftReg(io.chi_enq.txreq.flitpend, Config.numSyncReg, Some("sync_enq_txreq_flitpend"))
+        io.chi_deq.txdat.flitpend := SynchronizerShiftReg(io.chi_enq.txdat.flitpend, Config.numSyncReg, Some("sync_enq_txdat_flitpend"))
+        io.chi_deq.txrsp.flitpend := SynchronizerShiftReg(io.chi_enq.txrsp.flitpend, Config.numSyncReg, Some("sync_enq_txrsp_flitpend"))
 
         val RESET_FINISH_MAX       = 100
         val resetFinishCounter_deq = withReset(deq_reset.asAsyncReset)(RegInit(0.U((log2Ceil(RESET_FINISH_MAX) + 1).W)))
