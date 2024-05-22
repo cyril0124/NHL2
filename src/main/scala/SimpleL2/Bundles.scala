@@ -125,13 +125,13 @@ object CHIChannelIO {
 }
 
 class CHIBundleDownstream(params: CHIBundleParameters, aggregateIO: Boolean = false) extends Record {
-    val txreq: CHIChannelIO[CHIBundleREQ] = CHIChannelIO(new CHIBundleREQ(params), aggregateIO)
-    val txdat: CHIChannelIO[CHIBundleDAT] = CHIChannelIO(new CHIBundleDAT(params), aggregateIO)
-    val txrsp: CHIChannelIO[CHIBundleRSP] = CHIChannelIO(new CHIBundleRSP(params), aggregateIO)
+    val txreq: CHIChannelIO[UInt] = CHIChannelIO(UInt(82.W), aggregateIO)
+    val txdat: CHIChannelIO[UInt] = CHIChannelIO(UInt(314.W), aggregateIO)
+    val txrsp: CHIChannelIO[UInt] = CHIChannelIO(UInt(18.W), aggregateIO)
 
-    val rxrsp: CHIChannelIO[CHIBundleRSP] = Flipped(CHIChannelIO(new CHIBundleRSP(params), aggregateIO))
-    val rxdat: CHIChannelIO[CHIBundleDAT] = Flipped(CHIChannelIO(new CHIBundleDAT(params), aggregateIO))
-    val rxsnp: CHIChannelIO[CHIBundleSNP] = Flipped(CHIChannelIO(new CHIBundleSNP(params), aggregateIO))
+    val rxrsp: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(29.W), aggregateIO))
+    val rxdat: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(292.W), aggregateIO))
+    val rxsnp: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(64.W), aggregateIO))
 
     // @formatter:off
     val elements = ListMap(
@@ -146,13 +146,13 @@ class CHIBundleDownstream(params: CHIBundleParameters, aggregateIO: Boolean = fa
 }
 
 class CHIBundleUpstream(params: CHIBundleParameters, aggregateIO: Boolean = false) extends Record {
-    val txreq: CHIChannelIO[CHIBundleREQ] = Flipped(CHIChannelIO(new CHIBundleREQ(params), aggregateIO))
-    val txdat: CHIChannelIO[CHIBundleDAT] = Flipped(CHIChannelIO(new CHIBundleDAT(params), aggregateIO))
-    val txrsp: CHIChannelIO[CHIBundleRSP] = Flipped(CHIChannelIO(new CHIBundleRSP(params), aggregateIO))
+    val txreq: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(82.W), aggregateIO))
+    val txdat: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(314.W), aggregateIO))
+    val txrsp: CHIChannelIO[UInt] = Flipped(CHIChannelIO(UInt(18.W), aggregateIO))
 
-    val rxrsp: CHIChannelIO[CHIBundleRSP] = CHIChannelIO(new CHIBundleRSP(params), aggregateIO)
-    val rxdat: CHIChannelIO[CHIBundleDAT] = CHIChannelIO(new CHIBundleDAT(params), aggregateIO)
-    val rxsnp: CHIChannelIO[CHIBundleSNP] = CHIChannelIO(new CHIBundleSNP(params), aggregateIO)
+    val rxrsp: CHIChannelIO[UInt] = CHIChannelIO(UInt(29.W), aggregateIO)
+    val rxdat: CHIChannelIO[UInt] = CHIChannelIO(UInt(292.W), aggregateIO)
+    val rxsnp: CHIChannelIO[UInt] = CHIChannelIO(UInt(64.W), aggregateIO)
 
     // @formatter:off
     val elements = ListMap(
