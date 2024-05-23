@@ -9,10 +9,10 @@ local dut_reset = env.dut_reset
 local bridge = dut.u_CHIBridge
 local txState = bridge.txState
 local rxState = bridge.rxState
-local txactivereq = dut.io_chiLinkCtrl_txactivereq
-local txactiveack = dut.io_chiLinkCtrl_txactiveack
-local rxactivereq = dut.io_chiLinkCtrl_rxactivereq
-local rxactiveack = dut.io_chiLinkCtrl_rxactiveack
+local txactivereq = dut.io_out_chiLinkCtrl_txactivereq
+local txactiveack = dut.io_out_chiLinkCtrl_txactiveack
+local rxactivereq = dut.io_out_chiLinkCtrl_rxactivereq
+local rxactiveack = dut.io_out_chiLinkCtrl_rxactiveack
 
 assert(cfg.simulator == "vcs")
 
