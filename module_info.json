@@ -1,0 +1,9 @@
+[
+    {"package": "SimpleL2",       "target": "L2Cache",        "unit_test": false },
+    {"package": "SimpleL2",       "target": "CHIBridge",      "unit_test": true  },
+    {"package": "SimpleL2",       "target": "Directory",      "unit_test": false },
+    {"package": "SimpleL2",       "target": "RequestArbiter", "unit_test": true  },
+    {"package": "SimpleL2",       "target": "RequestBuffer",  "unit_test": false },
+    {"package": "SimpleL2",       "target": "MainPipe",       "unit_test": true  },
+    {"package": "AsyncBridgeCHI", "target": "AsyncBridgeCHI", "unit_test": false }
+]

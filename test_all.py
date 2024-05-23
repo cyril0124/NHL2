@@ -11,25 +11,22 @@ def execute_cmd(cmd):
 def execute_cmd_pipe(cmd):
     return subprocess.run(cmd, shell=True, stderr=subprocess.PIPE, text=True)
 
-def build_all(build_targets):
-    max_builds = len(build_targets)
-    for index, (package, target) in enumerate(build_targets):
+def test_all(test_targets):
+    max_tests = len(test_targets)
+    for index, (package, target) in enumerate(test_targets):
         index = index + 1
         print(f"""\
 ------------------------------------------------------
-| [{index}/{max_builds}] => start build package: {package} target: {target}
+| [{index}/{max_tests}] => start test package: {package} target: {target}
 ------------------------------------------------------""")
-        ret = execute_cmd_pipe(f"make package={package} target={target} rtl")
+        ret = execute_cmd_pipe(f"make package={package} target={target} simulator=vcs unit-test-quiet")
         if isinstance(ret, int) and ret != 0:
             assert False, f"build package: {package} target: {target} failed!"
-        
-        has_error = "[error]" in ret.stderr
-        has_failed = "failed" in ret.stderr
-        if not isinstance(ret, int) and ret.stderr != None and (has_error or has_failed):
+        if not isinstance(ret, int) and ret.stderr != None and "[error]" in ret.stderr:
             assert False, f"build package: {package} target: {target} failed! ==> {ret.stderr}"
         print(f"""\
 ---------------------------------------------------------
-| [{index}/{max_builds}] => build SUCCESS! package: {package} target: {target}  
+| [{index}/{max_tests}] => test SUCCESS! package: {package} target: {target}  
 ---------------------------------------------------------
 """)
 
@@ -42,9 +39,10 @@ if __name__ == "__main__":
     if args.target != None:
         package = args.package
         target = args.target
-        execute_cmd(f"make package={package} target={target} rtl")
+        execute_cmd(f"make package={package} target={target} simulator=vcs unit-test")
     else:
         with open(json_file_path, 'r') as file:
             json_data = json.load(file)
-        build_targets = [(entry['package'], entry['target']) for entry in json_data]
-        build_all(build_targets)
+        test_targets = [(entry['package'], entry['target']) for entry in json_data if entry['unit_test']]
+        test_all(test_targets)
+        

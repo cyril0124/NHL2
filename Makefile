@@ -32,10 +32,10 @@ rtl:
 	mill -i --jobs 16 $(module).runMain $(package).$(target) -td build
 
 unit-test:
-	verilua_run -f ./build/$(target).v --prjdir . --top $(target) --lua_main ./src/main/lua/$(package)/$(target).lua --lua_file ./src/main/lua/common/env.lua --sim $(simulator) --top_file ./build/$(target).v --shutdown 10000
+	verilua_run -f ./build/$(target).v --prjdir . --top $(target) --lua_main ./src/main/lua/$(package)/$(target).lua --lua_file ./lua_file.f --sim $(simulator) --top_file ./build/$(target).v --shutdown 10000
 
 unit-test-quiet:
-	@verilua_run -f ./build/$(target).v --prjdir . --top $(target) --lua_main ./src/main/lua/$(package)/$(target).lua --lua_file ./src/main/lua/common/env.lua --sim $(simulator) --top_file ./build/$(target).v --shutdown 10000 > /dev/null
+	@verilua_run -f ./build/$(target).v --prjdir . --top $(target) --lua_main ./src/main/lua/$(package)/$(target).lua --lua_file ./lua_file.f --sim $(simulator) --top_file ./build/$(target).v --shutdown 10000 > /dev/null
 	@if grep -q $(SUCCESS_STRING) ./.verilua/$(target)/run.log; then \
 		echo -e "UnitTest <$(target)> $(GREEN)SUCCESS!$(RESET)"; \
 	else \
