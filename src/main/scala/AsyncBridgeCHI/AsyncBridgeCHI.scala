@@ -94,7 +94,7 @@ class AsyncBridgeCHI extends RawModule {
             q.io.enq_reset := in_reset
             q.io.deq_clock := out_clock
             q.io.deq_reset := out_reset
-            q.io.enq.bits <> DontCare
+            q.io.enq.bits  <> DontCare
             q.io.enq.valid := in
 
             // q.io.enq.ready  ==> DontCare
@@ -212,7 +212,7 @@ object AsyncBridgeCHI extends App {
         bridge.enq_reset := reset
         bridge.deq_clock := deq_clock
         bridge.deq_reset := deq_reset
-        bridge.io <> io
+        bridge.io        <> io
 
         dontTouch(bridge.io)
     }

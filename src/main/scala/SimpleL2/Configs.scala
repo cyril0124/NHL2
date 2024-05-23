@@ -3,7 +3,9 @@ package SimpleL2.Configs
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tilelink.TLPermissions._
 import org.chipsalliance.cde.config._
+import xs.utils.FastArbiter
 import SimpleL2.Bundles.CHIBundleParameters
 
 case object L2ParamKey extends Field[L2Param](L2Param())
@@ -20,10 +22,12 @@ case class L2Param(
     nrRequestBufferEntry: Int = 4,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
-    rxdatCreditMAX: Int = 2
+    rxdatCreditMAX: Int = 2,
+    replacementPolicy: String = "plru"
 ) {
     require(dataBits == 64 * 8)
     require(nrMSHR == nrTmpDataEntry)
+    require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
 }
 
 trait HasL2Param {
@@ -45,6 +49,10 @@ trait HasL2Param {
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX
     val rxdatCreditMAX = l2param.rxdatCreditMAX
+
+    val replacementPolicy = l2param.replacementPolicy
+
+    val aliasBitsOpt = Some(4)
 
     // @formatter:off
     val tlBundleParams = TLBundleParameters(
@@ -70,49 +78,22 @@ trait HasL2Param {
     // @formatter:on
 }
 
-// object L2CacheConfig {
-//     val addressBits = 44
-//     val dataBits    = 256
+trait HasCommonUtils {
+    def fastArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+        val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
+        if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+        for ((a, req) <- arb.io.in.zip(in)) { a <> req }
+        out <> arb.io.out
+    }
 
-//     val sets       = 256
-//     val ways       = 8
-//     val blockBytes = 64
+    def arbTask[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+        val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
+        if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+        for ((a, req) <- arb.io.in.zip(in)) { a <> req }
+        out <> arb.io.out
+    }
 
-//     val setBits    = log2Ceil(sets)
-//     val offsetBits = log2Ceil(blockBytes)
-//     val tagBits    = addressBits - setBits - offsetBits
-
-//     val enableClockGate = true
-
-//     val nrMSHR         = 16
-//     val nrTmpDataEntry = 16
-
-//     val nrRequestBufferEntry = 4
-
-//     val rxrspCreditMAX = 4
-//     val rxsnpCreditMAX = 4
-//     val rxdatCreditMAX = 2
-
-//     // @formatter:off
-//     val tlBundleParams = TLBundleParameters(
-//         addressBits = addressBits,
-//         dataBits = dataBits,
-//         sourceBits = 7,
-//         sinkBits = 7,
-//         sizeBits = 3,
-//         echoFields = Nil,
-//         requestFields = Nil,
-//         responseFields = Nil,
-//         hasBCE = true
-//     )
-//     // @formatter:on
-
-//     // @formatter:off
-//     val chiBundleParams = CHIBundleParameters(
-//         nodeIdBits = 7,
-//         addressBits = addressBits,
-//         dataBits = dataBits,
-//         dataCheck = false
-//     )
-//     // @formatter:on
-// }
+    def needT(param: UInt): Bool = {
+        param === NtoT || param === BtoT
+    }
+}

@@ -26,7 +26,7 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
         val owner = Input(UInt(RequestOwner.OwnerWidth.W))
     })
 
-    io.sinkA <> DontCare
+    io.sinkA       <> DontCare
     io.sinkA.ready := true.B
 
     val valids  = RegInit(VecInit(Seq.fill(nrRequestBufferEntry)(false.B)))
@@ -42,7 +42,7 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
         when(chosen && io.sinkA.fire) {
             buf.opcode := io.sinkA.bits.opcode
             buf.source := io.sinkA.bits.source
-            buf.owner := io.owner
+            buf.owner  := io.owner
         }
     }
 
@@ -65,7 +65,7 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
 
 object RequestBuffer extends App {
     val config = new Config((_, _, _) => {
-        case L2ParamKey => L2Param()
+        case L2ParamKey      => L2Param()
         case DebugOptionsKey => DebugOptions()
     })
 

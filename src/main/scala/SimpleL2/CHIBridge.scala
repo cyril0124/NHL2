@@ -7,6 +7,8 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
+import SimpleL2.Bundles.CHIBundleDecoupled
+import chisel3.experimental.Param
 
 object LinkState {
     def STOP = "b00".U(2.W)
@@ -15,21 +17,30 @@ object LinkState {
     def DEACTIVATE = "b01".U(2.W)
 }
 
+class CHIBridgeInput(implicit p: Parameters) extends L2Bundle {
+    val chi = CHIBundleDecoupled(chiBundleParams)
+}
+
+class CHIBridgeOutput(implicit p: Parameters) extends L2Bundle {
+    val chi         = CHIBundleDownstream(chiBundleParams)
+    val chiLinkCtrl = new CHILinkCtrlIO()
+}
+
 class CHIBridge()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val chi         = CHIBundleDownstream(chiBundleParams)
-        val chiLinkCtrl = new CHILinkCtrlIO()
+        // val in  = new CHIBridgeInput
+        val out = new CHIBridgeOutput
         // TODO: val deactivateTxLink = Input(Bool())
         // TODO: ShutDown
     })
 
-    io.chi <> DontCare
-    io.chiLinkCtrl <> DontCare
+    io.out.chi         <> DontCare
+    io.out.chiLinkCtrl <> DontCare
 
-    val txactivereq = io.chiLinkCtrl.txactivereq
-    val txactiveack = io.chiLinkCtrl.txactiveack
-    val rxactivereq = io.chiLinkCtrl.rxactivereq
-    val rxactiveack = io.chiLinkCtrl.rxactiveack
+    val txactivereq = io.out.chiLinkCtrl.txactivereq
+    val txactiveack = io.out.chiLinkCtrl.txactiveack
+    val rxactivereq = io.out.chiLinkCtrl.rxactivereq
+    val rxactiveack = io.out.chiLinkCtrl.rxactiveack
 
     val resetFinish = RegInit(false.B)
     resetFinish := true.B
@@ -85,8 +96,8 @@ class CHIBridge()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.chiLinkCtrl.txactivereq := txState === LinkState.ACTIVATE || txState === LinkState.RUN
-    io.chiLinkCtrl.rxactiveack := rxactivereq && rxState === LinkState.STOP || rxState === LinkState.ACTIVATE || rxState === LinkState.RUN
+    io.out.chiLinkCtrl.txactivereq := txState === LinkState.ACTIVATE || txState === LinkState.RUN
+    io.out.chiLinkCtrl.rxactiveack := rxactivereq && rxState === LinkState.STOP || rxState === LinkState.ACTIVATE || rxState === LinkState.RUN
 
     assert(!(txState === LinkState.RUN && txactivereq && !txactiveack), "txactiveack should keep high during RUN state")
     assert(!(txState === LinkState.ACTIVATE && !txactivereq), "txactivereq should keep high during ACTIVATE state")
@@ -96,7 +107,7 @@ class CHIBridge()(implicit p: Parameters) extends L2Module {
 
 object CHIBridge extends App {
     val config = new Config((_, _, _) => {
-        case L2ParamKey => L2Param()
+        case L2ParamKey      => L2Param()
         case DebugOptionsKey => DebugOptions()
     })
 

@@ -9,8 +9,8 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
 
-abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param
-abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
+abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HasCommonUtils
+abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param with HasCommonUtils
 
 class L2Cache()(implicit p: Parameters) extends L2Module {
     val io_tl = IO(TLBundle(tlBundleParams)).suggestName("master_port_0_0")
@@ -22,12 +22,12 @@ class L2Cache()(implicit p: Parameters) extends L2Module {
     val tl  = io_tl
     val chi = io.chi
 
-    tl <> DontCare
+    tl  <> DontCare
     chi <> DontCare
 
     val chiBridge = Module(new CHIBridge)
-    chiBridge.io.chi <> chi
-    io.chiLinkCtrl <> chiBridge.io.chiLinkCtrl
+    chi            <> chiBridge.io.out.chi
+    io.chiLinkCtrl <> chiBridge.io.out.chiLinkCtrl
 
     val slice = Module(new Slice)
     slice.io.tl <> tl
@@ -38,7 +38,7 @@ class L2Cache()(implicit p: Parameters) extends L2Module {
 
 object L2Cache extends App {
     val config = new Config((_, _, _) => {
-        case L2ParamKey => L2Param()
+        case L2ParamKey      => L2Param()
         case DebugOptionsKey => DebugOptions()
     })
 

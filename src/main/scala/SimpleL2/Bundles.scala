@@ -166,12 +166,26 @@ class CHIBundleUpstream(params: CHIBundleParameters, aggregateIO: Boolean = fals
     // @formatter:on
 }
 
+class CHIBundleDecoupled(params: CHIBundleParameters) extends Bundle {
+    val txreq = Decoupled(new CHIBundleREQ(params))
+    val txdat = Decoupled(new CHIBundleDAT(params))
+    val txrsp = Decoupled(new CHIBundleRSP(params))
+
+    val rxrsp = Flipped(Decoupled(new CHIBundleRSP(params)))
+    val rxdat = Flipped(Decoupled(new CHIBundleDAT(params)))
+    val rxsnp = Flipped(Decoupled(new CHIBundleRSP(params)))
+}
+
 object CHIBundleDownstream {
     def apply(params: CHIBundleParameters, aggregateIO: Boolean = false): CHIBundleDownstream = new CHIBundleDownstream(params, aggregateIO)
 }
 
 object CHIBundleUpstream {
     def apply(params: CHIBundleParameters, aggregateIO: Boolean = false): CHIBundleUpstream = new CHIBundleUpstream(params, aggregateIO)
+}
+
+object CHIBundleDecoupled {
+    def apply(params: CHIBundleParameters): CHIBundleDecoupled = new CHIBundleDecoupled(params)
 }
 
 class CHILinkCtrlIO extends Bundle {
@@ -191,6 +205,7 @@ object RequestOwner {
     val CMO        = "b010".U
     val Prefetcher = "b011".U
     val Snoop      = "b100".U
+    val MSHR       = "b101".U
 }
 
 object TLChannel {
@@ -219,7 +234,9 @@ class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
 }
 
 class TaskBundle(implicit p: Parameters) extends L2Bundle {
+    val owner      = UInt(RequestOwner.width.W)
     val opcode     = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
+    val param      = UInt(3.W)
     val channel    = UInt(TLChannel.width.W)
     val set        = UInt(setBits.W)
     val tag        = UInt(tagBits.W)
@@ -230,45 +247,23 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
     def isSnoop = channel === TLChannel.ChannelB
+    def isChannelA = channel(0)
+    def isChannelB = channel(1)
+    def isChannelC = channel(2)
 }
 
-// abstract class TaskBundle extends Bundle with HasSetAndTag
+object ReplayReson {
+    // val NoSpaceForMSHR =
+}
 
-// class TaskSinkA extends TaskBundle {
-//     val params = L2CacheConfig.tlBundleParams
-//     val opcode = UInt(3.W)
+class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
+    val opcode  = UInt(5.W)
+    val channel = UInt(TLChannel.width.W)
+    val set     = UInt(setBits.W)
+    val tag     = UInt(tagBits.W)
+    val source  = UInt(math.max(tlBundleParams.sourceBits, 12).W)
 
-//     val source     = UInt(params.sourceBits.W)
-//     val isPrefetch = Bool()
-//     // TODO: alias
-// }
-
-// class TaskSinkC extends TaskBundle {
-//     val params    = L2CacheConfig.tlBundleParams
-//     val opcode    = UInt(3.W)
-//     val source    = UInt(params.sourceBits.W)
-//     val tmpDataID = UInt(log2Ceil(L2CacheConfig.nrTmpDataEntry).W)
-// }
-
-// class TaskSnoop extends TaskBundle {
-//     val params = L2CacheConfig.chiBundleParams
-//     val opcode = UInt(5.W)
-//     val txnID  = UInt(12.W)
-// }
-
-// class TaskCMO extends TaskBundle {
-//     // TODO:
-// }
-
-// class TaskReplay extends TaskBundle {
-//     // TODO:
-// }
-
-// class TaskMSHR extends TaskBundle {
-//     val tmpDataID = UInt(log2Ceil(L2CacheConfig.nrTmpDataEntry).W)
-// }
-
-class DirRead(implicit p: Parameters) extends L2Bundle {
-    val set = UInt(setBits.W)
-    val tag = UInt(tagBits.W)
+    def txnID = source     // alias to source
+    def chiOpcode = opcode // alias to opcode
+    def isSnoop = channel === TLChannel.ChannelB
 }
