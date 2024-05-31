@@ -163,6 +163,8 @@ local function will_failed(func, ...)
     assert(not ok)
 end
 
+local lester = require "lester"
+local expect = lester.expect
 
 return {
     end_simulation = end_simulation,
@@ -175,4 +177,5 @@ return {
     register_test_case = register_test_case,
     mux_case = mux_case,
     will_failed = will_failed,
+    expect = expect,
 }

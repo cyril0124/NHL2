@@ -9,11 +9,11 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
 
-abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HasCommonUtils
-abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param with HasCommonUtils
+abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param
+abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
 
 class L2Cache()(implicit p: Parameters) extends L2Module {
-    val io_tl = IO(TLBundle(tlBundleParams)).suggestName("master_port_0_0")
+    val io_tl = IO(Flipped(TLBundle(tlBundleParams))).suggestName("master_port_0_0")
     val io = IO(new Bundle {
         val chi         = CHIBundleDownstream(chiBundleParams)
         val chiLinkCtrl = new CHILinkCtrlIO()

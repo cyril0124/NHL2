@@ -47,7 +47,7 @@ class CHIBundleRSP(params: CHIBundleParameters) extends CHIBundleBase(params) wi
     val tgtID   = UInt(params.nodeIDWidth.W)
     val respErr = UInt(2.W)
     val resp    = UInt(3.W)
-    val dbID    = UInt(12.W) 
+    val dbID    = UInt(12.W)
     val cBusy   = UInt(3.W)
 }
 
@@ -84,7 +84,7 @@ class CHIBundleSNP(params: CHIBundleParameters) extends CHIBundleBase(params) wi
     val doNotGoToSD = Bool()
 }
 
-class CHIBundle(val params: CHIBundleParameters) extends Bundle {
+class CHIBundle(val params: CHIBundleParameters) extends Record {
     val tx = new Bundle {
         val req: CreditedIO[CHIBundleREQ] = CreditedIO(new CHIBundleREQ(params))
         val rsp: CreditedIO[CHIBundleRSP] = CreditedIO(new CHIBundleRSP(params))
@@ -97,10 +97,14 @@ class CHIBundle(val params: CHIBundleParameters) extends Bundle {
         val snp: CreditedIO[CHIBundleSNP] = CreditedIO(new CHIBundleSNP(params))
     })
 
-    // val elements = ListMap(
-    //     "tx_req" -> tx.req, "tx_rsp" -> tx.rsp, "tx_dat" -> tx.dat,
-    //     "rx_snp" -> rx.snp, "rx_dat" -> rx.dat, "rx_snp" -> rx.snp
-    // )
+    val elements = ListMap(
+        "tx_req" -> tx.req,
+        "tx_rsp" -> tx.rsp,
+        "tx_dat" -> tx.dat,
+        "rx_snp" -> rx.snp,
+        "rx_dat" -> rx.dat,
+        "rx_snp" -> rx.snp
+    )
 }
 
 object CHIBundle {

@@ -29,6 +29,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
         // Send task to MainPipe
         val mpReq_s2 = ValidIO(new TaskBundle)
+
+        val resetFinish = Input(Bool())
     })
 
     io <> DontCare
@@ -37,22 +39,11 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val ready_s1 = WireInit(false.B)
     val valid_s1 = WireInit(false.B)
 
-    // TODO: another module
-    val resetFinish = RegInit(false.B)
-    val resetIdx    = RegInit((sets - 1).U)
-    // block reqs when reset
-    when(!resetFinish) {
-        resetIdx := resetIdx - 1.U
-    }
-    when(resetIdx === 0.U) {
-        resetFinish := true.B
-    }
-
     // -----------------------------------------------------------------------------------------
     // Stage 0
     // -----------------------------------------------------------------------------------------
     // TODO: block mshr
-    io.taskMSHR_s0.ready := !valid_s1
+    io.taskMSHR_s0.ready := !valid_s1 && io.resetFinish
 
     // -----------------------------------------------------------------------------------------
     // Stage 1
@@ -79,7 +70,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val chosenTask_s1 = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     arbTask(otherTasks_s1, chosenTask_s1)
 
-    chosenTask_s1.ready := resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1
+    chosenTask_s1.ready := io.resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1
     task_s1 := Mux(
         isTaskMSHR_s1,
         taskMSHR_s1,

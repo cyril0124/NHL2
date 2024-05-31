@@ -14,6 +14,7 @@ case class L2Param(
     ways: Int = 8,
     sets: Int = 256,
     blockBytes: Int = 64,
+    beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
     enableClockGate: Boolean = true,
@@ -38,6 +39,7 @@ trait HasL2Param {
     val sets        = l2param.sets
     val addressBits = l2param.addressBits
     val dataBits    = l2param.dataBits
+    val beatBytes   = l2param.beatBytes
     val setBits     = log2Ceil(l2param.sets)
     val offsetBits  = log2Ceil(l2param.blockBytes)
     val tagBits     = l2param.addressBits - setBits - offsetBits
@@ -57,7 +59,7 @@ trait HasL2Param {
     // @formatter:off
     val tlBundleParams = TLBundleParameters(
         addressBits = addressBits,
-        dataBits = dataBits,
+        dataBits = beatBytes * 8,
         sourceBits = 7,
         sinkBits = 7,
         sizeBits = 3,
@@ -76,9 +78,16 @@ trait HasL2Param {
         dataCheck = false
     )
     // @formatter:on
-}
 
-trait HasCommonUtils {
+    val bankBits = 0 // TODO: multi-bank
+
+    def parseAddress(x: UInt): (UInt, UInt, UInt) = {
+        val offset = x
+        val set    = offset >> (offsetBits + bankBits)
+        val tag    = set >> setBits
+        (tag(tagBits - 1, 0), set(setBits - 1, 0), offset(offsetBits - 1, 0))
+    }
+
     def fastArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
@@ -91,6 +100,10 @@ trait HasCommonUtils {
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
+    }
+
+    def widthCheck(in: UInt, width: Int) = {
+        assert(in.getWidth == width)
     }
 
     def needT(param: UInt): Bool = {

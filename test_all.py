@@ -13,13 +13,16 @@ def execute_cmd_pipe(cmd):
 
 def test_all(test_targets):
     max_tests = len(test_targets)
-    for index, (package, target) in enumerate(test_targets):
+    for index, (package, target, cmd) in enumerate(test_targets):
         index = index + 1
         print(f"""\
 ------------------------------------------------------
 | [{index}/{max_tests}] => start test package: {package} target: {target}
 ------------------------------------------------------""")
-        ret = execute_cmd_pipe(f"make package={package} target={target} simulator=vcs unit-test-quiet")
+        if cmd != "":
+            ret = execute_cmd_pipe(cmd)
+        else:
+            ret = execute_cmd_pipe(f"make package={package} target={target} simulator=vcs unit-test-quiet")
         if isinstance(ret, int) and ret != 0:
             assert False, f"build package: {package} target: {target} failed!"
         if not isinstance(ret, int) and ret.stderr != None and "[error]" in ret.stderr:
@@ -39,10 +42,16 @@ if __name__ == "__main__":
     if args.target != None:
         package = args.package
         target = args.target
-        execute_cmd(f"make package={package} target={target} simulator=vcs unit-test")
+        cmd = f"make package={package} target={target} simulator=vcs unit-test"
+        with open(json_file_path, 'r') as file:
+            json_data = json.load(file)
+        for entry in json_data:
+            if entry['package'] == package and entry['target'] == target:
+                cmd = entry.get('unit_test_cmd', cmd)
+        execute_cmd(cmd)
     else:
         with open(json_file_path, 'r') as file:
             json_data = json.load(file)
-        test_targets = [(entry['package'], entry['target']) for entry in json_data if entry['unit_test']]
+        test_targets = [(entry['package'], entry['target'], entry.get('unit_test_cmd', "")) for entry in json_data if entry['unit_test']]
         test_all(test_targets)
         

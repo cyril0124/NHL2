@@ -69,6 +69,12 @@ class DirRead(implicit p: Parameters) extends L2Bundle {
     val tag = UInt(tagBits.W)
 }
 
+class DirWrite(implicit p: Parameters) extends L2Bundle {
+    val set   = UInt(setBits.W)
+    val meta  = new DirectoryMetaEntry
+    val wayOH = UInt(ways.W)
+}
+
 class DirResp(implicit p: Parameters) extends L2Bundle {
     val meta  = new DirectoryMetaEntry
     val wayOH = UInt(ways.W)
@@ -77,13 +83,20 @@ class DirResp(implicit p: Parameters) extends L2Bundle {
 
 class Directory()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val dirRead_s1 = Flipped(Decoupled(new DirRead))
-        val dirResp_s3 = Output(new DirResp)
+        val dirRead_s1  = Flipped(Decoupled(new DirRead))
+        val dirWrite_s3 = Flipped(Decoupled(new DirWrite))
+        val dirResp_s3  = ValidIO(new DirResp)
+
+        // TODO: update replacer SRAM
+
+        val resetFinish = Output(Bool())
     })
 
     // TODO: ECC
 
     io <> DontCare
+
+    val resetIdx = RegInit((sets - 1).U)
 
     val metaArray = Module(
         new SRAMTemplate(
@@ -128,12 +141,38 @@ class Directory()(implicit p: Parameters) extends L2Module {
         dontTouch(sram.io)
     }
 
+    replacerSRAM_opt.foreach { sram =>
+        sram.io.w(
+            valid = !io.resetFinish,
+            data = 0.U, // TODO: replacer SRAM init value
+            setIdx = resetIdx,
+            waymask = 1.U
+        )
+
+        assert(!(!io.resetFinish && sram.io.w.req.valid && !sram.io.w.req.ready))
+    }
+
     // -----------------------------------------------------------------------------------------
     // Stage 1
     // -----------------------------------------------------------------------------------------
     metaArray.io.r.req.bits.setIdx := io.dirRead_s1.bits.set
     metaArray.io.r.req.valid       := io.dirRead_s1.fire
-    io.dirRead_s1.ready            := metaArray.io.r.req.ready
+    metaArray.io.w(
+        valid = !io.resetFinish || io.dirWrite_s3.fire,
+        data = Mux(io.resetFinish, io.dirWrite_s3.bits.meta, 0.U.asTypeOf(new DirectoryMetaEntry)),
+        setIdx = Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx),
+        waymask = Mux(io.resetFinish, io.dirWrite_s3.bits.wayOH, Fill(ways, "b1".U))
+    )
+    io.dirRead_s1.ready := io.resetFinish && metaArray.io.r.req.ready && !io.dirWrite_s3.fire
+
+    io.dirWrite_s3.ready := io.resetFinish && metaArray.io.w.req.ready
+    assert(!(io.dirWrite_s3.valid && !metaArray.io.w.req.ready), "dirWrite_s3 while metaArray is not ready!")
+    assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
+    when(!io.resetFinish) {
+        assert(!io.dirRead_s1.fire)
+        assert(!io.dirWrite_s3.fire)
+        assert(!(metaArray.io.w.req.valid && !metaArray.io.w.req.ready))
+    }
 
     // -----------------------------------------------------------------------------------------
     // Stage 2
@@ -147,7 +186,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     // Stage 3
     // -----------------------------------------------------------------------------------------
     val metaRead_s3 = RegEnable(metaRead_s2, reqValid_s2)
-    val reqValid_s3 = RegEnable(reqValid_s2, reqValid_s2)
+    val reqValid_s3 = RegNext(reqValid_s2, false.B)
     val reqTag_s3   = RegEnable(reqTag_s2, reqValid_s2)
     val stateAll_s3 = metaRead_s3.map(_.state)
     val tagAll_s3   = metaRead_s3.map(_.tag)
@@ -157,16 +196,27 @@ class Directory()(implicit p: Parameters) extends L2Module {
             .map { case (state, tag) =>
                 state =/= MixedState.I && tag === reqTag_s3
             }
-            .reverse
     ).asUInt
     val hit_s3        = hitOH_s3.asUInt.orR
-    val finalWayOH_s3 = Mux(hit_s3, hitOH_s3, random.LFSR(16)(ways - 1, 0) /* TODO */ )
-    assert(PopCount(hitOH_s3) <= 1.U)
-    assert(PopCount(finalWayOH_s3) <= 1.U)
+    val finalWayOH_s3 = Mux(hit_s3, hitOH_s3, UIntToOH(random.LFSR(3)) /* TODO */ )
 
-    io.dirResp_s3.hit   := hit_s3
-    io.dirResp_s3.meta  := Mux1H(finalWayOH_s3, metaRead_s3)
-    io.dirResp_s3.wayOH := finalWayOH_s3
+    when(io.resetFinish) {
+        assert(PopCount(hitOH_s3) <= 1.U)
+        assert(PopCount(finalWayOH_s3) <= 1.U)
+    }
+
+    io.dirResp_s3.valid      := reqValid_s3
+    io.dirResp_s3.bits.hit   := hit_s3
+    io.dirResp_s3.bits.meta  := Mux1H(finalWayOH_s3, metaRead_s3)
+    io.dirResp_s3.bits.wayOH := finalWayOH_s3
+
+    //
+    // reset all sram data when reset
+    //
+    when(!io.resetFinish) {
+        resetIdx := resetIdx - 1.U
+    }
+    io.resetFinish := resetIdx === 0.U && !reset.asBool
 
     dontTouch(metaArray.io)
     dontTouch(hitOH_s3)
