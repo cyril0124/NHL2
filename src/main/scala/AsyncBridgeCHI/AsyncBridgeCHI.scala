@@ -109,7 +109,29 @@ class AsyncBridgeCHI extends RawModule {
     }
 
     //
-    // Input link control singals
+    // CHI TX Channel: responsible for receiving L-Credit
+    //
+    io.chi_deq.txreq <> AsyncConnect(io.chi_enq.txreq, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txreq_to_deq_txreq", Config.maxCreditTXREQ)
+    io.chi_deq.txdat <> AsyncConnect(io.chi_enq.txdat, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txdat_to_deq_txdat", Config.maxCreditTXDAT)
+    io.chi_deq.txrsp <> AsyncConnect(io.chi_enq.txrsp, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txrsp_to_deq_txrsp", Config.maxCreditTXRSP)
+
+    io.chi_enq.txreq.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txreq.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txreq_lcrdv_to_enq_txreq_lcrdv", Config.maxCreditTXREQ)
+    io.chi_enq.txdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txdat.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txdat_lcrdv_to_enq_txdat_lcrdv", Config.maxCreditTXDAT)
+    io.chi_enq.txrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txrsp.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txrsp_lcrdv_to_enq_txrsp_lcrdv", Config.maxCreditTXRSP)
+
+    //
+    // CHI RX Channel: responsible for sending L-Credit
+    //
+    io.chi_enq.rxdat <> AsyncConnect(io.chi_deq.rxdat, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxdat_to_enq_rxdat", Config.maxCreditRXDAT)
+    io.chi_enq.rxrsp <> AsyncConnect(io.chi_deq.rxrsp, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxrsp_to_enq_rxrsp", Config.maxCreditRXRSP)
+    io.chi_enq.rxsnp <> AsyncConnect(io.chi_deq.rxsnp, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxsnp_to_enq_rxsnp", Config.maxCreditRXSNP)
+
+    io.chi_deq.rxdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxdat.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxdat_lcrdv_to_deq_rxdat_lcrdv", Config.maxCreditRXDAT)
+    io.chi_deq.rxrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxrsp.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxrsp_lcrdv_to_deq_rxrsp_lcrdv", Config.maxCreditRXRSP)
+    io.chi_deq.rxsnp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxsnp.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxsnp_lcrdv_to_deq_rxsnp_lcrdv", Config.maxCreditRXSNP)
+
+    //
+    // Input link control
     //
     withClockAndReset(enq_clock, enq_reset) {
         //
@@ -136,28 +158,6 @@ class AsyncBridgeCHI extends RawModule {
         }
         io.resetFinish_enq := resetFinishCounter_enq >= RESET_FINISH_MAX.U
     }
-
-    //
-    // CHI TX Channel: responsible for receiving L-Credit
-    //
-    io.chi_deq.txreq <> AsyncConnect(io.chi_enq.txreq, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txreq_to_deq_txreq", Config.maxCreditTXREQ)
-    io.chi_deq.txdat <> AsyncConnect(io.chi_enq.txdat, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txdat_to_deq_txdat", Config.maxCreditTXDAT)
-    io.chi_deq.txrsp <> AsyncConnect(io.chi_enq.txrsp, enq_clock, enq_reset, deq_clock, deq_reset, "enq_txrsp_to_deq_txrsp", Config.maxCreditTXRSP)
-
-    io.chi_enq.txreq.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txreq.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txreq_lcrdv_to_enq_txreq_lcrdv", Config.maxCreditTXREQ)
-    io.chi_enq.txdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txdat.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txdat_lcrdv_to_enq_txdat_lcrdv", Config.maxCreditTXDAT)
-    io.chi_enq.txrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_deq.txrsp.lcrdv, deq_clock, deq_reset, enq_clock, enq_reset, "deq_txrsp_lcrdv_to_enq_txrsp_lcrdv", Config.maxCreditTXRSP)
-
-    //
-    // CHI RX Channel: responsible for sending L-Credit
-    //
-    io.chi_enq.rxdat <> AsyncConnect(io.chi_deq.rxdat, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxdat_to_enq_rxdat", Config.maxCreditRXDAT)
-    io.chi_enq.rxrsp <> AsyncConnect(io.chi_deq.rxrsp, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxrsp_to_enq_rxrsp", Config.maxCreditRXRSP)
-    io.chi_enq.rxsnp <> AsyncConnect(io.chi_deq.rxsnp, deq_clock, deq_reset, enq_clock, enq_reset, "deq_rxsnp_to_enq_rxsnp", Config.maxCreditRXSNP)
-
-    io.chi_deq.rxdat.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxdat.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxdat_lcrdv_to_deq_rxdat_lcrdv", Config.maxCreditRXDAT)
-    io.chi_deq.rxrsp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxrsp.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxrsp_lcrdv_to_deq_rxrsp_lcrdv", Config.maxCreditRXRSP)
-    io.chi_deq.rxsnp.lcrdv <> AsyncConnect.bitPulseConnect(io.chi_enq.rxsnp.lcrdv, enq_clock, enq_reset, deq_clock, deq_reset, "enq_rxsnp_lcrdv_to_deq_rxsnp_lcrdv", Config.maxCreditRXSNP)
 
     //
     // Output link controls
