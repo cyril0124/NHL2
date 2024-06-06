@@ -163,20 +163,13 @@ class AsyncBridgeCHI extends RawModule {
     // Output link controls
     //
     withClockAndReset(deq_clock, deq_reset) {
-        // chi power ctrl
         io.linkCtrl_deq.txsactive   := SynchronizerShiftReg(io.linkCtrl_enq.txsactive, Config.numSyncReg, Some("sync_LinkCtrl_txsactive"))
         io.linkCtrl_deq.rxactiveack := SynchronizerShiftReg(io.linkCtrl_enq.rxactiveack, Config.numSyncReg, Some("sync_LinkCtrl_rxactiveack"))
         io.linkCtrl_deq.txactivereq := SynchronizerShiftReg(io.linkCtrl_enq.txactivereq, Config.numSyncReg, Some("sync_LinkCrtl_txactivereq"))
 
-        // chi tx flitpend
         io.chi_deq.txreq.flitpend := SynchronizerShiftReg(io.chi_enq.txreq.flitpend, Config.numSyncReg, Some("sync_enq_txreq_flitpend"))
         io.chi_deq.txdat.flitpend := SynchronizerShiftReg(io.chi_enq.txdat.flitpend, Config.numSyncReg, Some("sync_enq_txdat_flitpend"))
         io.chi_deq.txrsp.flitpend := SynchronizerShiftReg(io.chi_enq.txrsp.flitpend, Config.numSyncReg, Some("sync_enq_txrsp_flitpend"))
-
-        // chi rx flitpend
-        io.chi_enq.rxdat.flitpend := SynchronizerShiftReg(io.chi_deq.rxdat.flitpend, Config.numSyncReg, Some("sync_deq_rxdat_flitpend"))
-        io.chi_enq.rxrsp.flitpend := SynchronizerShiftReg(io.chi_deq.rxrsp.flitpend, Config.numSyncReg, Some("sync_deq_rxrsp_flitpend"))
-        io.chi_enq.rxsnp.flitpend := SynchronizerShiftReg(io.chi_deq.rxsnp.flitpend, Config.numSyncReg, Some("sync_deq_rxsnp_flitpend"))
 
         val RESET_FINISH_MAX       = 100
         val resetFinishCounter_deq = withReset(deq_reset.asAsyncReset)(RegInit(0.U((log2Ceil(RESET_FINISH_MAX) + 1).W)))
