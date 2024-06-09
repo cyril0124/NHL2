@@ -17,6 +17,7 @@ case class L2Param(
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
+    nrClients: Int = 2, // number of L1 DCache
     enableClockGate: Boolean = true,
     nrMSHR: Int = 16,
     nrTmpDataEntry: Int = 16,
@@ -37,12 +38,14 @@ trait HasL2Param {
 
     val ways        = l2param.ways
     val sets        = l2param.sets
+    val wayBits     = log2Ceil(l2param.sets)
     val addressBits = l2param.addressBits
     val dataBits    = l2param.dataBits
     val beatBytes   = l2param.beatBytes
     val setBits     = log2Ceil(l2param.sets)
     val offsetBits  = log2Ceil(l2param.blockBytes)
     val tagBits     = l2param.addressBits - setBits - offsetBits
+    val nrClients   = l2param.nrClients
 
     val enableClockGate      = l2param.enableClockGate
     val nrTmpDataEntry       = l2param.nrTmpDataEntry

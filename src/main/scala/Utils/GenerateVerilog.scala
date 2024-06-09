@@ -17,6 +17,8 @@ object GenerateVerilog {
             Array("--target", "verilog") ++ args,
             Seq(
                 FirtoolOption("-O=release"),
+                // FirtoolOption("-O=debug"),
+                // FirtoolOption("-preserve-values=all"),
                 FirtoolOption("--disable-all-randomization"),
                 FirtoolOption("--disable-annotation-unknown"),
                 FirtoolOption("--strip-debug-info"),
@@ -29,5 +31,11 @@ object GenerateVerilog {
                 )
             ) ++ extraFirtoolOptions ++ Seq(ChiselGeneratorAnnotation(gen))
         )
+    }
+}
+
+object MultiDontTouch {
+    def apply[T <: Data](signals: T*): Unit = {
+        signals.foreach(s => dontTouch(s))
     }
 }

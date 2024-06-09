@@ -37,15 +37,15 @@ local TLParam = utils.enum_define {
 local MixedState = utils.enum_define {
     name = "MixedState",
 
-    I   = tonumber("0b0000"),
-    BC  = tonumber("0b0100"),
-    BD  = tonumber("0b0101"),
-    BBC = tonumber("0b0110"),
-    BBD = tonumber("0b0111"),
-    TTC = tonumber("0b1010"),
-    TTD = tonumber("0b1011"),
-    TC  = tonumber("0b1100"),
-    TD  = tonumber("0b1101"),
+    I   = tonumber("0000", 2),
+    BC  = tonumber("0100", 2),
+    BD  = tonumber("0101", 2),
+    BBC = tonumber("0110", 2),
+    BBD = tonumber("0111", 2),
+    TTC = tonumber("1010", 2),
+    TTD = tonumber("1011", 2),
+    TC  = tonumber("1100", 2),
+    TD  = tonumber("1101", 2),
 }
 
 local TLOpcodeA = utils.enum_define {

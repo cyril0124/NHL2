@@ -243,6 +243,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val source     = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
     val isPrefetch = Bool()
     val tmpDataID  = UInt(log2Ceil(nrTmpDataEntry).W)
+    val corrupt    = Bool()
+    val sink       = UInt((tlBundleParams.sinkBits).W)
 
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
@@ -254,16 +256,4 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
 object ReplayReson {
     // val NoSpaceForMSHR =
-}
-
-class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
-    val opcode  = UInt(5.W)
-    val channel = UInt(TLChannel.width.W)
-    val set     = UInt(setBits.W)
-    val tag     = UInt(tagBits.W)
-    val source  = UInt(math.max(tlBundleParams.sourceBits, 12).W)
-
-    def txnID = source     // alias to source
-    def chiOpcode = opcode // alias to opcode
-    def isSnoop = channel === TLChannel.ChannelB
 }

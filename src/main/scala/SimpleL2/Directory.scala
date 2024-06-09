@@ -51,17 +51,18 @@ class MixedState {
 trait HasMixedState {
     val state = UInt(MixedState.width.W)
 
-    def isDirty() = state(0)
-    def isShared() = state(1)
-    def isBranch() = state(3, 2) === TLState.BRANCH
-    def isTrunk() = state(3, 2) === TLState.TRUNK
-    def isTip() = state(3, 2) === TLState.TIP
+    def isDirty = state(0)
+    def isShared = state(1)
+    def isBranch = state(3, 2) === TLState.BRANCH
+    def isTrunk = state(3, 2) === TLState.TRUNK
+    def isTip = state(3, 2) === TLState.TIP
 }
 
 class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedState {
     val fromPrefetch = Bool()
     val tag          = UInt(tagBits.W)
     val alias        = aliasBitsOpt.map(width => UInt(width.W))
+    val clients      = UInt(nrClients.W)
 }
 
 class DirRead(implicit p: Parameters) extends L2Bundle {
@@ -153,7 +154,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Stage 1
+    // Stage 1(dir read) / Stage 3(dir write)
     // -----------------------------------------------------------------------------------------
     metaArray.io.r.req.bits.setIdx := io.dirRead_s1.bits.set
     metaArray.io.r.req.valid       := io.dirRead_s1.fire
@@ -175,7 +176,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Stage 2
+    // Stage 2(dir read)
     // -----------------------------------------------------------------------------------------
     val metaRead_s2 = Wire(Vec(ways, new DirectoryMetaEntry()))
     val reqValid_s2 = RegNext(io.dirRead_s1.fire, false.B)
@@ -183,7 +184,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     metaRead_s2 := metaArray.io.r.resp.data
 
     // -----------------------------------------------------------------------------------------
-    // Stage 3
+    // Stage 3(dir read)
     // -----------------------------------------------------------------------------------------
     val metaRead_s3 = RegEnable(metaRead_s2, reqValid_s2)
     val reqValid_s3 = RegNext(reqValid_s2, false.B)
