@@ -2,11 +2,8 @@ local utils = require "LuaUtils"
 local env = require "env"
 
 local assert = assert
+local expect = env.expect
 local TEST_SUCCESS = env.TEST_SUCCESS
-local posedge = env.posedge
-local negedge = env.negedge
-local dut_reset = env.dut_reset
-local send_pulse = env.send_pulse
 
 local RequestOwner = utils.enum_define {
     Level1     = tonumber("0b001"),
@@ -82,19 +79,17 @@ end
 
 local test_basic_mshr_req = env.register_test_case "test_basic_mshr_req" {
     function ()
-        dut_reset()
+        env.dut_reset()
         set_ready()
 
-        if reqArb.resetFinish() == 0 then
-            reqArb.resetFinish:posedge()
-        end
+        env.posedge()
+
+        expect.equal(taskMSHR_s0.ready:get(), 1)
     
-        assert(taskMSHR_s0.ready:get() == 1)
-    
-        negedge()
+        env.negedge()
             taskMSHR_s0.valid:set(1)
         
-        negedge()
+        env.negedge()
             taskMSHR_s0.valid:set(0)
 
         assert(dirRead_s1:fire())
@@ -102,117 +97,105 @@ local test_basic_mshr_req = env.register_test_case "test_basic_mshr_req" {
             assert(task.ready:get() == 0)
         end
     
-        posedge()
-            assert(taskMSHR_s0.ready:get() == 0)
+        env.posedge()
+            expect.equal(taskMSHR_s0.ready:get(), 0)
     
-        posedge()
-            assert(taskMSHR_s0.ready:get() == 1)
+        env.posedge()
+            expect.equal(taskMSHR_s0.ready:get(), 1)
     
-        posedge(10)
+        env.posedge(10)
         reset_ready()
     end
 }
 
 local test_basic_sink_req = env.register_test_case "test_basic_sink_req" {
     function ()
-        dut_reset()
+        env.dut_reset()
         set_ready()
 
-        if reqArb.resetFinish() == 0 then
-            reqArb.resetFinish:posedge()
-        end
-
-        posedge()
+        env.posedge()
 
         for i, task in ipairs(normal_tasks) do
             assert(task.ready:get() == 1)
         end
 
-        negedge()
+        env.negedge()
             taskSinkA_s1.valid:set(1)
 
-        negedge()
+        env.negedge()
             taskSinkA_s1.valid:set(0)
             assert(dirRead_s1:fire())
 
-        posedge(10)
+        env.posedge(10)
         reset_ready()
     end
 }
 
 local test_mshr_block_sink_req = env.register_test_case "test_mshr_block_sink_req" {
     function ()
-        dut_reset()
+        env.dut_reset()
         set_ready()
 
-        if reqArb.resetFinish() == 0 then
-            reqArb.resetFinish:posedge()
-        end
-
-        posedge()
+        env.posedge()
 
         for i, task in ipairs(normal_tasks) do
             assert(task.ready:get() == 1)
         end
 
-        negedge()
+        env.negedge()
             assert(taskSinkA_s1.ready:get() == 1)
             taskMSHR_s0.valid:set(1)
             taskSinkA_s1.valid:set(0)
 
-        posedge()
+        env.posedge()
             assert(taskSinkA_s1.ready:get() == 1)
 
-        negedge()
+        env.negedge()
             assert(taskMSHR_s0.ready:get() == 0)
             assert(taskSinkA_s1.ready:get() == 0)
             assert(reqArb.isTaskMSHR_s1:get() == 1)
             taskMSHR_s0.valid:set(0)
         
-        posedge()
+        env.posedge()
             assert(taskSinkA_s1.ready:get() == 0)
             taskSinkA_s1.valid:set(1)
 
-        negedge()
+        env.negedge()
             assert(taskSinkA_s1.ready:get() == 1)
 
-        posedge()
+        env.posedge()
             taskSinkA_s1.valid:set(0)
 
-        posedge(10)
+        env.posedge(10)
         reset_ready()
     end
 }
 
 local test_sinkC_block_sinkA = env.register_test_case "test_sinkC_block_sinkA" {
     function ()
-        dut_reset()
+        env.dut_reset()
         set_ready()
 
-        if reqArb.resetFinish() == 0 then
-            reqArb.resetFinish:posedge()
-        end
+        env.posedge()
 
-        posedge()
-
-        negedge()
+        env.negedge()
             assert(taskSinkA_s1.ready:get() == 1)
             assert(taskSinkC_s1.ready:get() == 1)
             assert(taskSnoop_s1.ready:get() == 1)
             taskSinkC_s1.valid:set(1)
         
-        posedge()
+        env.posedge()
             assert(taskSinkA_s1.ready:get() == 0)
             assert(taskSinkC_s1.ready:get() == 1)
             assert(taskSnoop_s1.ready:get() == 1)
         
-        negedge()
+        env.negedge()
             taskSinkC_s1.valid:set(0)
        
-        posedge()
+        env.posedge()
             
 
-        posedge(10)
+        env.posedge(10)
         reset_ready()
     end
 }
@@ -220,8 +203,9 @@ local test_sinkC_block_sinkA = env.register_test_case "test_sinkC_block_sinkA" {
 verilua "mainTask" {
     function ()
         sim.dump_wave()
-
-        dut_reset()
+        env.dut_reset()
+        
+        dut.io_resetFinish:set(1)
 
         test_basic_mshr_req()
         test_basic_sink_req()

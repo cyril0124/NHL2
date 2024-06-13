@@ -189,20 +189,25 @@ local test_basic_release = env.register_test_case "test_basic_release" {
 }
 
 
-verilua "mainTask" { function ()
-    sim.dump_wave()
-    env.dut_reset()
+verilua "mainTask" { 
+    function ()
+        sim.dump_wave()
+        env.dut_reset()
 
-    test_basic_acquire("hit")
-    test_basic_acquire("miss")
-    test_basic_acquire("miss_replay")
-    test_basic_acquire("hit_alloc_mshr")
+        dut.io_sourceD_s4_ready:set(1)
+        dut.io_replay_s4_ready:set(1)
 
-    for i = 1, 5 do
-        test_basic_release("normal")
-    end
+        test_basic_acquire("hit")
+        test_basic_acquire("miss")
+        test_basic_acquire("miss_replay")
+        test_basic_acquire("hit_alloc_mshr")
 
-    env.TEST_SUCCESS()
-end }
+        for i = 1, 5 do
+            test_basic_release("normal")
+        end
+
+        env.TEST_SUCCESS()
+    end 
+}
 
 

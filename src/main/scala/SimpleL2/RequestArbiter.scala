@@ -12,22 +12,23 @@ import SimpleL2.Bundles._
 
 class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        // MSHR request
+
+        /** [[MSHR]] request */
         val taskMSHR_s0 = Flipped(Decoupled(new TaskBundle)) // Hard wire to MSHRs
 
-        // Channel request
+        /** Channel request */
         val taskSinkA_s1 = Flipped(Decoupled(new TaskBundle))
         val taskSinkC_s1 = Flipped(Decoupled(new TaskBundle))
         val taskSnoop_s1 = Flipped(Decoupled(new TaskBundle))
 
-        // Other request
+        /** Other request */
         val taskCMO_s1    = Flipped(Decoupled(new TaskBundle))
         val taskReplay_s1 = Flipped(Decoupled(new TaskBundle))
 
-        // Read directory
+        /** Read directory */
         val dirRead_s1 = Decoupled(new DirRead)
 
-        // Send task to MainPipe
+        /** Send task to [[MainPipe]] */
         val mpReq_s2 = ValidIO(new TaskBundle)
 
         val resetFinish = Input(Bool())
@@ -62,10 +63,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     valid_s1 := isTaskMSHR_s1
     ready_s1 := !isTaskMSHR_s1
 
-    //
-    // Task priority:
-    //      MSHR > Replay > CMO > Snoop > SinkC > SinkA
-    //
+    /** Task priority: MSHR > Replay > CMO > Snoop > SinkC > SinkA
+      */
     val otherTasks_s1 = Seq(io.taskReplay_s1, io.taskCMO_s1, io.taskSnoop_s1, io.taskSinkC_s1, io.taskSinkA_s1)
     val chosenTask_s1 = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     arbTask(otherTasks_s1, chosenTask_s1)

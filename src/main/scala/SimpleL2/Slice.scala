@@ -19,11 +19,16 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.chi <> DontCare
 
     val sinkA    = Module(new SinkA)
+    val sourceD  = Module(new SourceD)
     val reqArb   = Module(new RequestArbiter)
     val dir      = Module(new Directory)
+    val ds       = Module(new DataStorage)
     val mainPipe = Module(new MainPipe)
+    val tempDS   = Module(new TempDataStorage)
 
-    dir.io <> DontCare
+    sourceD.io <> DontCare
+    dir.io     <> DontCare
+    ds.io      <> DontCare
 
     sinkA.io.a <> io.tl.a
 
@@ -35,6 +40,24 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io            <> DontCare
     mainPipe.io.mpReq_s2   <> reqArb.io.mpReq_s2
     mainPipe.io.dirResp_s3 <> dir.io.dirResp_s3
+    // TODO: ds.io.dsRead_s3.crdv
+    mainPipe.io.replay_s4.ready  := true.B // TODO:
+    mainPipe.io.sourceD_s4.ready := true.B // TODO:
+
+    ds.io.dsRead_s3.valid := mainPipe.io.dsRead_s3.valid
+    ds.io.dsRead_s3.bits  := mainPipe.io.dsRead_s3.bits
+
+    sourceD.io.task         <> mainPipe.io.sourceD_s4
+    sourceD.io.data         <> tempDS.io.toSourceD.dataOut
+    sourceD.io.dataId       := tempDS.io.toSourceD.dataId
+    sourceD.io.tempDataRead <> tempDS.io.fromSoruceD.read
+    sourceD.io.tempDataResp <> tempDS.io.fromSoruceD.resp
+
+    tempDS.io.fromDS.dsResp_ds4 := ds.io.toTempDS.dsResp_ds4
+    tempDS.io.fromDS.dsDest_ds4 := ds.io.toTempDS.dsDest_ds4
+    // ds.io.toTXDAT.dsResp_ds4
+
+    io.tl.d <> sourceD.io.d
 
     dontTouch(reqArb.io)
     dontTouch(mainPipe.io)
@@ -48,5 +71,5 @@ object Slice extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
-    GenerateVerilog(args, () => new Slice()(config), name = "Slice", split = false)
+    GenerateVerilog(args, () => new Slice()(config), name = "Slice", split = true)
 }

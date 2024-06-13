@@ -20,15 +20,16 @@ case class L2Param(
     nrClients: Int = 2, // number of L1 DCache
     enableClockGate: Boolean = true,
     nrMSHR: Int = 16,
-    nrTmpDataEntry: Int = 16,
+    nrTempDataEntry: Int = 16,
     nrRequestBufferEntry: Int = 4,
+    nrSourceDTaskQueueEntry: Int = 4,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
     rxdatCreditMAX: Int = 2,
     replacementPolicy: String = "plru"
 ) {
     require(dataBits == 64 * 8)
-    require(nrMSHR == nrTmpDataEntry)
+    require(nrMSHR == nrTempDataEntry)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
 }
 
@@ -47,9 +48,11 @@ trait HasL2Param {
     val tagBits     = l2param.addressBits - setBits - offsetBits
     val nrClients   = l2param.nrClients
 
-    val enableClockGate      = l2param.enableClockGate
-    val nrTmpDataEntry       = l2param.nrTmpDataEntry
-    val nrRequestBufferEntry = l2param.nrRequestBufferEntry
+    val enableClockGate         = l2param.enableClockGate
+    val nrTempDataEntry         = l2param.nrTempDataEntry
+    val dataIdBits              = log2Ceil(nrTempDataEntry)
+    val nrRequestBufferEntry    = l2param.nrRequestBufferEntry
+    val nrSourceDTaskQueueEntry = l2param.nrSourceDTaskQueueEntry
 
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX

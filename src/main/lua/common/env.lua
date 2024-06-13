@@ -58,6 +58,10 @@ local function send_pulse(signal)
     posedge()
 end
 
+local function cycles()
+    return dut.cycles:get()
+end
+
 
 local function TEST_SUCCESS()
     print(">>>TEST_SUCCESS!<<<")
@@ -173,6 +177,7 @@ return {
     dut_reset = dut_reset,
     sync_to_cycles = sync_to_cycles,
     send_pulse = send_pulse,
+    cycles = cycles,
     TEST_SUCCESS = TEST_SUCCESS,
     register_test_case = register_test_case,
     mux_case = mux_case,
