@@ -20,6 +20,7 @@ local mpReq_s2 = ([[
 local dirResp_s3 = ([[
     | valid
     | meta_state
+    | meta_clients
     | hit
 ]]):bundle {hier = cfg.top, prefix = "io_dirResp_s3_", is_decoupled = true}
 
@@ -31,6 +32,8 @@ local mshrAlloc_s3 = ([[
 local replay_s4 = ([[
     | valid 
 ]]):bundle {hier = cfg.top, prefix = "io_replay_s4_", is_decoupled = true}
+
+local mp = dut.u_MainPipe
 
 
 local test_basic_acquire = env.register_test_case "test_basic_acquire" {
@@ -72,12 +75,13 @@ local test_basic_acquire = env.register_test_case "test_basic_acquire" {
             env.mux_case(case) {
                 hit = function()
                     dirResp_s3.bits.hit:set(1)
-                    dirResp_s3.bits.meta_state:set(MixedState.TTC)
+                    dirResp_s3.bits.meta_state:set(MixedState.TC)
                 end,
 
                 hit_alloc_mshr = function()
                     dirResp_s3.bits.hit:set(1)
                     dirResp_s3.bits.meta_state:set(MixedState.BBC)
+                    dirResp_s3.bits.meta_clients:set(("0b01"):number())
                 end,
 
                 miss = function()
@@ -194,6 +198,7 @@ verilua "mainTask" {
         sim.dump_wave()
         env.dut_reset()
 
+        mp.dsRdCnt:set_force(1)
         dut.io_sourceD_s4_ready:set(1)
         dut.io_replay_s4_ready:set(1)
 
@@ -205,6 +210,8 @@ verilua "mainTask" {
         for i = 1, 5 do
             test_basic_release("normal")
         end
+
+        mp.dsRdCnt:set_release()
 
         env.TEST_SUCCESS()
     end 

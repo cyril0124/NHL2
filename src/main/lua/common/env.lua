@@ -35,10 +35,11 @@ local function negedge(cycles, cycle_action_func)
 end
 
 local function dut_reset()
-    clock:posedge()
+    -- clock:posedge()
     dut.reset = 1
-    clock:posedge(10)
+    clock:negedge(10)
     dut.reset = 0
+    -- clock:negedge()
 end
 
 
@@ -167,20 +168,36 @@ local function will_failed(func, ...)
     assert(not ok)
 end
 
+local function expect_happen_until(limit_cycles, func)
+    assert(type(limit_cycles) == "number")
+    assert(type(func) == "function")
+    local ok = dut.clock:posedge_until(limit_cycles, func)
+    assert(ok)
+end
+
+local function expect_not_happen_until(limit_cycles, func)
+    assert(type(limit_cycles) == "number")
+    assert(type(func) == "function")
+    local ok = dut.clock:posedge_until(limit_cycles, func)
+    assert(not ok)
+end
+
 local lester = require "lester"
 local expect = lester.expect
 
 return {
-    end_simulation = end_simulation,
-    posedge = posedge,
-    negedge = negedge,
-    dut_reset = dut_reset,
-    sync_to_cycles = sync_to_cycles,
-    send_pulse = send_pulse,
-    cycles = cycles,
-    TEST_SUCCESS = TEST_SUCCESS,
-    register_test_case = register_test_case,
-    mux_case = mux_case,
-    will_failed = will_failed,
-    expect = expect,
+    end_simulation          = end_simulation,
+    posedge                 = posedge,
+    negedge                 = negedge,
+    dut_reset               = dut_reset,
+    sync_to_cycles          = sync_to_cycles,
+    send_pulse              = send_pulse,
+    cycles                  = cycles,
+    TEST_SUCCESS            = TEST_SUCCESS,
+    register_test_case      = register_test_case,
+    mux_case                = mux_case,
+    will_failed             = will_failed,
+    expect                  = expect,
+    expect_happen_until     = expect_happen_until,
+    expect_not_happen_until = expect_not_happen_until,
 }

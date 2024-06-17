@@ -57,7 +57,7 @@ trait HasMixedState {
 class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedState {
     val fromPrefetch = Bool()
     val tag          = UInt(tagBits.W)
-    val alias        = aliasBitsOpt.map(width => UInt(width.W))
+    val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
     val clients      = UInt(nrClients.W)
 }
 
@@ -80,8 +80,8 @@ class DirResp(implicit p: Parameters) extends L2Bundle {
 
 class Directory()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val dirRead_s1  = Flipped(Decoupled(new DirRead))
-        val dirWrite_s3 = Flipped(Decoupled(new DirWrite))
+        val dirRead_s1  = Flipped(DecoupledIO(new DirRead))
+        val dirWrite_s3 = Flipped(ValidIO(new DirWrite))
         val dirResp_s3  = ValidIO(new DirResp)
 
         // TODO: update replacer SRAM
@@ -162,7 +162,8 @@ class Directory()(implicit p: Parameters) extends L2Module {
     )
     io.dirRead_s1.ready := io.resetFinish && metaSRAM.io.r.req.ready && !io.dirWrite_s3.fire
 
-    io.dirWrite_s3.ready := io.resetFinish && metaSRAM.io.w.req.ready
+    val dirWriteReady_s3 = io.resetFinish && metaSRAM.io.w.req.ready
+    assert(!(io.dirWrite_s3.valid && !dirWriteReady_s3))
     assert(!(io.dirWrite_s3.valid && !metaSRAM.io.w.req.ready), "dirWrite_s3 while metaSRAM is not ready!")
     assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
     when(!io.resetFinish) {

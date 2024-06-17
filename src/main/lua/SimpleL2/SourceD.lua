@@ -68,17 +68,14 @@ local test_grant_no_stall = env.register_test_case "test_grant_no_stall" {
 
         verilua "appendTasks" {
             check_task = function ()
-                local ok = false
-                ok = dut.clock:posedge_until(10, function(c)
+                env.expect_happen_until(10, function(c)
                     return tl_d:fire() and tl_d.bits.source:get() == 1
                 end)
-                assert(ok)
                 
                 env.posedge()
-                ok = dut.clock:posedge_until(10, function(c)
+                env.expect_not_happen_until(10, function(c)
                     return tl_d:fire()
                 end)
-                assert(not ok)
             end
         }
         
@@ -96,17 +93,14 @@ local test_grant_simple_stall = env.register_test_case "test_grant_stall" {
 
         verilua "appendTasks" {
             check_task = function()
-               local ok = false
-               ok = dut.clock:posedge_until(20, function(c)
+                env.expect_happen_until(20, function(c)
                    return tl_d:fire() and tl_d.bits.source:get() == 1
-               end)
-               assert(ok)
+                end)
 
                 env.posedge()
-                ok = dut.clock:posedge_until(20, function(c)
+                env.expect_not_happen_until(20, function(c)
                     return tl_d:fire()
                 end)
-                assert(not ok)
             end
         }
 
@@ -128,29 +122,24 @@ local test_grant_consecutive_stall = env.register_test_case "test_grantdata_cont
         local sync_ehdl = ("sync"):ehdl()
         verilua "appendTasks" {
             check_task = function()
-               local ok = false
-               ok = dut.clock:posedge_until(20, function(c)
+               env.expect_happen_until(20, function(c)
                    return tl_d:fire() and tl_d.bits.source:get() == 1
                end)
-               assert(ok)
 
-                ok = dut.clock:posedge_until(20, function(c)
+                env.expect_happen_until(20, function(c)
                     return tl_d:fire() and tl_d.bits.source:get() == 2
                 end)
-                assert(ok)
 
                 env.posedge()
-                ok = dut.clock:posedge_until(20, function(c)
+                env.expect_not_happen_until(20, function(c)
                     return tl_d:fire()
                 end)
-                assert(not ok)
 
                 sync_ehdl:wait()
                 for i = 1, 4 do
-                    ok = dut.clock:posedge_until(20, function(c)
+                    env.expect_happen_until(20, function(c)
                         return tl_d:fire() and tl_d.bits.source:get() == i
                     end)
-                    assert(ok, i)
                     env.posedge()
                 end
             end
@@ -191,25 +180,21 @@ local test_grantdata_no_stall = env.register_test_case "test_grantdata_no_stall"
             check_task = function ()
                 local ok = false
                 -- check task enq
-                ok = dut.clock:posedge_until(10, function(c)
+                env.expect_happen_until(10, function(c)
                     return task:fire() and taskQueue.io_enq_valid:get() == 1 and taskQueue.io_enq_ready:get() == 1
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(20, function (c)
+                env.expect_happen_until(20, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0x100
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(20, function (c)
+                env.expect_happen_until(20, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0x200
                 end)
-                assert(ok)
 
-                local ok = dut.clock:posedge_until(5, function (c)
+                env.expect_happen_until(5, function (c)
                     return taskQueue.io_deq_ready:get() == 1 and taskQueue.io_deq_valid:get() == 1  
                 end)
-                assert(ok)
             end
         }
 
@@ -234,41 +219,34 @@ local test_grantdata_simple_stall = env.register_test_case "test_grantdata_simpl
             check_task = function()
                 local ok = false
                 -- data will put into tmpDataBuffer
-                local ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return sourceD.tmpDataBuffer:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100"
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0x100
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0x200
                 end)
-                assert(ok)
 
-                local ok = dut.clock:posedge_until(5, function (c)
+                env.expect_happen_until(5, function (c)
                     return taskQueue.io_deq_ready:get() == 1 and taskQueue.io_deq_valid:get() == 1  
                 end)
-                assert(ok)
             end,
 
             check_fsm = function ()
-                local ok = false
                 local Normal = 0
                 local Stall = 1
 
-                local ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return sourceD.outState:get() == Stall
                 end)
-                assert(ok)
 
-                local ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return sourceD.outState:get() == Normal
                 end)
-                assert(ok)
             end,
         }
 
@@ -296,40 +274,31 @@ local test_grantdata_continuous_stall_2 = env.register_test_case "test_grantdata
 
         verilua "appendTasks" {
             check_task = function ()
-                local ok = false
-
-                local ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire()
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == 4 and tl_d.bits.data:get()[1] == 0x300
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == 4 and tl_d.bits.data:get()[1] == 0x400
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == 5 and tl_d.bits.data:get()[1] == 0x500
                 end)
-                assert(ok)
 
-                ok = dut.clock:posedge_until(300, function (c)
+                env.expect_happen_until(300, function (c)
                     return tl_d:fire() and tl_d.bits.source:get() == 5 and tl_d.bits.data:get()[1] == 0x600
                 end)
-                assert(ok)
             end,
 
             check_task_1 = function ()
-                local ok = false
-                ok = dut.clock:posedge_until(400, function (c)
+                env.expect_happen_until(400, function (c)
                     return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.dataId:get() == 2
                 end)
-                assert(ok)
             end
         }
 

@@ -41,7 +41,7 @@ class DSEntry()(implicit p: Parameters) extends L2Bundle {
 class DataStorage()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val dsWrite_s2 = Flipped(CreditIO(new DSWrite))
-        val wrWay_s3   = Input(UInt(wayBits.W))
+        val dsWrWay_s3 = Input(UInt(wayBits.W))
         val dsRead_s3  = Flipped(CreditIO(new DSRead))
 
         val toTempDS = new Bundle {
@@ -91,8 +91,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // val wen_ds1    = RegNext(wen_s2, false.B)
     val wen_ds1 = WireInit(false.B)
 
-    val rdQueueEntries = 2
-    val rdQueue        = Module(new Queue(new DSRead, rdQueueEntries, flow = true))
+    val rdQueue = Module(new Queue(new DSRead, rdQueueEntries, flow = true))
     rdQueue.io.deq.ready := dsReady_s3 && !wen_ds1
     rdQueue.io.enq.valid := io.dsRead_s3.valid
     rdQueue.io.enq.bits  := io.dsRead_s3.bits
@@ -123,8 +122,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     val wrReq_ds1    = wrQueue.io.deq.bits
     val wrData_ds1   = wrReq_ds1.data
-    val wrWayReg_ds1 = RegEnable(io.wrWay_s3, 0.U, RegNext(wen_s2))
-    val wrWay_ds1    = Mux(RegNext(wen_s2), io.wrWay_s3, wrWayReg_ds1)
+    val wrWayReg_ds1 = RegEnable(io.dsWrWay_s3, 0.U, RegNext(wen_s2))
+    val wrWay_ds1    = Mux(RegNext(wen_s2), io.dsWrWay_s3, wrWayReg_ds1)
     val wrIdx_ds1    = Cat(wrWay_ds1, wrReq_ds1.set)
     wen_ds1                             := wrQueue.io.deq.fire
     dataSRAM.io.w.req.valid             := wen_ds1 && dsReady_s3

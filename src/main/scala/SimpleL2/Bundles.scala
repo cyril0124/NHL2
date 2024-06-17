@@ -226,7 +226,7 @@ class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
     val channel   = UInt(TLChannel.width.W)
     val source    = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
     val address   = UInt(addressBits.W)
-    val tmpDataID = UInt(log2Ceil(nrTmpDataEntry).W)
+    val tmpDataID = UInt(log2Ceil(nrTempDataEntry).W)
 
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
@@ -242,9 +242,11 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val tag        = UInt(tagBits.W)
     val source     = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
     val isPrefetch = Bool()
-    val tmpDataID  = UInt(log2Ceil(nrTmpDataEntry).W)
+    val tmpDataID  = UInt(log2Ceil(nrTempDataEntry).W)
     val corrupt    = Bool()
     val sink       = UInt((tlBundleParams.sinkBits).W)
+    val wayOH      = UInt(ways.W)
+    val aliasOpt   = aliasBitsOpt.map(width => UInt(width.W))
 
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
@@ -256,4 +258,14 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
 object ReplayReson {
     // val NoSpaceForMSHR =
+}
+
+class CreditIO[T <: Data](gen: T) extends Bundle {
+    val crdv  = Input(Bool())
+    val valid = Output(Bool())
+    val bits  = Output(gen)
+}
+
+object CreditIO {
+    def apply[T <: Data](gen: T): CreditIO[T] = new CreditIO(gen)
 }

@@ -18,17 +18,20 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.tl  <> DontCare
     io.chi <> DontCare
 
-    val sinkA    = Module(new SinkA)
-    val sourceD  = Module(new SourceD)
-    val reqArb   = Module(new RequestArbiter)
-    val dir      = Module(new Directory)
-    val ds       = Module(new DataStorage)
-    val mainPipe = Module(new MainPipe)
-    val tempDS   = Module(new TempDataStorage)
+    val sinkA       = Module(new SinkA)
+    val sourceD     = Module(new SourceD)
+    val reqArb      = Module(new RequestArbiter)
+    val dir         = Module(new Directory)
+    val ds          = Module(new DataStorage)
+    val mainPipe    = Module(new MainPipe)
+    val tempDS      = Module(new TempDataStorage)
+    val missHandler = Module(new MissHandler)
 
-    sourceD.io <> DontCare
-    dir.io     <> DontCare
-    ds.io      <> DontCare
+    sourceD.io     <> DontCare
+    dir.io         <> DontCare
+    ds.io          <> DontCare
+    tempDS.io      <> DontCare
+    missHandler.io <> DontCare
 
     sinkA.io.a <> io.tl.a
 
@@ -36,26 +39,35 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
     reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
     reqArb.io.resetFinish  <> dir.io.resetFinish
+    reqArb.io.dsWrCrd      := ds.io.dsWrite_s2.crdv
 
-    mainPipe.io            <> DontCare
-    mainPipe.io.mpReq_s2   <> reqArb.io.mpReq_s2
-    mainPipe.io.dirResp_s3 <> dir.io.dirResp_s3
-    // TODO: ds.io.dsRead_s3.crdv
+    mainPipe.io                  <> DontCare
+    mainPipe.io.mpReq_s2         <> reqArb.io.mpReq_s2
+    mainPipe.io.dirResp_s3       <> dir.io.dirResp_s3
+    mainPipe.io.mshrFreeOH_s3    := missHandler.io.mshrFreeOH_s3
     mainPipe.io.replay_s4.ready  := true.B // TODO:
     mainPipe.io.sourceD_s4.ready := true.B // TODO:
+    mainPipe.io.dsRdCrd          := ds.io.dsRead_s3.crdv
 
-    ds.io.dsRead_s3.valid := mainPipe.io.dsRead_s3.valid
-    ds.io.dsRead_s3.bits  := mainPipe.io.dsRead_s3.bits
+    ds.io.dsWrite_s2.valid := reqArb.io.dsWrite_s2.valid
+    ds.io.dsWrite_s2.bits  := reqArb.io.dsWrite_s2.bits
+    ds.io.dsWrWay_s3       := mainPipe.io.dsWrWay_s3
+    ds.io.dsRead_s3.valid  := mainPipe.io.dsRead_s3.valid
+    ds.io.dsRead_s3.bits   := mainPipe.io.dsRead_s3.bits
+
+    dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 
     sourceD.io.task         <> mainPipe.io.sourceD_s4
     sourceD.io.data         <> tempDS.io.toSourceD.dataOut
     sourceD.io.dataId       := tempDS.io.toSourceD.dataId
-    sourceD.io.tempDataRead <> tempDS.io.fromSoruceD.read
-    sourceD.io.tempDataResp <> tempDS.io.fromSoruceD.resp
+    sourceD.io.tempDataRead <> tempDS.io.fromSourceD.read
+    sourceD.io.tempDataResp <> tempDS.io.fromSourceD.resp
 
     tempDS.io.fromDS.dsResp_ds4 := ds.io.toTempDS.dsResp_ds4
     tempDS.io.fromDS.dsDest_ds4 := ds.io.toTempDS.dsDest_ds4
     // ds.io.toTXDAT.dsResp_ds4
+
+    missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
 
     io.tl.d <> sourceD.io.d
 

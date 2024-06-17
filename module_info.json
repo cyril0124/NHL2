@@ -21,7 +21,7 @@
         "package": "SimpleL2",       
         "target": "DataStorage",    
         "unit_test": true,
-        "unit_test_cmd": "make WAVE_ENABLE=1 simulator=verilator package=SimpleL2 target=DataStorage unit-test-filelist"  
+        "unit_test_cmd": "make WAVE_ENABLE=1 simulator=vcs package=SimpleL2 target=DataStorage unit-test-filelist"  
     },
     {
         "package": "SimpleL2",       
@@ -30,5 +30,6 @@
         "unit_test_cmd": "make package=SimpleL2 target=TempDataStorage unit-test-filelist"
     },
     {"package": "SimpleL2", "target": "SourceD", "unit_test": true },
+    {"package": "SimpleL2", "target": "MissHandler", "unit_test": true },
     {"package": "AsyncBridgeCHI", "target": "AsyncBridgeCHI", "unit_test": false }
 ]

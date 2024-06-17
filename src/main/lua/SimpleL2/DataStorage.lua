@@ -21,13 +21,33 @@ local dsResp_ds4 = ([[
 ]]):bundle {hier = cfg.top, prefix = "io_toTempDS_dsResp_ds4_", name = "dsResp_ds4"}
 
 
-local wrWay_s3 = dut.io_wrWay_s3
+local dsWrWay_s3 = dut.io_dsWrWay_s3
+local rd_crdv = dut.io_dsRead_s3_crdv
+local wr_crdv = dut.io_dsWrite_s2_crdv
 
-
-verilua "mainTask" {
+local test_basic_read_write = env.register_test_case "test_basic_read_write" {
     function ()
-        sim.dump_wave()
         env.dut_reset()
+
+        verilua "appendTasks" {
+            check_task = function ()        
+                local read_data = 0xff
+        
+                env.expect_happen_until(100, function (c)
+                    return dsResp_ds4:fire()
+                end)
+                read_data = dsResp_ds4.bits.data:get()[1]
+                expect.equal(read_data, 0x00)
+                
+                env.posedge()
+        
+                env.expect_happen_until(100, function (c)
+                    return dsResp_ds4:fire()
+                end)
+                read_data = dsResp_ds4.bits.data:get()[1]
+                expect.equal(read_data, 0xdead)
+            end
+        }
 
         env.negedge()
             -- 
@@ -49,13 +69,13 @@ verilua "mainTask" {
             -- 
             -- write way is provided in Stage 3
             -- 
-            wrWay_s3:set(1)
+            dsWrWay_s3:set(1)
             dsWrite_s2.valid:set(0)
             
             dsRead_s3.valid:set(0)
         
         env.negedge()
-            wrWay_s3:set(0)
+            dsWrWay_s3:set(0)
             
             -- 
             -- [2] read from set=0x01, way=0x01
@@ -69,45 +89,58 @@ verilua "mainTask" {
             dsRead_s3.valid:set(0)
 
         env.posedge(10)
-
-        env.posedge(100)
-
-        env.TEST_SUCCESS()
     end
 }
 
+local test_credit_transfer = env.register_test_case "test_credit_transfer" {
+    function ()
+        local sync = ("sync"):ehdl()
 
-verilua "appendTasks" {
-    check_task = function ()
-        dut.reset:negedge()
+        env.dut_reset()
+        sync:send()
 
-        local ok = false
-        local read_data = 0xff
+        verilua "appendTasks" {
+            check_rd_crd = function ()
+                env.expect_happen_until(20, function (c)
+                    return rd_crdv:get() == 1
+                end)
+                
+                env.posedge()
+                env.expect_happen_until(20, function (c)
+                    return rd_crdv:get() == 1
+                end)
 
-        ok = dut.clock:posedge_until(100, function (c)
-            local condition_meet = dsResp_ds4:fire()
-            if condition_meet then
-                read_data = dsResp_ds4.bits.data:get()[1]
-                return true 
-            else
-                return false
+                env.posedge()
+                env.expect_not_happen_until(20, function (c)
+                    return rd_crdv:get() == 1
+                end)
+            end,
+
+            check_wr_crd = function ()
+                sync:wait()
+                env.expect_happen_until(30, function ()
+                    return wr_crdv:get() == 1
+                end)
+
+                env.posedge()
+                env.expect_not_happen_until(20, function ()
+                    return wr_crdv:get() == 1
+                end)
             end
-        end)
-        assert(ok)
-        expect.equal(read_data, 0x00)
-        
-        env.posedge()
+        }
 
-        ok = dut.clock:posedge_until(100, function (c)
-            local condition_meet = dsResp_ds4:fire()
-            if condition_meet then
-                read_data = dsResp_ds4.bits.data:get()[1]
-                return true 
-            else
-                return false
-            end
-        end)
-        assert(ok)
-        expect.equal(read_data, 0xdead)
+        env.posedge(100)
+    end
+}
+
+verilua "mainTask" {
+    function ()
+        sim.dump_wave()
+
+        test_basic_read_write()
+        test_credit_transfer()
+
+        env.posedge(100)
+        env.TEST_SUCCESS()
     end
 }

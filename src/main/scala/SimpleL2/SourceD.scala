@@ -32,7 +32,14 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io <> DontCare
 
     /** tasks will be buffered in [[taskQueue]] if and only if data cannot be sent in current cycle */
-    val taskQueue   = Module(new Queue(new TaskBundle, nrSourceDTaskQueueEntry, flow = true))
+    val taskQueue = Module(new Queue(new TaskBundle, nrSourceDTaskQueueEntry, flow = true))
+
+    /** 
+     * [[dataIdQueue]] is used for storing the [[dataId]] of the incoming 
+     * datas which cannot be stored in both [[tmpDataBuffer]] or send out directly 
+     */
+    val dataIdQueue = Module(new Queue(UInt(dataIdBits.W), nrSourceDTaskQueueEntry, flow = false))
+
     val deqNeedData = WireInit(false.B)
     taskQueue.io.enq <> io.task
 
@@ -44,6 +51,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
 
     /** a FSM is used to control the flow of data */
     val stall        = io.d.valid && !io.d.ready
+    val dataIdCount  = WireInit(0.U((log2Ceil(nrSourceDTaskQueueEntry) + 1).W))
     val outState     = RegInit(Normal)
     val nextOutState = WireInit(Normal)
 
@@ -74,7 +82,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
             when(isLastOutData) {
                 nextOutState := Normal
 
-                when(taskQueue.io.count =/= 1.U) {
+                when(dataIdCount >= 1.U) {
                     nextOutState := FetchData
                 }
             }.otherwise {
@@ -84,7 +92,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
 
         is(FetchData) {
             nextOutState := FetchData
-            when(taskQueue.io.count === 1.U && io.tempDataResp.fire) {
+            when(dataIdCount <= 1.U && io.tempDataResp.fire) {
                 nextOutState := Stall
             }
         }
@@ -113,7 +121,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         io.d.fire
     )
     deqTask.ready := io.d.ready && readyToDeq
-    assert(!(outState === FetchData && !deqNeedData))
+    // assert(!(outState === FetchData && !deqNeedData))
 
     /** temporary data will be stored into [[tmpDataBuffer]] */
     val isNotLastData = io.data.fire && !io.data.bits.last
@@ -145,12 +153,12 @@ class SourceD()(implicit p: Parameters) extends L2Module {
 
     /** 
      * [[dataIdQueue]] is used for storing the [[dataId]] of the incoming 
-     * datas which cannot be store in both [[tmpDataBuffer]] or send out directly 
+     * datas which cannot be stored in both [[tmpDataBuffer]] or send out directly 
      */
-    val dataIdQueue = Module(new Queue(UInt(dataIdBits.W), nrSourceDTaskQueueEntry, flow = false))
     dataIdQueue.io.enq.valid := io.data.valid && !io.data.ready && io.data.bits.last
     dataIdQueue.io.enq.bits  := io.dataId
-    dataIdQueue.io.deq.ready := deqTask.valid && deqTask.ready
+    dataIdQueue.io.deq.ready := deqTask.valid && io.tempDataRead.fire
+    dataIdCount              := dataIdQueue.io.count
     assert(!(dataIdQueue.io.enq.valid && !dataIdQueue.io.enq.ready))
 
     /** read data back from [[TempDataBuffer]] if [[tmpDataBuffer]] is empty */
@@ -176,15 +184,19 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.d.bits.sink   := deqTask.bits.sink
     io.d.bits.opcode := deqTask.bits.opcode
     io.d.bits.param  := deqTask.bits.param
-    io.d.bits.data := MuxCase(
-        io.data.bits.data,
-        Seq(
-            (outState === Normal)                                                              -> io.data.bits.data,
-            (outState === Stall)                                                               -> beatDatas(beatCnt),
-            (outState === FetchData && io.d.ready && !io.tempDataResp.valid)                   -> beatDatas(beatCnt),
-            (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 0.U) -> io.tempDataResp.bits(255, 0),
-            (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 1.U) -> beatDatas(beatCnt)
-        )
+    io.d.bits.data := Mux(
+        deqNeedData,
+        MuxCase(
+            io.data.bits.data,
+            Seq(
+                (outState === Normal)                                                              -> io.data.bits.data,
+                (outState === Stall)                                                               -> beatDatas(beatCnt),
+                (outState === FetchData && io.d.ready && !io.tempDataResp.valid)                   -> beatDatas(beatCnt),
+                (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 0.U) -> io.tempDataResp.bits(255, 0),
+                (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 1.U) -> beatDatas(beatCnt)
+            )
+        ),
+        0.U
     )
     io.d.bits.size    := 5.U // 32 bytes
     io.d.bits.source  := deqTask.bits.source

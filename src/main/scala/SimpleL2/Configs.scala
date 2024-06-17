@@ -4,9 +4,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLPermissions._
+import freechips.rocketchip.tilelink.TLMessages._
+import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey}
 import org.chipsalliance.cde.config._
 import xs.utils.FastArbiter
 import SimpleL2.Bundles.CHIBundleParameters
+
+case object AliasKey extends ControlKey[UInt]("alias")
+case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), _ := 0.U(width.W))
 
 case object L2ParamKey extends Field[L2Param](L2Param())
 
@@ -23,6 +28,7 @@ case class L2Param(
     nrTempDataEntry: Int = 16,
     nrRequestBufferEntry: Int = 4,
     nrSourceDTaskQueueEntry: Int = 4,
+    rdQueueEntries: Int = 2,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
     rxdatCreditMAX: Int = 2,
@@ -31,6 +37,7 @@ case class L2Param(
     require(dataBits == 64 * 8)
     require(nrMSHR == nrTempDataEntry)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
+    require(nrClients >= 1)
 }
 
 trait HasL2Param {
@@ -46,6 +53,7 @@ trait HasL2Param {
     val setBits     = log2Ceil(l2param.sets)
     val offsetBits  = log2Ceil(l2param.blockBytes)
     val tagBits     = l2param.addressBits - setBits - offsetBits
+    val nrMSHR      = l2param.nrMSHR
     val nrClients   = l2param.nrClients
 
     val enableClockGate         = l2param.enableClockGate
@@ -53,6 +61,7 @@ trait HasL2Param {
     val dataIdBits              = log2Ceil(nrTempDataEntry)
     val nrRequestBufferEntry    = l2param.nrRequestBufferEntry
     val nrSourceDTaskQueueEntry = l2param.nrSourceDTaskQueueEntry
+    val rdQueueEntries          = l2param.rdQueueEntries
 
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX
@@ -60,17 +69,17 @@ trait HasL2Param {
 
     val replacementPolicy = l2param.replacementPolicy
 
-    val aliasBitsOpt = Some(4)
+    val aliasBitsOpt = Some(2)
 
     // @formatter:off
     val tlBundleParams = TLBundleParameters(
         addressBits = addressBits,
         dataBits = beatBytes * 8,
-        sourceBits = 7,
+        sourceBits = 5, // TODO: Parameterize it
         sinkBits = 7,
         sizeBits = 3,
         echoFields = Nil,
-        requestFields = Nil,
+        requestFields = Seq(AliasField(2)),
         responseFields = Nil,
         hasBCE = true
     )
@@ -86,6 +95,33 @@ trait HasL2Param {
     // @formatter:on
 
     val bankBits = 0 // TODO: multi-bank
+
+    def widthCheck(in: UInt, width: Int) = {
+        assert(in.getWidth == width)
+    }
+
+    def getClientBitOH(sourceId: UInt): UInt = {
+        if (nrClients == 1) {
+            1.U(1.W)
+        } else {
+
+            /** 
+              * Now we suppose that we have 2 clients and each of them owns a unique id range(0 ~ 15, 16~31).
+              * So we can use the sourceId to determine which client the request belongs to.
+              * The MSB<5> is used to identify the clientBitOH because 0xF == 0b1111 = 15.
+              * TODO: Parameterize this
+              */
+            require(nrClients == 2)
+            // widthCheck(sourceId, 5)
+            assert(sourceId <= 31.U)
+
+            /** 
+              * "0b01" => L1 DCache Core0
+              * "0b10" => L1 DCache Core1
+              */
+            Mux(sourceId(4), "b10".U, "b01".U)
+        }
+    }
 
     def parseAddress(x: UInt): (UInt, UInt, UInt) = {
         val offset = x
@@ -108,11 +144,11 @@ trait HasL2Param {
         out <> arb.io.out
     }
 
-    def widthCheck(in: UInt, width: Int) = {
-        assert(in.getWidth == width)
-    }
-
     def needT(param: UInt): Bool = {
         param === NtoT || param === BtoT
+    }
+
+    def needDataSinkC(opcode: UInt): Bool = {
+        opcode === ReleaseData
     }
 }

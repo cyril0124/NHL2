@@ -16,8 +16,8 @@ object GenerateVerilog {
         (new ChiselStage).execute(
             Array("--target", "verilog") ++ args,
             Seq(
-                FirtoolOption("-O=release"),
-                // FirtoolOption("-O=debug"),
+                // FirtoolOption("-O=release"),
+                FirtoolOption("-O=debug"),
                 // FirtoolOption("-preserve-values=all"),
                 FirtoolOption("--disable-all-randomization"),
                 FirtoolOption("--disable-annotation-unknown"),
