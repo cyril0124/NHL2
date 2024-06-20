@@ -19,6 +19,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.chi <> DontCare
 
     val sinkA       = Module(new SinkA)
+    val sinkC       = Module(new SinkC)
     val sourceD     = Module(new SourceD)
     val reqArb      = Module(new RequestArbiter)
     val dir         = Module(new Directory)
@@ -34,9 +35,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io <> DontCare
 
     sinkA.io.a <> io.tl.a
+    sinkC.io.c <> io.tl.c
 
     reqArb.io              <> DontCare
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
+    reqArb.io.taskSinkC_s1 <> sinkC.io.task
+    reqArb.io.dataSinkC_s1 := sinkC.io.taskData
     reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
     reqArb.io.resetFinish  <> dir.io.resetFinish
     reqArb.io.dsWrCrd      := ds.io.dsWrite_s2.crdv
@@ -78,8 +82,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
 }
 
 object Slice extends App {
+    val CFG_CLIENT = sys.env.get("CFG_CLIENT").getOrElse("2")
+    println(s"CFG_CLIENT = $CFG_CLIENT")
+
     val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
+        case L2ParamKey =>
+            L2Param(
+                nrClients = CFG_CLIENT.toInt
+            )
         case DebugOptionsKey => DebugOptions()
     })
 

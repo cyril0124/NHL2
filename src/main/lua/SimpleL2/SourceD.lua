@@ -334,6 +334,24 @@ local test_grantdata_continuous_stall_2 = env.register_test_case "test_grantdata
     end
 }
 
+local test_grant_mix_grantdata = env.register_test_case "test_grant_mix_grantdata" {
+    function ()
+        env.dut_reset()
+
+        send_task(4, TLOpcodeD.Grant)
+        
+        env.posedge(math.random(1, 10))
+
+        send_task(5, TLOpcodeD.GrantData)
+        
+        env.posedge(math.random(5, 10))
+        
+        send_data("0x100", "0x200")
+
+        env.posedge(100)
+    end
+}
+
 
 verilua "appendTasks" {
     main_task = function ()
@@ -351,12 +369,10 @@ verilua "appendTasks" {
         test_grantdata_simple_stall()
         test_grantdata_continuous_stall_2()
 
+        test_grant_mix_grantdata()
+
         env.posedge(100)
 
         env.TEST_SUCCESS()
-    end,
-
-    check_task = function ()
-        
-    end,
+    end
 }

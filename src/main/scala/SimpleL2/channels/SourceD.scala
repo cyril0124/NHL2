@@ -131,13 +131,24 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         assert(deqNeedData)
         tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.data.bits.data)
     }.elsewhen(outState === Stall && isLastData) {
-        assert(deqNeedData)
+
+        /**
+          * If [[taskQueue]] has only one entry being used and the [[outState]] is [[Stall]] then the deq task should be GrantData/AccessAckData.
+          * Otherwise, the [[taskQueue]] should be more than one entry, the first one can be Grant while the others can be GrantData/AccessAckData.
+          */
+        assert(Mux(taskQueue.io.count === 1.U, deqNeedData, taskQueue.io.count >= 2.U))
+
         tmpDataBuffer     := Cat(io.data.bits.data, tmpDataBuffer(255, 0))
         tmpDataBufferFull := true.B
     }.elsewhen(outState === Stall && nextOutState === Stall && isNotLastData) {
-        assert(deqNeedData)
+
+        /**
+          * If [[taskQueue]] has only one entry being used and the [[outState]] is [[Stall]] then the deq task should be GrantData/AccessAckData.
+          * Otherwise, the [[taskQueue]] should be more than one entry, the first one can be Grant while the others can be GrantData/AccessAckData.
+          */
+        assert(Mux(taskQueue.io.count === 1.U, deqNeedData, taskQueue.io.count >= 2.U))
+
         tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.data.bits.data)
-        // tmpDataBufferFull := true.B
     }.elsewhen(outState === FetchData && io.tempDataResp.fire) {
         tmpDataBuffer     := io.tempDataResp.bits
         tmpDataBufferFull := true.B

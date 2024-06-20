@@ -104,7 +104,7 @@ local test_credit_transfer = env.register_test_case "test_credit_transfer" {
                 env.expect_happen_until(20, function (c)
                     return rd_crdv:get() == 1
                 end)
-                
+
                 env.posedge()
                 env.expect_happen_until(20, function (c)
                     return rd_crdv:get() == 1

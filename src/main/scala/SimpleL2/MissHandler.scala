@@ -53,7 +53,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         !mshrFull,
         Seq(
             io.mshrAlloc_s3.bits.isChannelA -> !(mshrCount >= (nrMSHR - 2).U),
-            io.mshrAlloc_s3.bits.isChannelC -> !(mshrCount >= (nrMSHR - 1).U),
+            io.mshrAlloc_s3.bits.isChannelC -> !(mshrCount >= (nrMSHR - 1).U), // TODO: Release is always hit, maybe we are not required to do that?
             io.mshrAlloc_s3.bits.isSnoop    -> !mshrFull
         )
     )

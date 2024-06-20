@@ -20,7 +20,7 @@ local mpReq_s2 = ([[
 local dirResp_s3 = ([[
     | valid
     | meta_state
-    | meta_clients
+    | meta_clientsOH
     | hit
 ]]):bundle {hier = cfg.top, prefix = "io_dirResp_s3_", is_decoupled = true}
 
@@ -81,7 +81,7 @@ local test_basic_acquire = env.register_test_case "test_basic_acquire" {
                 hit_alloc_mshr = function()
                     dirResp_s3.bits.hit:set(1)
                     dirResp_s3.bits.meta_state:set(MixedState.BBC)
-                    dirResp_s3.bits.meta_clients:set(("0b01"):number())
+                    dirResp_s3.bits.meta_clientsOH:set(("0b01"):number())
                 end,
 
                 miss = function()

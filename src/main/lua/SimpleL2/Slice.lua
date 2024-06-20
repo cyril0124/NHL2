@@ -21,8 +21,19 @@ local tl_a = ([[
     | size
     | source
     | address
+    | user_alias
 ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_a_"}
 
+local tl_c = ([[
+    | valid
+    | ready
+    | opcode
+    | param
+    | size
+    | source
+    | address
+    | data
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_c_"}
 
 local tl_d = ([[
     | valid
@@ -56,6 +67,17 @@ tl_a.acquire_perm = function (this, addr, param, source)
     this.bits.size:set(5) -- 2^5 == 32
 end
 
+tl_a.get = function (this, addr, source)
+    assert(addr ~= nil)
+
+    this.valid:set(1)
+    this.bits.opcode:set(TLOpcodeA.Get)
+    this.bits.address:set(addr, true)
+    this.bits.param:set(0)
+    this.bits.source:set(source or 0)
+    this.bits.size:set(5) -- 2^5 == 32
+end
+
 local mpReq_s2 = ([[
     | valid
     | opcode
@@ -73,13 +95,13 @@ local tempDS = slice.tempDS
 local sourceD = slice.sourceD
 local reqArb = slice.reqArb
 
-local function write_dir(set, wayOH, tag, state, clients)
+local function write_dir(set, wayOH, tag, state, clientsOH)
     assert(type(set) == "number")
     assert(type(wayOH) == "number")
     assert(type(tag) == "number")
     assert(type(state) == "number")
 
-    local clients = clients or ("0b01"):number()
+    local clientsOH = clientsOH or ("0b01"):number()
     
     env.negedge()
         dir:force_all()
@@ -88,7 +110,7 @@ local function write_dir(set, wayOH, tag, state, clients)
             dir.io_dirWrite_s3_bits_wayOH:set(wayOH)
             dir.io_dirWrite_s3_bits_meta_tag:set(tag)
             dir.io_dirWrite_s3_bits_meta_state:set(state)
-            dir.io_dirWrite_s3_bits_meta_clients:set(clients)
+            dir.io_dirWrite_s3_bits_meta_clientsOH:set(clientsOH)
     
     env.negedge()
         dir:release_all()
@@ -118,6 +140,25 @@ local function write_ds(set, way, data_str)
     env.posedge()
 end
 
+local function to_address(set, tag)
+    local offset_bits = 6
+    local set_bits = mp.task_s3_set.get_width()
+    local tag_bits = mp.task_s3_tag.get_width()
+
+    return utils.bitpat_to_hexstr({
+        {   -- set field
+            s = offset_bits,   
+            e = offset_bits + set_bits - 1,
+            v = 0x00
+        },
+        {   -- tag field
+            s = offset_bits + set_bits, 
+            e = offset_bits + set_bits + tag_bits - 1, 
+            v = 0x04
+        }
+    }, 64):number()
+end
+
 local function reqArb_release_data(set, tag, way, datas)
     assert(type(datas) == "table")
     assert(#datas == 2)
@@ -131,7 +172,7 @@ local function reqArb_release_data(set, tag, way, datas)
         reqArb[sinkC .. "bits_set"]:set(set)
         reqArb[sinkC .. "bits_tag"]:set(tag)
         reqArb[sinkC .. "bits_opcode"]:set(TLOpcodeC.ReleaseData)
-        reqArb[sinkC .. "bits_channel"]:set(tonumber("100", 2))
+        reqArb[sinkC .. "bits_channel"]:set(("0b100"):number())
         reqArb.io_dataSinkC_s1:set(datas[1])
 
     env.negedge()
@@ -149,7 +190,7 @@ local test_replay_valid = env.register_test_case "test_replay_valid" {
         ms.io_mshrAlloc_s3_ready:set_force(0)
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 8) -- set = 0x00, tag = 0x04
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 8) -- set = 0x00, tag = 0x04
         env.negedge()
             tl_a.valid:set(0)
         
@@ -178,7 +219,7 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
         env.dut_reset()
         resetFinish:posedge()
 
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TC)    
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
         write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
@@ -187,7 +228,7 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
         slice.io_tl_d_ready:set(1)
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 8)
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
         env.negedge()
             tl_a.valid:set(0)
 
@@ -229,7 +270,7 @@ local test_load_to_use_latency = env.register_test_case "test_load_to_use_latenc
         env.dut_reset()
         resetFinish:posedge()
 
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TC)    
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
         write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
@@ -241,7 +282,7 @@ local test_load_to_use_latency = env.register_test_case "test_load_to_use_latenc
         local end_cycle = 0
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 8)
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
         
         start_cycle = env.cycles()
 
@@ -263,7 +304,7 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
         env.dut_reset()
         resetFinish:posedge()
         
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TC)    
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
         write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
@@ -272,7 +313,7 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
         slice.io_tl_d_ready:set(0)
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 8)
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -312,22 +353,22 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
         env.dut_reset()
         resetFinish:posedge()
 
-        -- 0x100
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TC)    
+        -- 0x10000
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
         write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
 
-        -- 0x200
-        write_dir(0x00, tonumber("0100", 2), 0x08, MixedState.TC)    
+        -- 0x20000
+        write_dir(0x00, ("0b0100"):number(), 0x08, MixedState.TC)    
         write_ds(0x00, 0x02, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead1},
             {s = 256, e = 256 + 63, v = 0xbeef1}
         }, 512))
 
-        -- 0x300
-        write_dir(0x00, tonumber("1000", 2), 0x0C, MixedState.TC)    
+        -- 0x30000
+        write_dir(0x00, ("0b1000"):number(), 0x0C, MixedState.TC)    
         write_ds(0x00, 0x03, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead2},
             {s = 256, e = 256 + 63, v = 0xbeef2}
@@ -378,11 +419,11 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
         }
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 1)
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 1)
         env.negedge()
-            tl_a:acquire_block(0x200, TLParam.NtoT, 2)
+            tl_a:acquire_block(0x20000, TLParam.NtoT, 2)
         env.negedge()
-            tl_a:acquire_block(0x300, TLParam.NtoT, 3)
+            tl_a:acquire_block(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -402,22 +443,22 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
         env.dut_reset()
         resetFinish:posedge()
 
-        -- 0x100
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TC)    
+        -- 0x10000
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
         write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
 
-        -- 0x200
-        write_dir(0x00, tonumber("0100", 2), 0x08, MixedState.TC)    
+        -- 0x20000
+        write_dir(0x00, ("0b0100"):number(), 0x08, MixedState.TC)    
         write_ds(0x00, 0x02, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead1},
             {s = 256, e = 256 + 63, v = 0xbeef1}
         }, 512))
 
-        -- 0x300
-        write_dir(0x00, tonumber("1000", 2), 0x0C, MixedState.TC)    
+        -- 0x30000
+        write_dir(0x00, ("0b1000"):number(), 0x0C, MixedState.TC)    
         write_ds(0x00, 0x03, utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead2},
             {s = 256, e = 256 + 63, v = 0xbeef2}
@@ -450,11 +491,11 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
         }
 
         env.negedge()
-            tl_a:acquire_block(0x100, TLParam.NtoT, 1)
+            tl_a:acquire_block(0x10000, TLParam.NtoT, 1)
         env.negedge()
-            tl_a:acquire_perm(0x200, TLParam.NtoT, 2)
+            tl_a:acquire_perm(0x20000, TLParam.NtoT, 2)
         env.negedge()
-            tl_a:acquire_block(0x300, TLParam.NtoT, 3)
+            tl_a:acquire_block(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
 
@@ -466,14 +507,6 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
         end
 
         env.posedge(200)
-    end
-}
-
-local test_grantdata_until_full = env.register_test_case "test_grantdata_until_full" {
-    function ()
-        env.dut_reset()
-        resetFinish:posedge()
-
     end
 }
 
@@ -495,10 +528,10 @@ local test_release_write = env.register_test_case "test_release_write" {
             end
         }
 
-        -- 0x100
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TTC)
+        -- 0x10000
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
 
-        reqArb_release_data(0x00, 0x04, tonumber("100", 2), {0x100, 0x200})
+        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x100, 0x200})
 
         env.negedge(math.random(1, 10))
             dut:force_all()
@@ -513,7 +546,7 @@ local test_release_write = env.register_test_case "test_release_write" {
             dut:release_all()
         
         env.negedge()
-            reqArb_release_data(0x00, 0x04, tonumber("100", 2), {0x300, 0x400})
+            reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x300, 0x400})
         
         env.negedge(math.random(1, 10))
             dut:force_all()
@@ -544,11 +577,11 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
             end
         }
 
-        -- 0x100
-        write_dir(0x00, tonumber("0010", 2), 0x04, MixedState.TTC)
+        -- 0x10000
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
 
-        reqArb_release_data(0x00, 0x04, tonumber("100", 2), {0x100, 0x200})
-        reqArb_release_data(0x00, 0x04, tonumber("100", 2), {0x300, 0x400})
+        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x100, 0x200})
+        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x300, 0x400})
 
         env.negedge(math.random(1, 10))
             dut:force_all()
@@ -566,24 +599,336 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
     end
 }
 
+local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        local sync = ("sync"):ehdl()
+        
+        verilua "appendTasks" {
+            check_dir_write = function ()
+
+                -- [1] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_state:get(), MixedState.TTC)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_clientsOH:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_tag:get(), 4)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 0)
+
+                -- [2] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_state:get(), MixedState.TTC)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_clientsOH:get(), 2)
+                    expect.equal(mp.io_dirWrite_s3_bits_meta_tag:get(), 4)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 0)
+
+                -- [3] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+                -- [4] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    -- 
+                    -- CacheAlias will hit and with different alias field between 
+                    -- task_s3_alias and dirResp_s3_alias 
+                    -- 
+                    expect.equal(mp.io_dirResp_s3_bits_hit:get(), 1)
+                    expect.equal(mp.cacheAlias_s3:get(), 1)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+                -- [5] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirResp_s3_bits_hit:get(), 1)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+                -- [6] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirResp_s3_bits_hit:get(), 1)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+                    expect.equal(mp.needProbeOnHit_a_s3:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+                -- [7] stage 2 & stage 3
+                sync:wait()
+                env.posedge(2)
+                    expect.equal(mp.io_dirResp_s3_bits_hit:get(), 1)
+                    expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+                    expect.equal(mp.needProbeOnHit_a_s3:get(), 1)
+                    expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+            end
+        }
+
+        -- 
+        -- [1] test AcquirePerm.NtoT hit on Tip Clean
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
+        env.negedge()
+            tl_a:acquire_perm(to_address(0, 4), TLParam.NtoT, 1)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(math.random(5, 10))
+
+        -- 
+        -- [2] test AcquireBlock.NtoT hit on Tip Clean
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
+        env.negedge()
+            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28) -- source = 28 ==> clientsOH = "0b10"
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(math.random(5, 10))
+
+        -- 
+        -- [3] test Get hit on Tip Clean
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
+        env.negedge()
+            tl_a:get(to_address(0, 4), TLParam.NtoT, 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(20)
+
+        -- 
+        -- [4] test AcquireBlock hit on Tip Clean but met CacheAlias
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 2)
+        env.negedge()
+            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+            tl_a.bits.user_alias:set(1)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(20)
+
+        -- 
+        -- [5] test AcquireBlock.NtoT hit and need read downward
+        --
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.BC, 0)
+        env.negedge()
+            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(20)
+        
+        -- 
+        -- [6] test AcquireBlock.NtoT hit and need probe upward
+        --
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, 1)
+        env.negedge()
+            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(20)
+
+        -- 
+        -- [7] test Get hit and need probe upward
+        --
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, 1)
+        env.negedge()
+            tl_a:get(to_address(0, 4), 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        sync:send()
+
+        env.posedge(20)
+
+        env.posedge(100)
+    end
+}
+
+local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        -- 
+        -- [1] test AcquireBlock miss
+        -- 
+        env.negedge()
+            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        env.posedge(2)
+            expect.equal(mp.io_dirResp_s3_bits_hit:get(), 0)
+            expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+            expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+
+        -- 
+        -- [2] test Get miss
+        -- 
+        env.negedge()
+            tl_a:get(to_address(0, 4), 28)
+        env.negedge()
+            tl_a.valid:set(0)
+        env.posedge(2)
+            expect.equal(mp.io_dirResp_s3_bits_hit:get(), 0)
+            expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
+            expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+        
+        env.posedge(100)
+    end
+}
+
+local test_release_hit = env.register_test_case "test_release_hit" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        -- 
+        -- [1] test ReleaseData.TtoN hit
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x00, MixedState.TTC, 1)
+        env.negedge()
+            tl_c.bits.data:set_str("0xdead")
+            tl_c.bits.address:set_str("0x00")
+            tl_c.bits.opcode:set(TLOpcodeC.ReleaseData)
+            tl_c.bits.source:set(1)
+            tl_c.bits.param:set(TLParam.TtoN)
+            tl_c.bits.size:set(5)
+            tl_c.valid:set(1)
+        env.negedge()
+            tl_c.bits.data:set_str("0xbeef")
+        env.negedge()
+            tl_c.valid:set(0)
+        env.posedge()
+            mp.io_dirResp_s3_valid:expect(1)
+            mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
+            mp.io_dirResp_s3_bits_hit:expect(1)
+            mp.isRelease_s3:expect(1)
+            mp.valid_s3:expect(1)
+            mp.io_dirWrite_s3_valid:expect(1)
+            mp.io_dirWrite_s3_bits_meta_tag:expect(0)
+            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(0x00)
+            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TD)
+
+        -- 
+        -- [2] test Release.TtoB hit on TC
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x00, MixedState.TC, ("0b11"):number())
+        env.negedge()
+            tl_c.bits.address:set_str("0x00")
+            tl_c.bits.opcode:set(TLOpcodeC.Release)
+            tl_c.bits.source:set(1)
+            tl_c.bits.param:set(TLParam.TtoB)
+            tl_c.bits.size:set(5)
+            tl_c.valid:set(1)
+        env.negedge()
+            tl_c.valid:set(0)
+        env.negedge()
+        env.posedge()
+            mp.io_dirResp_s3_valid:expect(1)
+            mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x3)
+            mp.io_dirResp_s3_bits_hit:expect(1)
+            mp.isRelease_s3:expect(1)
+            mp.valid_s3:expect(1)
+            mp.io_dirWrite_s3_valid:expect(1)
+            mp.io_dirWrite_s3_bits_meta_tag:expect(0)
+            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(("0b11"):number())
+            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TC)
+
+        -- 
+        -- [3] test Release.TtoB hit on TTC
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x00, MixedState.TTC, ("0b01"):number())
+        env.negedge()
+            tl_c.bits.address:set_str("0x00")
+            tl_c.bits.opcode:set(TLOpcodeC.Release)
+            tl_c.bits.source:set(1)
+            tl_c.bits.param:set(TLParam.TtoB)
+            tl_c.bits.size:set(5)
+            tl_c.valid:set(1)
+        env.negedge()
+            tl_c.valid:set(0)
+        env.negedge()
+        env.posedge()
+            mp.io_dirResp_s3_valid:expect(1)
+            mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
+            mp.io_dirResp_s3_bits_hit:expect(1)
+            mp.isRelease_s3:expect(1)
+            mp.valid_s3:expect(1)
+            mp.io_dirWrite_s3_valid:expect(1)
+            mp.io_dirWrite_s3_bits_meta_tag:expect(0)
+            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(("0b01"):number())
+            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TC)
+
+        -- 
+        -- [4] test Release BtoN hit on BBC
+        -- 
+        write_dir(0x00, ("0b0010"):number(), 0x00, MixedState.BBC, ("0b01"):number())
+        env.negedge()
+            tl_c.bits.address:set_str("0x00")
+            tl_c.bits.opcode:set(TLOpcodeC.Release)
+            tl_c.bits.source:set(1)
+            tl_c.bits.param:set(TLParam.BtoN)
+            tl_c.bits.size:set(5)
+            tl_c.valid:set(1)
+        env.negedge()
+            tl_c.valid:set(0)
+        env.negedge()
+        env.posedge()
+            mp.io_dirResp_s3_valid:expect(1)
+            mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
+            mp.io_dirResp_s3_bits_hit:expect(1)
+            mp.isRelease_s3:expect(1)
+            mp.valid_s3:expect(1)
+            mp.io_dirWrite_s3_valid:expect(1)
+            mp.io_dirWrite_s3_bits_meta_tag:expect(0)
+            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(("0b00"):number())
+            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.BC)
+
+        env.posedge(100)
+    end
+}
+
 verilua "mainTask" { function ()
     sim.dump_wave()
 
-    mp.dirWen_s3:set_force(0)
+    -- 
+    -- normal test cases
+    -- 
+    -- mp.dirWen_s3:set_force(0)
+    --     reqArb.io_dsWrCrd:set_force(0)
+    --         test_replay_valid()
+    --         test_load_to_use()
+    --         test_load_to_use_latency()
+    --         test_load_to_use_stall()
+    --         test_grantdata_continuous_stall_3()
+    --         test_grantdata_mix_grant()
+    --     reqArb.io_dsWrCrd:set_release()
 
-    reqArb.io_dsWrCrd:set_force(0)
-    test_replay_valid()
-    test_load_to_use()
-    test_load_to_use_latency()
-    test_load_to_use_stall()
-    test_grantdata_continuous_stall_3()
-    test_grantdata_mix_grant()
-    reqArb.io_dsWrCrd:set_release()
+    --     test_release_write()
+    --     test_release_continuous_write()
+    -- mp.dirWen_s3:set_release()
 
-    test_release_write()
-    test_release_continuous_write()
-
-    mp.dirWen_s3:set_release()
+    -- 
+    -- coherency test cases
+    -- 
+    -- test_sinkA_hit()
+    -- test_sinkA_miss()
+    test_release_hit()
 
     env.posedge(100)
     env.TEST_SUCCESS()

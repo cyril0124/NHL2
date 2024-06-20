@@ -148,7 +148,7 @@ trait HasL2Param {
         param === NtoT || param === BtoT
     }
 
-    def needDataSinkC(opcode: UInt): Bool = {
+    def needData(opcode: UInt): Bool = {
         opcode === ReleaseData
     }
 }

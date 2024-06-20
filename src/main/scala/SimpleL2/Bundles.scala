@@ -215,10 +215,15 @@ object TLChannel {
     val ChannelC = "b100".U
 }
 
-// trait HasSetAndTag {
-//     val set = UInt(L2CacheConfig.setBits.W)
-//     val tag = UInt(L2CacheConfig.tagBits.W)
-// }
+object L2Channel extends ChiselEnum {
+    // ChiselEnum should be strictly increase!
+    val TXREQ    = Value("b000".U) // CHI output channels
+    val ChannelA = Value("b001".U) // TileLink output channels
+    val ChannelB = Value("b010".U) // TileLink output channels
+    val TXRSP    = Value("b011".U) // CHI output channels
+    val ChannelC = Value("b100".U) // TileLink output channels
+    val TXDAT    = Value("b101".U) // CHI output channels
+}
 
 class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
     val owner     = UInt(RequestOwner.width.W)
@@ -237,7 +242,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val owner      = UInt(RequestOwner.width.W)
     val opcode     = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
     val param      = UInt(3.W)
-    val channel    = UInt(TLChannel.width.W)
+    val channel    = L2Channel()
     val set        = UInt(setBits.W)
     val tag        = UInt(tagBits.W)
     val source     = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
@@ -247,13 +252,17 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val sink       = UInt((tlBundleParams.sinkBits).W)
     val wayOH      = UInt(ways.W)
     val aliasOpt   = aliasBitsOpt.map(width => UInt(width.W))
+    val isMshrTask = Bool()
 
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
-    def isSnoop = channel === TLChannel.ChannelB
-    def isChannelA = channel(0)
-    def isChannelB = channel(1)
-    def isChannelC = channel(2)
+    def isSnoop = channel === L2Channel.ChannelB && !isMshrTask
+    def isChannelA = channel.asUInt(0) && !isMshrTask
+    def isChannelB = channel.asUInt(1) && !isMshrTask
+    def isChannelC = channel.asUInt(2) && !isMshrTask
+    def isTXREQ = channel === L2Channel.TXREQ && !isMshrTask
+    def isTXRSP = channel === L2Channel.TXRSP && !isMshrTask
+    def isTXDAT = channel === L2Channel.TXDAT && !isMshrTask
 }
 
 object ReplayReson {

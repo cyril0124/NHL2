@@ -11,19 +11,19 @@ import SimpleL2.Bundles._
 
 class SinkA()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val a    = Flipped(Decoupled(new TLBundleA(tlBundleParams)))
-        val task = Decoupled(new TaskBundle)
+        val a    = Flipped(DecoupledIO(new TLBundleA(tlBundleParams)))
+        val task = DecoupledIO(new TaskBundle)
     })
 
     io      <> DontCare
     io.a    <> DontCare
     io.task <> DontCare
 
-    val (set, tag, offset) = parseAddress(io.a.bits.address)
+    val (tag, set, offset) = parseAddress(io.a.bits.address)
     assert(offset === 0.U)
 
     io.task.valid           := io.a.valid
-    io.task.bits.channel    := TLChannel.ChannelA
+    io.task.bits.channel    := L2Channel.ChannelA
     io.task.bits.opcode     := io.a.bits.opcode
     io.task.bits.param      := io.a.bits.param
     io.task.bits.source     := io.a.bits.source
@@ -31,6 +31,7 @@ class SinkA()(implicit p: Parameters) extends L2Module {
     io.task.bits.tmpDataID  := DontCare
     io.task.bits.set        := set
     io.task.bits.tag        := tag
+    io.task.bits.aliasOpt.map(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
 
     io.a.ready := io.task.ready
 

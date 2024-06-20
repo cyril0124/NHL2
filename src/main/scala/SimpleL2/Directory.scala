@@ -58,7 +58,24 @@ class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedS
     val fromPrefetch = Bool()
     val tag          = UInt(tagBits.W)
     val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
-    val clients      = UInt(nrClients.W)
+    val clientsOH    = UInt(nrClients.W)
+}
+
+object DirectoryMetaEntry {
+    def apply(fromPrefetch: Bool, state: UInt, tag: UInt, aliasOpt: Option[UInt], clientsOH: UInt)(implicit p: Parameters) = {
+        val meta = Wire(new DirectoryMetaEntry)
+        meta.fromPrefetch := fromPrefetch
+        meta.state        := state
+        meta.tag          := tag
+        meta.aliasOpt.map(_ := aliasOpt.getOrElse(0.U))
+        meta.clientsOH := clientsOH
+        meta
+    }
+
+    def apply()(implicit p: Parameters) = {
+        val meta = WireInit(0.U.asTypeOf(new DirectoryMetaEntry))
+        meta
+    }
 }
 
 class DirRead(implicit p: Parameters) extends L2Bundle {
@@ -93,7 +110,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
 
     io <> DontCare
 
-    val resetIdx = RegInit((sets - 1).U)
+    val resetIdx = RegInit(sets.U)
 
     val metaSRAM = Module(
         new SRAMTemplate(
@@ -142,7 +159,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
         sram.io.w(
             valid = !io.resetFinish,
             data = 0.U, // TODO: replacer SRAM init value
-            setIdx = resetIdx,
+            setIdx = resetIdx - 1.U,
             waymask = 1.U
         )
 
@@ -157,15 +174,17 @@ class Directory()(implicit p: Parameters) extends L2Module {
     metaSRAM.io.w(
         valid = !io.resetFinish || io.dirWrite_s3.fire,
         data = Mux(io.resetFinish, io.dirWrite_s3.bits.meta, 0.U.asTypeOf(new DirectoryMetaEntry)),
-        setIdx = Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx),
+        setIdx = Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U),
         waymask = Mux(io.resetFinish, io.dirWrite_s3.bits.wayOH, Fill(ways, "b1".U))
     )
     io.dirRead_s1.ready := io.resetFinish && metaSRAM.io.r.req.ready && !io.dirWrite_s3.fire
 
     val dirWriteReady_s3 = io.resetFinish && metaSRAM.io.w.req.ready
-    assert(!(io.dirWrite_s3.valid && !dirWriteReady_s3))
-    assert(!(io.dirWrite_s3.valid && !metaSRAM.io.w.req.ready), "dirWrite_s3 while metaSRAM is not ready!")
-    assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
+    when(io.resetFinish) {
+        assert(!(io.dirWrite_s3.valid && !dirWriteReady_s3))
+        assert(!(io.dirWrite_s3.valid && !metaSRAM.io.w.req.ready), "dirWrite_s3 while metaSRAM is not ready!")
+        assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
+    }
     when(!io.resetFinish) {
         assert(!io.dirRead_s1.fire)
         assert(!io.dirWrite_s3.fire)

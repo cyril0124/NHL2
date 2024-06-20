@@ -15,6 +15,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_probe      = Bool() // probe upwards
     val s_rprobe     = Bool() // probe upwards, cause by Replace
     val s_sprobe     = Bool() // probe upwards, cause by Snoop
+    val s_pprobe     = Bool()
     val s_grant      = Bool() // response grant upwards
     val s_snpresp    = Bool() // resposne SnpResp downwards
     val s_evict      = Bool() // evict downwards(for clean state)
@@ -24,11 +25,13 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_accessack  = Bool()
 
     // w: wait
-    val w_grantack = Bool()
-    val w_compdat  = Bool()
-    val w_probeack = Bool()
-    val w_dbidresp = Bool()
-    val w_comp     = Bool()
+    val w_grantack  = Bool()
+    val w_compdat   = Bool()
+    val w_probeack  = Bool()
+    val w_rprobeack = Bool()
+    val w_pprobeack = Bool()
+    val w_dbidresp  = Bool()
+    val w_comp      = Bool()
 }
 
 class MshrInfo()(implicit p: Parameters) extends L2Bundle {
