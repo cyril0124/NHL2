@@ -7,10 +7,10 @@ local missHandler = dut.u_MissHandler
 local alloc = ([[
     | valid
     | ready
-    | set
-    | tag
-    | source
-    | channel
+    | req_set
+    | req_tag
+    | req_source
+    | req_channel
 ]]):bdl {hier = cfg.top, prefix = "io_mshrAlloc_s3_"}
 
 local test_basic_alloc = env.register_test_case "test_basic_alloc" {
@@ -19,7 +19,7 @@ local test_basic_alloc = env.register_test_case "test_basic_alloc" {
 
         env.negedge()
             alloc.valid:set(1)
-            alloc.bits.set:set(0x12)
+            alloc.bits.req_set:set(0x12)
         env.negedge()
             alloc.valid:set(0)
 
@@ -40,8 +40,8 @@ local test_alloc_until_full_a = env.register_test_case "test_alloc_until_full_a"
             env.negedge()
                 expect.equal(alloc.ready:get(), 1)
                 alloc.valid:set(1)
-                alloc.bits.channel:set(tonumber("001", 2))
-                alloc.bits.set:set(i)
+                alloc.bits.req_channel:set(tonumber("001", 2))
+                alloc.bits.req_set:set(i)
                 print("successfully alloc", i)
         end
         env.negedge()
@@ -61,8 +61,8 @@ local test_alloc_until_full_c = env.register_test_case "test_alloc_until_full_c"
             env.negedge()
                 expect.equal(alloc.ready:get(), 1)
                 alloc.valid:set(1)
-                alloc.bits.channel:set(tonumber("100", 2))
-                alloc.bits.set:set(i)
+                alloc.bits.req_channel:set(tonumber("100", 2))
+                alloc.bits.req_set:set(i)
                 print("successfully alloc", i)
         end
         env.negedge()
@@ -82,8 +82,8 @@ local test_alloc_until_full_snoop = env.register_test_case "test_alloc_until_ful
             env.negedge()
                 expect.equal(alloc.ready:get(), 1)
                 alloc.valid:set(1)
-                alloc.bits.channel:set(tonumber("010", 2))
-                alloc.bits.set:set(i)
+                alloc.bits.req_channel:set(tonumber("010", 2))
+                alloc.bits.req_set:set(i)
                 print("successfully alloc", i)
         end
         env.negedge()

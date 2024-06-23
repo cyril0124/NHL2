@@ -83,8 +83,14 @@ local mpReq_s2 = ([[
     | opcode
     | set
     | tag
-]]):bundle {hier = cfg.top .. ".u_Slice.reqArb", is_decoupled = true, prefix = "io_mpReq_s2_"}
+]]):bundle {hier = cfg.top .. ".u_Slice.reqArb", is_decoupled = true, prefix = "io_mpReq_s2_", name = "mpReq_s2"}
 
+local txreq = ([[
+    | valid
+    | ready
+    | opcode
+    | addr
+]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "txreq"}
 
 local slice = dut.u_Slice
 local mp = slice.mainPipe
@@ -94,6 +100,11 @@ local ds = slice.ds
 local tempDS = slice.tempDS
 local sourceD = slice.sourceD
 local reqArb = slice.reqArb
+
+local mshrs = {}
+for i = 0, 15 do
+    mshrs[i] = ms["mshrs_" .. i]
+end
 
 local function write_dir(set, wayOH, tag, state, clientsOH)
     assert(type(set) == "number")
@@ -149,12 +160,12 @@ local function to_address(set, tag)
         {   -- set field
             s = offset_bits,   
             e = offset_bits + set_bits - 1,
-            v = 0x00
+            v = set
         },
         {   -- tag field
             s = offset_bits + set_bits, 
             e = offset_bits + set_bits + tag_bits - 1, 
-            v = 0x04
+            v = tag
         }
     }, 64):number()
 end
@@ -173,6 +184,7 @@ local function reqArb_release_data(set, tag, way, datas)
         reqArb[sinkC .. "bits_tag"]:set(tag)
         reqArb[sinkC .. "bits_opcode"]:set(TLOpcodeC.ReleaseData)
         reqArb[sinkC .. "bits_channel"]:set(("0b100"):number())
+        reqArb[sinkC .. "bits_param"]:set(TLParam.TtoN)
         reqArb.io_dataSinkC_s1:set(datas[1])
 
     env.negedge()
@@ -903,6 +915,44 @@ local test_release_hit = env.register_test_case "test_release_hit" {
     end
 }
 
+local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        dut.io_chi_txreq_ready:set(1)
+
+        env.negedge()
+            tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
+            tl_a.valid:set(1)
+        env.negedge()
+            tl_a.valid:set(0)
+        
+        env.posedge(2)
+            mp.io_dirResp_s3_bits_hit:expect(0)
+        
+        env.expect_happen_until(10, function ()
+            return txreq.valid:get() == 1 and txreq.ready:get() == 1
+        end)
+        txreq:dump()
+        mshrs[0].io_status_valid:expect(1)
+        mshrs[0].io_status_set:expect(0x10)
+        mshrs[0].io_status_tag:expect(0x20)
+        for i = 1, 15 do
+            mshrs[i].io_status_valid:expect(0)
+        end
+
+        
+
+        -- verilua "appendTasks" {
+        --     function ()
+        --     end
+        -- }
+
+        env.posedge(100)
+    end
+}
+
 verilua "mainTask" { function ()
     sim.dump_wave()
 
@@ -928,7 +978,8 @@ verilua "mainTask" { function ()
     -- 
     -- test_sinkA_hit()
     -- test_sinkA_miss()
-    test_release_hit()
+    -- test_release_hit()
+    test_sinkA_miss()
 
     env.posedge(100)
     env.TEST_SUCCESS()

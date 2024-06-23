@@ -19,18 +19,17 @@ local dirResp_s3 = ([[
     | hit
     | meta_state
     | meta_tag
-    | meta_alias
+    | meta_aliasOpt
     | meta_fromPrefetch
 ]]):bundle {hier = cfg.top, prefix = "io_dirResp_s3_", name = "dirResp_s3"}
 
 local dirWrite_s3 = ([[
     | valid
-    | ready
     | set
     | wayOH
     | meta_state
     | meta_tag
-    | meta_alias
+    | meta_aliasOpt
     | meta_fromPrefetch
 ]]):bundle {hier = cfg.top, prefix = "io_dirWrite_s3_", name = "dirWrite_s3"}
 
@@ -41,7 +40,7 @@ local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir"
 
         env.posedge()
             expect.equal(dirRead_s1.ready:get(), 0)
-            expect.equal(dirWrite_s3.ready:get(), 0)
+            -- expect.equal(dirWrite_s3.ready:get(), 0)
             expect.equal(dirResp_s3.valid:get(), 0)
 
         resetFinish:posedge()
@@ -50,7 +49,7 @@ local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir"
 
         env.negedge()
             expect.equal(dirRead_s1.ready:get(), 1)
-            expect.equal(dirWrite_s3.ready:get(), 1)
+            -- expect.equal(dirWrite_s3.ready:get(), 1)
             expect.equal(dirResp_s3.valid:get(), 0)
 
         env.negedge()
@@ -59,7 +58,7 @@ local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir"
             dirWrite_s3.bits.set:set(0x11)
             dirWrite_s3.bits.meta_tag:set(0x22)
             dirWrite_s3.bits.meta_state:set(MixedState.TC)
-            dirWrite_s3.bits.meta_alias:set(1)
+            dirWrite_s3.bits.meta_aliasOpt:set(1)
             dirWrite_s3.bits.meta_fromPrefetch:set(1)
             print(dut.cycles(), dirWrite_s3:dump_str())
 
@@ -87,7 +86,7 @@ local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir"
             expect.equal(dirResp_s3.bits.hit:get(), 1)
             expect.equal(dirResp_s3.bits.meta_state:get(), MixedState.TC)
             expect.equal(dirResp_s3.bits.meta_tag:get(), 0x22)
-            expect.equal(dirResp_s3.bits.meta_alias:get(), 1)
+            expect.equal(dirResp_s3.bits.meta_aliasOpt:get(), 1)
             expect.equal(dirResp_s3.bits.meta_fromPrefetch:get(), 1)
             print(dut.cycles(), dirResp_s3:dump_str())
 

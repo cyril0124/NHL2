@@ -2,9 +2,7 @@ local utils = require "LuaUtils"
 local env = require "env"
 
 local assert = assert
-local TEST_SUCCESS = env.TEST_SUCCESS
-local posedge = env.posedge
-local dut_reset = env.dut_reset
+local expect = env.expect
 
 local bridge = dut.u_CHIBridge
 local txState = bridge.txState
@@ -14,7 +12,7 @@ local txactiveack = dut.io_out_chiLinkCtrl_txactiveack
 local rxactivereq = dut.io_out_chiLinkCtrl_rxactivereq
 local rxactiveack = dut.io_out_chiLinkCtrl_rxactiveack
 
-assert(cfg.simulator == "vcs")
+assert(cfg.simulator == "vcs" or cfg.simulator == "iverilog")
 
 local LinkState = utils.enum_define {
     STOP = 0,
@@ -23,114 +21,121 @@ local LinkState = utils.enum_define {
     DEACTIVATE = 1,
 }
 
-local function test_txstate_switch()
-    dut_reset()
-    posedge(2)
+local test_txstate_switch = env.register_test_case "test_txstate_switch" {
+    function ()
+        env.dut_reset()
 
-    assert(txState() == LinkState.ACITVATE) -- ACITVATE
-    posedge()
+        env.posedge(3)
+            txState:expect(LinkState.ACITVATE)
+        
+        env.posedge()
+            txState:expect(LinkState.ACITVATE)
+            txactiveack:set(1)
+        
+        env.posedge(2)
+            txState:expect(LinkState.RUN)
+            txactivereq:expect(1)
+        
+        env.posedge()
 
-    txactiveack:set(1)
-    posedge()
+        env.posedge(10, function (cycle)
+            txState:expect(LinkState.RUN) -- keep RUN
+            txactivereq:expect(1)
+            txactiveack:expect(1)
+        end)
 
-    assert(txState() == LinkState.RUN) -- RUN
-    assert(txactivereq() == 1)
-    posedge()
+        -- txactivereq:set_force(0)
+        -- txactiveack:set_force(0)
 
-    posedge(10, function (cycle)
-        assert(txState() == LinkState.RUN) -- keep RUN
-        assert(txactivereq() == 1)
-        assert(txactiveack() == 1)
-    end)
+        -- TODO: STOP
+    end
+}
 
-    -- txactivereq:set_force(0)
-    -- txactiveack:set_force(0)
+local test_txstate_after_reset = env.register_test_case "test_txstate_after_reset" {
+    function ()
+        env.dut_reset()
+        txactiveack:set(0)
+        env.posedge(3)
 
-    -- TODO: STOP
-end
+        txState:expect(LinkState.ACITVATE)
 
-local function test_txstate_after_reset()
-    dut_reset()
-    txactiveack:set(0)
-    posedge(2)
+        env.posedge(10, function (cycle)
+            txState:expect(LinkState.ACITVATE) -- keep ACITVATE
+        end)
+    end
+}
 
-    assert(txState() == LinkState.ACITVATE) -- ACITVATE
+local test_rxstate_switch = env.register_test_case "test_rxstate_switch" {
+    function ()
+        env.dut_reset()
+            rxState:expect(LinkState.STOP)
+        
+        env.posedge(3)
+            rxState:expect(LinkState.STOP)
+            rxactiveack:expect(0)
+            rxactivereq:expect(0)
 
-    posedge(10, function (cycle)
-        assert(txState() == LinkState.ACITVATE, txState()) -- keep ACITVATE
-    end)
-end
+            rxactivereq:set(1)
+        
+        env.posedge(2)
+            rxState:expect(LinkState.ACITVATE)
+        
+        env.posedge()
+            rxState:expect(LinkState.RUN)
 
-local function test_rxstate_switch()
-    dut_reset()
-    assert(rxState() == LinkState.STOP)
-    posedge(2)
+        env.posedge(10, function (cycle)
+            assert(rxState() == LinkState.RUN) -- keep RUN
+            assert(rxactiveack() == 1)
+            assert(rxactivereq() == 1)
+        end)
 
-    assert(rxState() == LinkState.STOP)
-    assert(rxactiveack() == 0)
-    assert(rxactivereq() == 0)
+        rxactivereq:set(0)
 
-    rxactivereq:set(1)
-    posedge()
+        env.posedge(2)
+            rxState:expect(LinkState.DEACTIVATE)
+        
+        env.posedge()
+            rxState:expect(LinkState.STOP)
 
-    assert(rxState() == LinkState.ACITVATE)
-    posedge()
+        env.posedge(10, function (cycle)
+            rxState:expect(LinkState.STOP) -- keep STOP
+            rxactiveack:expect(0)
+            rxactivereq:expect(0)
+        end)
 
-    assert(rxState() == LinkState.RUN)
+        
+        -- 
+        -- restart
+        -- 
+        rxactivereq:set(1)
+        env.posedge(2)
+            rxState:expect(LinkState.ACITVATE)
 
-    posedge(10, function (cycle)
-        assert(rxState() == LinkState.RUN) -- keep RUN
-        assert(rxactiveack() == 1)
-        assert(rxactivereq() == 1)
-    end)
+        env.posedge()
+            rxState:expect(LinkState.RUN)
 
-    rxactivereq:set(0)
-    posedge()
+        env.posedge(10, function (cycle)
+            rxState:expect(LinkState.RUN) -- keep RUN
+            rxactiveack:expect(1)
+            rxactivereq:expect(1)
+        end)
 
-    assert(rxState() == LinkState.DEACTIVATE)
-    posedge()
+        rxactivereq:set(0)
 
-    assert(rxState() == LinkState.STOP)
-
-    posedge(10, function (cycle)
-        assert(rxState() == LinkState.STOP) -- keep STOP
-        assert(rxactiveack() == 0)
-        assert(rxactivereq() == 0)
-    end)
-
-    
-    -- 
-    -- restart
-    -- 
-    rxactivereq:set(1)
-    posedge()
-
-    assert(rxState() == LinkState.ACITVATE)
-    posedge()
-
-    assert(rxState() == LinkState.RUN)
-
-    posedge(10, function (cycle)
-        assert(rxState() == LinkState.RUN) -- keep RUN
-        assert(rxactiveack() == 1)
-        assert(rxactivereq() == 1)
-    end)
-
-    rxactivereq:set(0)
-
-    posedge(10)
-    assert(rxState() == LinkState.STOP)
-end
+        env.posedge(10)
+            rxState:expect(LinkState.STOP)
+    end
+}
 
 verilua "mainTask" { function ()
     sim.dump_wave()
-    dut_reset()
+    env.dut_reset()
 
     test_txstate_switch()
     test_txstate_after_reset()
     test_rxstate_switch()
 
-    TEST_SUCCESS()
+    env.TEST_SUCCESS()
 end }
 
 

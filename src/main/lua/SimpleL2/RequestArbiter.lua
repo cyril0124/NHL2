@@ -73,7 +73,7 @@ local normal_tasks = {
 local clock = dut.clock:chdl()
 local reqArb = dut.u_RequestArbiter
 
-local dataSinkC_s1 = reqArb.io_dataSinkC_s1
+local dataSinkC_s1 = dut.io_dataSinkC_s1
 
 local function set_ready()
     dut.io_dirRead_s1_ready = 1
@@ -109,7 +109,7 @@ local test_basic_mshr_req = env.register_test_case "test_basic_mshr_req" {
         for i, task in ipairs(normal_tasks) do
             assert(task.ready:get() == 0)
         end
-    
+
         env.posedge()
             expect.equal(taskMSHR_s0.ready:get(), 0)
     
@@ -239,6 +239,7 @@ local test_basic_release_data = env.register_test_case "test_release_data" {
             expect.equal(taskSinkC_s1.ready:get(), 1)
             expect.equal(reqArb.dsWrCnt:get(), 1)
             dataSinkC_s1:set_str("0x5678") -- beat 1
+        env.posedge()
             expect.equal(reqArb.io_dsWrite_s2_valid:get(), 1)
             expect.equal(reqArb.io_dsWrite_s2_bits_set:get(), 0x1)
             expect.equal(reqArb.io_dsWrite_s2_bits_data:get_str(HexStr), "00000000000000000000000000000000000000000000000000000000000056780000000000000000000000000000000000000000000000000000000000001234")
