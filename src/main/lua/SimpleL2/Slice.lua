@@ -92,6 +92,14 @@ local txreq = ([[
     | addr
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "txreq"}
 
+local chi_rxdat = ([[
+    | valid
+    | ready
+    | dataID
+    | data
+    | txnID
+]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxdat_", name = "rxdat"}
+
 local slice = dut.u_Slice
 local mp = slice.mainPipe
 local ms = slice.missHandler
@@ -100,6 +108,7 @@ local ds = slice.ds
 local tempDS = slice.tempDS
 local sourceD = slice.sourceD
 local reqArb = slice.reqArb
+local rxdat = slice.rxdat
 
 local mshrs = {}
 for i = 0, 15 do
@@ -121,6 +130,7 @@ local function write_dir(set, wayOH, tag, state, clientsOH)
             dir.io_dirWrite_s3_bits_wayOH:set(wayOH)
             dir.io_dirWrite_s3_bits_meta_tag:set(tag)
             dir.io_dirWrite_s3_bits_meta_state:set(state)
+            dir.io_dirWrite_s3_bits_meta_aliasOpt:set(0)
             dir.io_dirWrite_s3_bits_meta_clientsOH:set(clientsOH)
     
     env.negedge()
@@ -360,7 +370,7 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
     end
 }
 
-local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata_continuous_stall_2" {
+local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata_continuous_stall_3" {
     function ()
         env.dut_reset()
         resetFinish:posedge()
@@ -921,6 +931,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         resetFinish:posedge()
 
         dut.io_chi_txreq_ready:set(1)
+        dut.io_chi_txrsp_ready:set(1)
 
         env.negedge()
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
@@ -938,47 +949,66 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         mshrs[0].io_status_valid:expect(1)
         mshrs[0].io_status_set:expect(0x10)
         mshrs[0].io_status_tag:expect(0x20)
+        mshrs[0].state_w_compdat:expect(0)
         for i = 1, 15 do
             mshrs[i].io_status_valid:expect(0)
         end
 
-        
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(10, function()
+                    return mshrs[0].state_w_compdat:get() == 1
+                end)
 
-        -- verilua "appendTasks" {
-        --     function ()
-        --     end
-        -- }
+                env.expect_happen_until(10, function()
+                    return mshrs[0].state_s_compack:get() == 1
+                end)
+            end
+        }
+
+        -- send data to l2cache
+        env.negedge()
+            chi_rxdat.bits.txnID:set(0)
+            chi_rxdat.bits.dataID:set(0)
+            chi_rxdat.bits.data:set_str("0xdead")
+            chi_rxdat.valid:set(1)
+        env.negedge()
+            chi_rxdat.bits.data:set_str("0xbeef")
+            chi_rxdat.bits.dataID:set(2) -- last data beat
+        env.negedge()
+            chi_rxdat.valid:set(0)
 
         env.posedge(100)
     end
 }
 
 verilua "mainTask" { function ()
-    sim.dump_wave()
+    -- sim.dump_wave()
 
     -- 
     -- normal test cases
     -- 
-    -- mp.dirWen_s3:set_force(0)
-    --     reqArb.io_dsWrCrd:set_force(0)
-    --         test_replay_valid()
-    --         test_load_to_use()
-    --         test_load_to_use_latency()
-    --         test_load_to_use_stall()
-    --         test_grantdata_continuous_stall_3()
-    --         test_grantdata_mix_grant()
-    --     reqArb.io_dsWrCrd:set_release()
+    mp.dirWen_s3:set_force(0)
+        reqArb.io_dsWrCrd:set_force(0)
+            test_replay_valid()
+            test_load_to_use()
+            test_load_to_use_latency()
+            test_load_to_use_stall()
+            test_grantdata_continuous_stall_3()
+            test_grantdata_mix_grant()
+        reqArb.io_dsWrCrd:set_release()
 
-    --     test_release_write()
-    --     test_release_continuous_write()
-    -- mp.dirWen_s3:set_release()
+        test_release_write()
+        test_release_continuous_write()
+    mp.dirWen_s3:set_release()
 
     -- 
     -- coherency test cases
     -- 
-    -- test_sinkA_hit()
-    -- test_sinkA_miss()
-    -- test_release_hit()
+    test_sinkA_hit()
+    test_release_hit()
+
+    sim.dump_wave()
     test_sinkA_miss()
 
     env.posedge(100)

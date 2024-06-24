@@ -95,6 +95,31 @@ local test_alloc_until_full_snoop = env.register_test_case "test_alloc_until_ful
     end
 }
 
+local test_resp_rxdat = env.register_test_case "test_resp_rxdat" {
+    function ()
+        env.dut_reset()
+
+        env.negedge()
+            missHandler.io_mshrFreeOH_s3:expect(1)
+            alloc.valid:set(1)
+            alloc.bits.req_channel:set(tonumber("010", 2))
+            alloc.bits.req_set:set(0)
+        env.negedge()
+            missHandler.io_mshrFreeOH_s3:expect(2)
+
+        env.negedge()
+            dut.io_rxdat_valid:set(1)
+            dut.io_rxdat_bits_txnID:set(0)
+        env.negedge()
+            missHandler.mshrs_0.io_resps_rxdat_valid:expect(1)
+            dut.io_rxdat_valid:set(0)
+        env.negedge()
+            missHandler.mshrs_0.io_resps_rxdat_valid:expect(0)
+
+        env.posedge(100)
+    end
+}
+
 
 verilua "appendTasks" {
     main_task = function()
@@ -104,6 +129,7 @@ verilua "appendTasks" {
         test_alloc_until_full_a()
         test_alloc_until_full_c()
         test_alloc_until_full_snoop()
+        test_resp_rxdat()
         
         env.posedge(100)
         env.TEST_SUCCESS()

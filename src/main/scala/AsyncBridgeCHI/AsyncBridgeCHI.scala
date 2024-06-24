@@ -2,6 +2,8 @@ package AsyncBridgeCHI
 
 import chisel3._
 import chisel3.util._
+import SimpleL2._
+import SimpleL2.chi._
 import SimpleL2.Bundles._
 import Utils.GenerateVerilog
 import freechips.rocketchip.util._

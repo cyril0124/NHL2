@@ -25,7 +25,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val task         = Flipped(DecoupledIO(new TaskBundle))
         val data         = Flipped(DecoupledIO(new DataSelectorOut))
         val dataId       = Input(UInt(dataIdBits.W))
-        val tempDataRead = Flipped(new TempDataRead)
+        val tempDataRead = DecoupledIO(new TempDataRead)
         val tempDataResp = Flipped(ValidIO(UInt(dataBits.W)))
     })
 
@@ -173,9 +173,12 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     assert(!(dataIdQueue.io.enq.valid && !dataIdQueue.io.enq.ready))
 
     /** read data back from [[TempDataBuffer]] if [[tmpDataBuffer]] is empty */
-    io.tempDataRead.valid  := (outState === FetchData && nextOutState =/= Stall || outState === Stall && nextOutState === FetchData) && isLastOutData && dataIdQueue.io.count =/= 0.U
-    io.tempDataRead.dataId := dataIdQueue.io.deq.bits
-    assert(!(io.tempDataRead.fire && RegNext(io.tempDataRead.fire) && io.tempDataRead.dataId === RegNext(io.tempDataRead.dataId)), "try to read the same dataId twice!")
+    io.tempDataRead.valid       := (outState === FetchData && nextOutState =/= Stall || outState === Stall && nextOutState === FetchData) && isLastOutData && dataIdQueue.io.count =/= 0.U
+    io.tempDataRead.bits.dataId := dataIdQueue.io.deq.bits
+    assert(
+        !(io.tempDataRead.fire && RegNext(io.tempDataRead.fire) && io.tempDataRead.bits.dataId === RegNext(io.tempDataRead.bits.dataId)),
+        "try to read the same dataId twice!"
+    )
     assert(!(io.tempDataRead.fire && !dataIdQueue.io.deq.fire || !io.tempDataRead.fire && dataIdQueue.io.deq.fire))
 
     /** send out tilelink transaction */

@@ -28,7 +28,7 @@ local tempDataRead = ([[
     | valid
     | ready
     | dataId
-]]):bundle {hier = cfg.top, prefix = "io_tempDataRead_", name = "data", is_decoupled = false}
+]]):bundle {hier = cfg.top, prefix = "io_tempDataRead_", name = "data", is_decoupled = true}
 
 
 
@@ -297,7 +297,7 @@ local test_grantdata_continuous_stall_2 = env.register_test_case "test_grantdata
 
             check_task_1 = function ()
                 env.expect_happen_until(400, function (c)
-                    return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.dataId:get() == 2
+                    return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.bits.dataId:get() == 2
                 end)
             end
         }

@@ -6,9 +6,7 @@ import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
-import SimpleL2.Bundles.{CHIBundleDownstream, CHILinkCtrlIO}
-import SimpleL2.Bundles.CHIBundleDecoupled
-import chisel3.experimental.Param
+import SimpleL2.chi._
 
 object LinkState {
     def STOP = "b00".U(2.W)

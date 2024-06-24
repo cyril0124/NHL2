@@ -3,9 +3,8 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, BankedSRAM}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import dataclass.data
@@ -60,13 +59,14 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val dsReady_s3 = WireInit(true.B)
 
     val dataSRAM = Module(
-        new SRAMTemplate(
-            new DSEntry,
-            sets * ways,
-            1,
+        new BankedSRAM(
+            gen = new DSEntry,
+            sets = sets * ways,
+            ways = 1,
+            nrBank = dataSramBank,
             singlePort = true,
-            hasMbist = false /* TODO */,
-            hasShareBus = false /* TDOO */,
+            // hasMbist = false /* TODO */,
+            // hasShareBus = false /* TDOO */,
             hasClkGate = enableClockGate
             // parentName = parentName + "ds_" /* TODO */
         )

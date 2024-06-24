@@ -16,7 +16,7 @@ init:
 	git submodule update --init --recursive 
 
 reformat:
-	mill -i __.reformat
+	mill -i NHL2.reformat
 
 compile:
 	mill -i $(module).compile

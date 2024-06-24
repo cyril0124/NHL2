@@ -10,21 +10,30 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, MultiDontTouch}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
+import SimpleL2.chi._
 
 // TODO: Replay
 
 class MainPipe()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val mpReq_s2      = Flipped(ValidIO(new TaskBundle))
+
+        /** Stage 2 */
+        val mpReq_s2 = Flipped(ValidIO(new TaskBundle))
+
+        /** Stage 3 */
         val dirResp_s3    = Flipped(ValidIO(new DirResp))
         val dirWrite_s3   = ValidIO(new DirWrite)
         val mshrAlloc_s3  = DecoupledIO(new MshrAllocBundle)
         val mshrFreeOH_s3 = Input(UInt(nrMSHR.W))
         val dsRead_s3     = ValidIO(new DSRead)
         val dsWrWay_s3    = Output(UInt(wayBits.W))
-        val replay_s4     = DecoupledIO(new TaskBundle)
-        val sourceD_s4    = DecoupledIO(new TaskBundle)
-        val dsRdCrd       = Input(Bool())
+        val txrsp_s3      = DecoupledIO(new CHIBundleREQ(chiBundleParams)) // Snp* hit and does not require data will be sent to txrsp_s3
+
+        /** Stage 4 */
+        val replay_s4  = DecoupledIO(new TaskBundle)
+        val sourceD_s4 = DecoupledIO(new TaskBundle)
+
+        val dsRdCrd = Input(Bool()) // TODO:
     })
 
     io <> DontCare
@@ -59,7 +68,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     io.dsWrWay_s3 := OHToUInt(dirResp_s3.wayOH)
 
-    val reqNeedT_s3           = needT(task_s3.param)
+    val reqNeedT_s3           = needT(task_s3.opcode, task_s3.param)
     val reqClientOH_s3        = getClientBitOH(task_s3.source)
     val isReqClient_s3        = (reqClientOH_s3 & meta_s3.clientsOH).orR // whether the request is from the same client
     val sinkRespPromoteT_a_s3 = hit_s3 && meta_s3.isTip
@@ -146,7 +155,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         // TODO: Release should always hit
     }
 
-    io.mshrAlloc_s3.valid := mshrAlloc_s3
+    io.mshrAlloc_s3.valid         := mshrAlloc_s3
+    io.mshrAlloc_s3.bits.dirResp  := dirResp_s3
+    io.mshrAlloc_s3.bits.fsmState := mshrAllocStates
+    io.mshrAlloc_s3.bits.req      := task_s3
 
     /** coherency check */
     when(valid_s3) {

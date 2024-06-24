@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.ReplacementPolicy
 import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, BankedSRAM}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
@@ -113,13 +113,14 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val resetIdx = RegInit(sets.U)
 
     val metaSRAM = Module(
-        new SRAMTemplate(
-            new DirectoryMetaEntry,
-            sets,
-            ways,
+        new BankedSRAM(
+            gen = new DirectoryMetaEntry,
+            sets = sets,
+            ways = ways,
+            nrBank = metaSramBank,
             singlePort = true,
-            hasMbist = false /* TODO */,
-            hasShareBus = false /* TDOO */,
+            // hasMbist = false /* TODO */,
+            // hasShareBus = false /* TDOO */,
             hasClkGate = enableClockGate
             // parentName = parentName + "meta_" /* TODO */
         )
@@ -131,14 +132,15 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val replacerSRAM_opt = if (replacementPolicy == "random") None else {
             Some(
                 Module(
-                    new SRAMTemplate(
-                        UInt(repl.nBits.W),
-                        sets,
-                        1,
+                    new BankedSRAM( // TODO:
+                        gen = UInt(repl.nBits.W),
+                        sets = sets,
+                        ways = 1,
+                        nrBank = metaSramBank,
                         singlePort = true,
                         shouldReset = true,
-                        hasMbist = false /* TODO */,
-                        hasShareBus = false /* TODO */,
+                        // hasMbist = false /* TODO */,
+                        // hasShareBus = false /* TODO */,
                         hasClkGate = enableClockGate
                         // parentName = parentName + "repl_"
                     )

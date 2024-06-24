@@ -8,7 +8,8 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey}
 import org.chipsalliance.cde.config._
 import xs.utils.FastArbiter
-import SimpleL2.Bundles.CHIBundleParameters
+import SimpleL2._
+import SimpleL2.chi._
 
 case object AliasKey extends ControlKey[UInt]("alias")
 case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), _ := 0.U(width.W))
@@ -25,6 +26,8 @@ case class L2Param(
     nrClients: Int = 2, // number of L1 DCache
     enableClockGate: Boolean = true,
     nrMSHR: Int = 16,
+    dataSramBank: Int = 4,
+    metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
     nrRequestBufferEntry: Int = 4,
     nrSourceDTaskQueueEntry: Int = 4,
@@ -44,17 +47,20 @@ trait HasL2Param {
     val p: Parameters
     val l2param = p(L2ParamKey)
 
-    val ways        = l2param.ways
-    val sets        = l2param.sets
-    val wayBits     = log2Ceil(l2param.sets)
-    val addressBits = l2param.addressBits
-    val dataBits    = l2param.dataBits
-    val beatBytes   = l2param.beatBytes
-    val setBits     = log2Ceil(l2param.sets)
-    val offsetBits  = log2Ceil(l2param.blockBytes)
-    val tagBits     = l2param.addressBits - setBits - offsetBits
-    val nrMSHR      = l2param.nrMSHR
-    val nrClients   = l2param.nrClients
+    val ways         = l2param.ways
+    val sets         = l2param.sets
+    val wayBits      = log2Ceil(l2param.sets)
+    val addressBits  = l2param.addressBits
+    val dataBits     = l2param.dataBits
+    val beatBytes    = l2param.beatBytes
+    val setBits      = log2Ceil(l2param.sets)
+    val offsetBits   = log2Ceil(l2param.blockBytes)
+    val blockBytes   = l2param.blockBytes
+    val tagBits      = l2param.addressBits - setBits - offsetBits
+    val nrMSHR       = l2param.nrMSHR
+    val nrClients    = l2param.nrClients
+    val dataSramBank = l2param.dataSramBank
+    val metaSramBank = l2param.metaSramBank
 
     val enableClockGate         = l2param.enableClockGate
     val nrTempDataEntry         = l2param.nrTempDataEntry
@@ -144,8 +150,16 @@ trait HasL2Param {
         out <> arb.io.out
     }
 
-    def needT(param: UInt): Bool = {
-        param === NtoT || param === BtoT
+    def needT(opcode: UInt, param: UInt): Bool = {
+        !opcode(2) ||
+        (opcode === TLMessages.Hint && param === TLHints.PREFETCH_WRITE) ||
+        ((opcode === TLMessages.AcquireBlock || opcode === TLMessages.AcquirePerm) && param =/= TLPermissions.NtoB)
+    }
+
+    def needB(opcode: UInt, param: UInt): Bool = {
+        opcode === TLMessages.Get ||
+        opcode === TLMessages.AcquireBlock && param === TLPermissions.NtoB ||
+        opcode === TLMessages.Hint && param === TLHints.PREFETCH_READ
     }
 
     def needData(opcode: UInt): Bool = {

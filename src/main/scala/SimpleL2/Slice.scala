@@ -8,6 +8,7 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
+import SimpleL2.chi._
 
 class Slice()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
@@ -18,9 +19,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.tl  <> DontCare
     io.chi <> DontCare
 
-    val sinkA       = Module(new SinkA)
-    val sinkC       = Module(new SinkC)
-    val sourceD     = Module(new SourceD)
+    /** Channels */
+    val sinkA   = Module(new SinkA)
+    val sinkC   = Module(new SinkC)
+    val sourceD = Module(new SourceD)
+    val txreq   = Module(new TXREQ)
+    val rxdat   = Module(new RXDAT)
+
+    /** Other modules */
     val reqArb      = Module(new RequestArbiter)
     val dir         = Module(new Directory)
     val ds          = Module(new DataStorage)
@@ -29,6 +35,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val missHandler = Module(new MissHandler)
 
     sourceD.io     <> DontCare
+    txreq.io       <> DontCare
     dir.io         <> DontCare
     ds.io          <> DontCare
     tempDS.io      <> DontCare
@@ -38,6 +45,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.c <> io.tl.c
 
     reqArb.io              <> DontCare
+    reqArb.io.taskMSHR_s0  <> missHandler.io.mpTask
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
     reqArb.io.taskSinkC_s1 <> sinkC.io.task
     reqArb.io.dataSinkC_s1 := sinkC.io.taskData
@@ -61,19 +69,28 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 
-    sourceD.io.task         <> mainPipe.io.sourceD_s4
-    sourceD.io.data         <> tempDS.io.toSourceD.dataOut
-    sourceD.io.dataId       := tempDS.io.toSourceD.dataId
-    sourceD.io.tempDataRead <> tempDS.io.fromSourceD.read
-    sourceD.io.tempDataResp <> tempDS.io.fromSourceD.resp
-
     tempDS.io.fromDS.dsResp_ds4 := ds.io.toTempDS.dsResp_ds4
     tempDS.io.fromDS.dsDest_ds4 := ds.io.toTempDS.dsDest_ds4
     // ds.io.toTXDAT.dsResp_ds4
 
     missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
+    missHandler.io.rxdat        <> rxdat.io.resp
 
-    io.tl.d <> sourceD.io.d
+    txreq.io.mshrTask <> missHandler.io.txreq
+
+    sourceD.io.task         <> mainPipe.io.sourceD_s4
+    sourceD.io.data         <> tempDS.io.toSourceD.dataOut
+    sourceD.io.dataId       := tempDS.io.freeDataId
+    sourceD.io.tempDataRead <> tempDS.io.fromSourceD.read
+    sourceD.io.tempDataResp <> tempDS.io.fromSourceD.resp
+
+    rxdat.io.toTempDS.dataId       := tempDS.io.freeDataId
+    rxdat.io.toTempDS.dataWr.ready := true.B // TODO:
+
+    io.tl.d      <> sourceD.io.d
+    io.chi.txreq <> txreq.io.out
+    io.chi.txrsp <> missHandler.io.txrsp
+    io.chi.rxdat <> rxdat.io.rxdat
 
     dontTouch(reqArb.io)
     dontTouch(mainPipe.io)
