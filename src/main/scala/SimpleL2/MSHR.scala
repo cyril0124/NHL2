@@ -12,6 +12,9 @@ import Utils.GenerateVerilog
 import SimpleL2.chi._
 import SimpleL2.chi.CHIOpcodeREQ._
 import SimpleL2.chi.CHIOpcodeRSP._
+import SimpleL2.chi.CHIOpcodeDAT._
+import SimpleL2.chi.CHIOpcodeSNP._
+import SimpleL2.TLState._
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
@@ -52,20 +55,24 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val wayOH = UInt(ways.W)
 }
 
+class MshrTasks()(implicit p: Parameters) extends L2Bundle {
+    val mpTask = DecoupledIO(new TaskBundle)
+    val txreq  = DecoupledIO(new CHIBundleREQ(chiBundleParams))
+    val txrsp  = DecoupledIO(new CHIBundleRSP(chiBundleParams))
+}
+
+class MshrResps()(implicit p: Parameters) extends L2Bundle {
+    val rxdat = Flipped(ValidIO(new CHIRespBundle(chiBundleParams)))
+    val sinke = Flipped(ValidIO(new TLRespBundle(tlBundleParams)))
+}
+
 class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val alloc_s3 = Flipped(ValidIO(new MshrAllocBundle))
         val status   = Output(new MshrStatus)
 
-        val tasks = new Bundle {
-            val mpTask = DecoupledIO(new TaskBundle)
-            val txreq  = DecoupledIO(new CHIBundleREQ(chiBundleParams))
-            val txrsp  = DecoupledIO(new CHIBundleRSP(chiBundleParams))
-        }
-
-        val resps = new Bundle {
-            val rxdat = Flipped(ValidIO(new CHIRespBundle(chiBundleParams)))
-        }
+        val tasks = new MshrTasks
+        val resps = new MshrResps
     })
 
     io <> DontCare
@@ -74,12 +81,29 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val req     = Reg(new TaskBundle)
     val dirResp = Reg(new DirResp)
 
+    val dbid     = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
+    val dataId   = RegInit(0.U(dataIdBits.W))
+    val gotDirty = RegInit(false.B)
+    val gotT     = RegInit(false.B)
+
+    val meta = dirResp.meta
+    // val metaNoClients   = !meta.clientsOH.orR
+    val reqClientOH     = getClientBitOH(req.source)
+    val reqIsGet        = req.opcode === Get
+    val reqIsAcquire    = req.opcode === AcquireBlock || req.opcode === AcquirePerm
+    val reqIsPrefetch   = req.opcode === Hint
+    val reqNeedT        = needT(req.opcode, req.param)
+    val reqNeedB        = needB(req.opcode, req.param)
+    val promoteT_normal = dirResp.hit && !meta.isShared && meta.isTip
+    val promoteT_l3     = !dirResp.hit && gotT
+    val promoteT_alias  = dirResp.hit && req.isAliasTask && (meta.isTrunk || meta.isTip)
+    val reqPromoteT     = (reqIsAcquire || reqIsGet || reqIsPrefetch) && (promoteT_normal || promoteT_l3 || promoteT_alias) // TODO:
+
     val initState = Wire(new MshrFsmState())
     initState.elements.foreach(_._2 := true.B)
     val state = RegInit(new MshrFsmState, initState)
 
-    val dbid   = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
-    val dataId = RegInit(0.U(dataIdBits.W))
+    val newMetaEntry = WireInit(0.U.asTypeOf(new DirectoryMetaEntryNoTag))
 
     when(io.alloc_s3.fire) {
         valid   := true.B
@@ -88,10 +112,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         state   := io.alloc_s3.bits.fsmState
     }
 
-    val reqNeedT = needT(req.opcode, req.param)
-    val reqNeedB = needB(req.opcode, req.param)
-
-    /** deal with txreq */
+    /** Deal with txreq */
     io.tasks.txreq.valid := !state.s_read
     io.tasks.txreq.bits.opcode := ParallelPriorityMux(
         Seq(
@@ -110,7 +131,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         state.s_read := true.B
     }
 
-    /** deal with txrsp */
+    /** Deal with txrsp */
     io.tasks.txrsp.valid         := !state.s_compack && state.w_compdat
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.txnID    := id.U
@@ -124,16 +145,101 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         state.s_compack := true.B
     }
 
+    /** Deal with mpTask */
     // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
-    // io.tasks.mpTask.valid :=
-    // io.tasks.mpTask.bits.opcode :=
+    val needRefillData   = (req.opcode === AcquireBlock || req.opcode === Get) && !dirResp.hit
+    val needProbeAckData = false.B // TODO:
+    val needTempDsData   = needRefillData || needProbeAckData
+    io.tasks.mpTask.valid             := valid && !state.s_grant && !state.w_grantack && state.s_read && state.w_compdat && state.s_compack
+    io.tasks.mpTask.bits.isMshrTask   := true.B
+    io.tasks.mpTask.bits.opcode       := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
+    io.tasks.mpTask.bits.sink         := id.U
+    io.tasks.mpTask.bits.source       := req.source
+    io.tasks.mpTask.bits.set          := req.set
+    io.tasks.mpTask.bits.tag          := req.tag
+    io.tasks.mpTask.bits.wayOH        := dirResp.wayOH                                                                                                                                    // TODO:
+    io.tasks.mpTask.bits.readTempDs   := needTempDsData
+    io.tasks.mpTask.bits.tempDsDest   := DataDestination.SourceD | DataDestination.DataStorage
+    io.tasks.mpTask.bits.dataId       := dataId
+    io.tasks.mpTask.bits.updateDir    := req.opcode =/= Get
+    io.tasks.mpTask.bits.newMetaEntry := newMetaEntry
 
-    /** receive responses */
-    when(io.resps.rxdat.fire && io.resps.rxdat.bits.last) {
-        state.w_compdat := true.B
-        dataId          := io.resps.rxdat.bits.dataId
+    newMetaEntry := DirectoryMetaEntryNoTag(
+        dirty = false.B, // TODO:
+        state = Mux(
+            reqIsGet,
+            Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
+            Mux(reqPromoteT || reqNeedT, Mux(reqIsPrefetch, TIP, TRUNK), BRANCH)
+        ),
+        alias = Mux(
+            reqIsGet || reqIsPrefetch,
+            meta.aliasOpt.getOrElse(0.U),
+            req.aliasOpt.getOrElse(0.U)
+        ), // TODO:
+        clientsOH = Mux(
+            reqIsPrefetch,
+            Mux(dirResp.hit, meta.clientsOH, Fill(nrClients, false.B)),
+            MuxCase(
+                Fill(nrClients, false.B),
+                Seq(
+                    (reqIsGet)                 -> meta.clientsOH,
+                    (reqIsPrefetch)            -> meta.clientsOH,
+                    (reqIsAcquire && reqNeedT) -> reqClientOH,
+                    (reqIsAcquire && reqNeedB) -> (meta.clientsOH | reqClientOH)
+                )
+            )
+        ),                           // TODO:
+        fromPrefetch = reqIsPrefetch // TODO:
+    )
+
+    when(io.tasks.mpTask.fire) {
+        state.s_grant := true.B
     }
-    assert(!(io.resps.rxdat.fire && state.w_compdat), "mshr is not watting for rxdat")
+
+    /**
+      * Receive RXDAT responses
+      * 1) CompData
+      * 2) Comp
+      */
+    val rxdat = io.resps.rxdat
+    when(rxdat.fire && rxdat.bits.last) {
+        state.w_compdat := true.B
+        dataId          := rxdat.bits.dataId
+
+        when(rxdat.bits.chiOpcode === CompData) {
+            gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
+            gotDirty := gotDirty || rxdat.bits.resp === Resp.UC_PD
+        }
+    }
+    assert(!(io.resps.rxdat.fire && state.w_compdat), s"mshr_${id} is not watting for rxdat")
+
+    val sinke = io.resps.sinke
+    when(sinke.fire) {
+
+        /**
+          * A MSHR will wait GrantAck for Acquire requests.
+          * If mshr not receive a GrantAck, it cannot be freed. 
+          * This allow external logic to check the mshr to determine whether the Grant/GrantData has been received by upstream cache.
+          * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
+          */
+        state.w_grantack := true.B
+    }
+    assert(!(io.resps.sinke.fire && state.w_grantack), s"mshr_${id} is not watting for sinke")
+
+    // val rxrsp = io.resps.rxrsp
+
+    /**
+      * Check if there has any request in the MSHR waiting for responses or waiting for sehcduling tasks.
+      * If there is, then we cannot free the MSHR.
+      */
+    val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
+    val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
+    val willFree   = noWait && noSchedule
+    when(valid && willFree) {
+        valid := false.B
+    }
+
+    // TODO: deadlock check
 
     io.status.valid := valid
     io.status.set   := req.set

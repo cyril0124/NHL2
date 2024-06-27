@@ -18,8 +18,8 @@ class DataSelectorOut()(implicit p: Parameters) extends L2Bundle {
 
 class DataSelector()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val dsResp_ds4 = Flipped(ValidIO(new DSResp))
-        val dataOut    = ValidIO(new DataSelectorOut)
+        val dataIn  = Flipped(ValidIO(UInt(dataBits.W)))
+        val dataOut = ValidIO(new DataSelectorOut)
     })
 
     val beatCnt = RegInit(0.U(1.W))
@@ -27,8 +27,8 @@ class DataSelector()(implicit p: Parameters) extends L2Module {
         beatCnt := beatCnt + 1.U
     }
 
-    val dsRespValid  = io.dsResp_ds4.valid || RegNext(io.dsResp_ds4.valid, false.B)
-    val selectedData = Mux(beatCnt === 1.U, io.dsResp_ds4.bits.data(511, 256), io.dsResp_ds4.bits.data(255, 0))
+    val dsRespValid  = io.dataIn.valid || RegNext(io.dataIn.valid, false.B)
+    val selectedData = Mux(beatCnt === 1.U, io.dataIn.bits(511, 256), io.dataIn.bits(255, 0))
     dontTouch(selectedData)
 
     io.dataOut.bits.last := beatCnt === 1.U

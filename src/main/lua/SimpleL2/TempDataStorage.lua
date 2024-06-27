@@ -26,7 +26,14 @@ local sourceD_read = ([[
 local sourceD_resp = ([[
     | valid
     | bits => data
-]]):abdl{hier = cfg.top, prefix = "io_fromSourceD_resp_", is_decoupled = false}
+]]):abdl{hier = cfg.top, prefix = "io_fromSourceD_resp_", is_decoupled = false, name = "sourceD_resp"}
+
+local reqArb_read = ([[
+    | valid
+    | ready
+    | dataId
+    | dest
+]]):bundle{hier = cfg.top, prefix = "io_fromReqArb_read_", is_decoupled = true}
 
 local flush = ([[
     | valid
@@ -38,12 +45,12 @@ local dataOut = ([[
     | ready
     | data
     | last
-]]):bundle{hier = cfg.top, prefix = "io_toSourceD_dataOut_"}
+]]):bundle{hier = cfg.top, prefix = "io_toSourceD_beatData_"}
 
 
-local TXDAT = 0
-local SourceD = 1
-local TempDataStorage = 2
+local TXDAT = ("0b0001"):number()
+local SourceD = ("0b0010"):number()
+local TempDataStorage = ("0b0100"):number()
 local nrTempDataEntry = 16
 
 local test_basic_read_write = env.register_test_case "test_basic_read_write" {
@@ -60,7 +67,7 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
         env.negedge()
             ds_write.valid:set(0)
 
-        expect.equal(tempDS.wen:get(), 1)
+        expect.equal(tempDS.wen_ts1:get(), 1)
         expect.equal(tempDS.freeDataIdx:get(), 1)
 
         -- 
@@ -100,7 +107,7 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
             ds_write.valid:set(0)
             
 
-        expect.equal(tempDS.wen:get(), 1)
+        expect.equal(tempDS.wen_ts1:get(), 1)
         expect.equal(tempDS.freeDataIdx:get(), 2)
 
         -- 
@@ -151,7 +158,7 @@ local test_flush_entry = env.register_test_case "test_flush_entry" {
         env.negedge()
             ds_write.valid:set(0)
 
-        expect.equal(tempDS.wen:get(), 1)
+        expect.equal(tempDS.wen_ts1:get(), 1)
         expect.equal(tempDS.freeDataIdx:get(), 1)
 
         -- 
@@ -217,7 +224,7 @@ local test_read_and_flush_entry = env.register_test_case "test_read_and_flush_en
         env.negedge()
             ds_write.valid:set(0)
 
-        expect.equal(tempDS.wen:get(), 1)
+        expect.equal(tempDS.wen_ts1:get(), 1)
         expect.equal(tempDS.freeDataIdx:get(), 1)
 
         sync_ehdl:send()
@@ -255,7 +262,7 @@ local test_bypass_sourceD = env.register_test_case "test_bypass_sourceD" {
     function ()
         env.dut_reset()
 
-        dut.io_toSourceD_dataOut_ready:set(1)
+        dut.io_toSourceD_beatData_ready:set(1)
 
         verilua "appendTasks" {
             function ()
@@ -279,7 +286,7 @@ local test_bypass_sourceD = env.register_test_case "test_bypass_sourceD" {
         env.negedge()
             ds_write.valid:set(0)
 
-        expect.equal(tempDS.wen:get(), 0)
+        expect.equal(tempDS.wen_ts1:get(), 0)
 
         env.posedge(100)
     end
@@ -289,7 +296,7 @@ local test_write_on_stalled_sourceD = env.register_test_case "test_write_on_stal
     function ()
         env.dut_reset()
 
-        dut.io_toSourceD_dataOut_ready:set(0)
+        dut.io_toSourceD_beatData_ready:set(0)
 
         -- 
         -- ds_write data
@@ -301,7 +308,7 @@ local test_write_on_stalled_sourceD = env.register_test_case "test_write_on_stal
         env.negedge()
             ds_write.valid:set(0)
         
-        expect.equal(tempDS.wen:get(), 1)
+        expect.equal(tempDS.wen_ts1:get(), 1)
         expect.equal(tempDS.freeDataIdx:get(), 0)
 
         -- 
@@ -325,6 +332,7 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
         env.dut_reset()
 
         local function read_back_and_check(dataId, data_str)
+            dut.io_toSourceD_beatData_ready:set(1)
             env.negedge()
                 sourceD_read.valid:set(1)
                 sourceD_read.bits.dataId:set(dataId)
@@ -361,10 +369,12 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
         --
         env.negedge()
             rxdat_write.ready:expect(1)
-            rxdat_write.valid:set(1)
             rxdat_write.bits.dataId:set(1)
             rxdat_write.bits.beatData:set_str("0xdddd")
             rxdat_write.bits.wrMaskOH:set(0x01)
+            rxdat_write.valid:set(1)
+            -- tempDS.valids_1_0:expect(0)
+            -- tempDS.valids_1_1:expect(0)
         env.negedge()
             tempDS.valids_0_0:expect(1)
             rxdat_write.valid:set(0)
@@ -382,6 +392,40 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
     end
 }
 
+-- local test_reqArb_read = env.register_test_case "test_reqArb_read" {
+--     function ()
+--         env.dut_reset()
+
+--         local function write_entry(data_id, data_str_1, data_str_2)
+--             env.negedge()
+--                 rxdat_write.ready:expect(1)
+--                 rxdat_write.valid:set(1)
+--                 rxdat_write.bits.dataId:set(data_id)
+--                 rxdat_write.bits.beatData:set_str(data_str_1)
+--                 rxdat_write.bits.wrMaskOH:set(0x01)
+--             env.negedge()
+--                 rxdat_write.bits.beatData:set_str(data_str_2)
+--                 rxdat_write.bits.wrMaskOH:set(0x02)
+--                 tempDS.valids_0_0:expect(1)
+--             env.negedge()
+--                 rxdat_write.valid:set(0)
+--         end
+
+--         write_entry(0, "0xdead", "0xbeef")
+
+--         env.negedge()
+--             reqArb_read.ready:expect(1)
+--             reqArb_read.bits.dataId:set(0)
+--             reqArb_read.valid:set(1)
+--         env.negedge()
+--             reqArb_read.valid:set(0)
+
+--         env.negedge()
+
+--         env.posedge(100)
+--     end
+-- }
+
 verilua "appendTasks" {
     maint_task = function ()
         sim.dump_wave()
@@ -395,6 +439,8 @@ verilua "appendTasks" {
         test_write_on_stalled_sourceD()
 
         test_rxdat_write()
+
+        -- test_reqArb_read()
 
         env.posedge(100)
         env.TEST_SUCCESS()

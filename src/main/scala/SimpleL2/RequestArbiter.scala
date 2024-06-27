@@ -29,10 +29,13 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         /** Read directory */
         val dirRead_s1 = Decoupled(new DirRead)
 
+        /** Read [[TempDataStorage]] */
+        val tempDsRead_s1 = DecoupledIO(new TempDataRead)
+
         /** Send task to [[MainPipe]] */
         val mpReq_s2 = ValidIO(new TaskBundle)
 
-        /** interact with [[DataStorage]] (for ReleaseData) */
+        /** Interact with [[DataStorage]] (for ReleaseData) */
         val dsWrCrd    = Input(Bool())
         val dsWrite_s2 = ValidIO(new DSWrite)
 
@@ -110,11 +113,15 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     )
     dontTouch(task_s1)
 
-    fire_s1 := io.dirRead_s1.ready && (valid_s1 || chosenTask_s1.fire)
+    fire_s1 := io.dirRead_s1.ready && (valid_s1 && Mux(task_s1.readTempDs, io.tempDsRead_s1.ready, true.B) || chosenTask_s1.fire)
 
     io.dirRead_s1.valid    := Mux(io.taskSinkC_s1.fire, beatCntSinkC_s1 === 0.U /* first sinkC beat */, fire_s1)
     io.dirRead_s1.bits.set := task_s1.set
     io.dirRead_s1.bits.tag := task_s1.tag
+
+    io.tempDsRead_s1.valid       := isTaskMSHR_s1 && task_s1.readTempDs && valid_s1
+    io.tempDsRead_s1.bits.dataId := task_s1.dataId
+    io.tempDsRead_s1.bits.dest   := task_s1.tempDsDest
 
     val fireVec_s1 = VecInit(Seq(io.taskSinkA_s1.fire, io.taskSinkC_s1.fire, io.taskSnoop_s1.fire, io.taskCMO_s1.fire, io.taskReplay_s1.fire))
     dontTouch(fireVec_s1)

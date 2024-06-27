@@ -8,7 +8,6 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
-import freechips.rocketchip.util.SeqBoolBitwiseOps
 
 class TempDataWrite()(implicit p: Parameters) extends L2Bundle {
     val beatData = UInt((beatBytes * 8).W)
@@ -18,6 +17,7 @@ class TempDataWrite()(implicit p: Parameters) extends L2Bundle {
 
 class TempDataRead()(implicit p: Parameters) extends L2Bundle {
     val dataId = Input(UInt(dataIdBits.W))
+    val dest   = UInt(DataDestination.width.W) // Data output destination
 }
 
 class TempDataEntry()(implicit p: Parameters) extends L2Bundle {
@@ -36,13 +36,17 @@ object TempDataEntry {
 
 class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
+        val fromReqArb = new Bundle {
+            val read = Flipped(DecoupledIO(new TempDataRead))
+        }
+
         val fromDS = new Bundle {
             val dsResp_ds4 = Flipped(ValidIO(new DSResp))
-            val dsDest_ds4 = Input(DataDestination())
+            val dsDest_ds4 = Input(UInt(DataDestination.width.W))
         }
 
         val fromSourceD = new Bundle {
-            val read = Flipped(DecoupledIO(new TempDataRead()))
+            val read = Flipped(DecoupledIO(new TempDataRead))
             val resp = ValidIO(UInt(dataBits.W))
         }
 
@@ -51,7 +55,12 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val toSourceD = new Bundle {
-            val dataOut = DecoupledIO(new DataSelectorOut)
+            val beatData = DecoupledIO(new DataSelectorOut)
+            val dataId   = Output(UInt(dataIdBits.W))
+        }
+
+        val toDS = new Bundle {
+            // val write = ValidIO
         }
 
         val freeDataId = Output(UInt(dataIdBits.W))
@@ -60,40 +69,52 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
 
     io <> DontCare
 
-    val valids      = RegInit(VecInit(Seq.fill(nrTempDataEntry)(VecInit(Seq.fill(2)(false.B)))))
-    val freeDataIdx = PriorityEncoder(~VecInit(valids.map(_.orR)).asUInt)
-    val full        = valids.map(_.orR).andR
+    val valids      = RegInit(VecInit(Seq.fill(nrTempDataEntry)(VecInit(Seq.fill(nrBeat)(false.B)))))
+    val freeDataIdx = PriorityEncoder(~VecInit(valids.map(_.asUInt.orR)).asUInt)
+    val full        = Cat(valids.map(_.asUInt.orR)).andR
     dontTouch(valids)
 
-    /** split 512-bits of data into two 256-bits data */
-    val dataSel = Module(new DataSelector)
-    dataSel.io.dsResp_ds4      := io.fromDS.dsResp_ds4
-    io.toSourceD.dataOut.valid := dataSel.io.dataOut.valid
-    io.toSourceD.dataOut.bits  := dataSel.io.dataOut.bits
-    io.freeDataId              := freeDataIdx
+    // -----------------------------------------------------------------------------------------
+    // Stage 1
+    // -----------------------------------------------------------------------------------------
+    val isSourceD_ts1      = io.fromDS.dsDest_ds4 === DataDestination.SourceD
+    val stallOnSourceD_ts1 = isSourceD_ts1 && !io.toSourceD.beatData.ready && io.toSourceD.beatData.valid && io.toSourceD.beatData.bits.last
+    val wen_sourceD_ts1    = stallOnSourceD_ts1
+    val wen_ds_ts1         = io.fromDS.dsDest_ds4 === DataDestination.TempDataStorage && io.fromDS.dsResp_ds4.valid
+    val wen_rxdat_ts1      = io.fromRXDAT.write.fire
+    val ren_sourceD_ts1    = io.fromSourceD.read.fire
+    val ren_reqArb_ts1     = io.fromReqArb.read.fire
+    assert(
+        PopCount(Seq(wen_sourceD_ts1, wen_ds_ts1, wen_rxdat_ts1)) <= 1.U,
+        "wen_sourceD_ts1: %d, wen_ds_ts1: %d, wen_rxdat_ts1: %d",
+        wen_sourceD_ts1,
+        wen_ds_ts1,
+        wen_rxdat_ts1
+    )
+    assert(PopCount(Seq(ren_sourceD_ts1, ren_reqArb_ts1)) <= 1.U, "ren_sourceD_ts1: %d, ren_reqArb_ts1: %d", ren_sourceD_ts1, ren_reqArb_ts1)
+    assert(!(wen_sourceD_ts1 && wen_ds_ts1), "wen_sourceD_ts1: %d, wen_ds_ts1: %d", wen_sourceD_ts1, wen_ds_ts1)
 
-    val isSourceD      = io.fromDS.dsDest_ds4 === DataDestination.SourceD
-    val stallOnSourceD = isSourceD && !io.toSourceD.dataOut.ready && io.toSourceD.dataOut.valid && io.toSourceD.dataOut.bits.last
-    val wen_sourceD    = stallOnSourceD
-    val wen_ds         = io.fromDS.dsDest_ds4 === DataDestination.TempDataStorage && io.fromDS.dsResp_ds4.valid
-    val wen_rxdat      = io.fromRXDAT.write.fire
+    val wen_ts1      = wen_sourceD_ts1 || wen_ds_ts1 || wen_rxdat_ts1
+    val wrIdx_ts1    = Mux(io.fromRXDAT.write.valid, io.fromRXDAT.write.bits.dataId, freeDataIdx)                                           // Mux(io.fromDS.dsResp_ds4.valid, freeDataIdx, DontCare) // TODO:
+    val wrMaskOH_ts1 = MuxCase("b00".U, Seq((wen_sourceD_ts1 || wen_ds_ts1) -> "b11".U, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.wrMaskOH)) // TODO:
+    val ren_ts1      = ren_sourceD_ts1 || ren_reqArb_ts1
+    val rdIdx_ts1    = Mux(ren_sourceD_ts1, io.fromSourceD.read.bits.dataId, io.fromReqArb.read.bits.dataId)
+    val rdDest_ts1   = Mux(ren_reqArb_ts1, io.fromReqArb.read.bits.dest, DataDestination.SourceD)
+    val rdDataId_ts1 = Mux(ren_reqArb_ts1, io.fromReqArb.read.bits.dataId, io.fromSourceD.read.bits.dataId)
+    assert(!(wen_ts1 && !wrMaskOH_ts1.orR), "wen_ts1 but wrMaskOH_ts1 is 0b00")
+    assert(!(wen_ts1 && ren_ts1), "try to write and read at the same time")
 
-    val wen      = wen_sourceD || wen_ds || wen_rxdat
-    val wrIdx    = Mux(io.fromRXDAT.write.valid, io.fromRXDAT.write.bits.dataId, freeDataIdx)                               // Mux(io.fromDS.dsResp_ds4.valid, freeDataIdx, DontCare) // TODO:
-    val wrMaskOH = MuxCase("b00".U, Seq((wen_sourceD || wen_ds) -> "b11".U, wen_rxdat -> io.fromRXDAT.write.bits.wrMaskOH)) // TODO:
-    val ren      = io.fromSourceD.read.fire
-    val rdIdx    = io.fromSourceD.read.bits.dataId
-    assert(!(wen && !wrMaskOH.orR), "wen but wrMaskOH is 0b00")
-
-    val wrData = MuxCase(
+    val wrData_ts1 = MuxCase(
         0.U,
         Seq(
-            (wen_sourceD || wen_ds) -> io.fromDS.dsResp_ds4.bits.data
+            (wen_sourceD_ts1 || wen_ds_ts1) -> io.fromDS.dsResp_ds4.bits.data
         )
     )
 
-    /** write data into internal SRAM */
-    val nrBeat = 2
+    /** 
+     * Write beatData(32-bytes) into internal SRAM.
+     * A complete cacheline data(64-bytes) should be splited into multiple banks due to physical constrain or chip technolocy limitation(for more information, please refer to the SRAM data book provided by specific foundary).
+     */
     val tempDataSRAMs = Seq.fill(nrBeat) {
         Module(
             new SRAMTemplate(
@@ -109,54 +130,84 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         )
     }
 
-    val rdDatas = WireInit(0.U.asTypeOf(Vec(2, new TempDataEntry)))
+    val rdDatas_ts2 = WireInit(0.U.asTypeOf(Vec(nrBeat, new TempDataEntry)))
     tempDataSRAMs.zipWithIndex.foreach { case (sram, i) =>
-        if (i != 0) require(i == 1)
+        if (i != 0) require(i == 1) // TODO: for now, we did not support multiple beats except 2, should be fixed in the future
 
         sram.io.w(
-            valid = wen && wrMaskOH(i),
+            valid = wen_ts1 && wrMaskOH_ts1(i),
             data = MuxCase(
                 0.U.asTypeOf(new TempDataEntry),
                 Seq(
-                    (wen_sourceD || wen_ds) -> TempDataEntry(wrData(255 * i + 255, i * 256)),
-                    wen_rxdat               -> TempDataEntry(io.fromRXDAT.write.bits.beatData)
+                    (wen_sourceD_ts1 || wen_ds_ts1) -> TempDataEntry(wrData_ts1(255 * i + 255, i * 256)),
+                    wen_rxdat_ts1                   -> TempDataEntry(io.fromRXDAT.write.bits.beatData)
                 )
             ),
-            setIdx = Mux(wen_rxdat, if (i == 0) wrIdx else RegEnable(wrIdx, false.B, wen), wrIdx),
+            setIdx = Mux(wen_rxdat_ts1, if (i == 0) wrIdx_ts1 else RegEnable(wrIdx_ts1, false.B, wen_ts1), wrIdx_ts1),
             waymask = 1.U
         )
         assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "tempDataSRAM should always be ready for write")
-        assert(!(wen && wrMaskOH(i) && valids(sram.io.w.req.bits.setIdx)(i)), s"try to write to an valid entry setIdx => %d i => ${i}", sram.io.w.req.bits.setIdx)
+        assert(!(wen_ts1 && wrMaskOH_ts1(i) && valids(sram.io.w.req.bits.setIdx)(i)), s"try to write to an valid entry setIdx => %d i => ${i}", sram.io.w.req.bits.setIdx)
 
-        when(sram.io.w.req.fire && wrMaskOH(i)) {
+        when(sram.io.w.req.fire && wrMaskOH_ts1(i)) {
             if (i == 0) {
                 valids(freeDataIdx)(i) := true.B
             } else {
-                valids(RegEnable(freeDataIdx, 0.U, wen))(i) := true.B
+                valids(RegEnable(freeDataIdx, 0.U, wen_ts1))(i) := true.B
             }
         }
 
-        sram.io.r.req.valid       := ren
-        sram.io.r.req.bits.setIdx := rdIdx
-        rdDatas(i)                := sram.io.r.resp.data(0)
+        sram.io.r.req.valid       := ren_ts1
+        sram.io.r.req.bits.setIdx := rdIdx_ts1
+        rdDatas_ts2(i)            := sram.io.r.resp.data(0)
         assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "tempDataSRAM should always be ready for read")
-        assert(!(ren && !valids(rdIdx).orR), "try to read from an empty tempDataSRAM valids:0x%x rdIdx:0x%x", valids.asUInt, rdIdx)
+        assert(!(ren_ts1 && !valids(rdIdx_ts1).asUInt.orR), "try to read from an empty tempDataSRAM valids:0x%x rdIdx_ts1:0x%x", valids.asUInt, rdIdx_ts1)
     }
-    assert(!(wen && full), "try to write to a full tempDataSRAM valids:0x%x", valids.asUInt)
+    assert(!(wen_ts1 && full), "try to write to a full tempDataSRAM valids:0x%x", valids.asUInt)
 
-    io.fromSourceD.read.ready := true.B // TODO: arbiter
-    io.fromSourceD.resp.valid := RegNext(ren, false.B)
-    io.fromSourceD.resp.bits  := rdDatas.asUInt
+    // -----------------------------------------------------------------------------------------
+    // Stage 2
+    // -----------------------------------------------------------------------------------------
+    val bypassDsData      = io.fromDS.dsResp_ds4.valid || RegNext(io.fromDS.dsResp_ds4.valid, false.B) // bypass data from DS to SourceD
+    val ren_ts2           = RegNext(ren_ts1, false.B)
+    val ren_sourceD_ts2   = RegNext(ren_sourceD_ts1, false.B)
+    val rdDest_ts2        = RegEnable(rdDest_ts1, 0.U, ren_ts1)                                        // Read destination
+    val rdDataId_ts2      = RegEnable(rdDataId_ts1, 0.U, ren_ts1)                                      // Read dataId
+    val dataToSourceD_ts2 = (rdDest_ts2 & DataDestination.SourceD).orR
+    val dataToDs_ts2      = (rdDest_ts2 & DataDestination.DataStorage).orR
+    val readToSourceD_ts2 = ren_ts2 && dataToSourceD_ts2 || RegNext(ren_ts2 && dataToSourceD_ts2, false.B)
+    // assert(PopCount(Seq(dataToSourceD_ts2, dataToDs_ts2)) <= 1.U)
 
-    io.fromRXDAT.write.ready := true.B // TODO: arbiter
+    /** 
+     * Split 512-bits of data into two 256-bits data. The splited data is originated from [[DataStorage]].
+     * If there is a hit on SinkA request, then we will need to bypass the data readed from [[DataStorage]] to [[SourceD]], 
+     * [[TempDataStorage]] is acted as a bypass data path in this case.
+     */
+    val dataSel = Module(new DataSelector)
+    dataSel.io.dataIn.valid := io.fromDS.dsResp_ds4.valid || ren_ts2 && dataToSourceD_ts2
+    dataSel.io.dataIn.bits  := Mux(readToSourceD_ts2, rdDatas_ts2.asUInt, io.fromDS.dsResp_ds4.bits.data)
 
-    /** flush data SRAM entry of [[TempDataStorage]] */
+    io.toSourceD.beatData.valid := dataSel.io.dataOut.valid && (bypassDsData || readToSourceD_ts2)
+    io.toSourceD.beatData.bits  := dataSel.io.dataOut.bits
+    io.toSourceD.dataId         := Mux(ren_ts2 && dataToSourceD_ts2, rdDataId_ts2, freeDataIdx)
+    io.freeDataId               := freeDataIdx
+
+    /** Arbitration between [[RequestArbiter]]'s read and [[SourceD]]'s read */
+    io.fromReqArb.read.ready  := !io.fromSourceD.read.valid && !RegNext(io.fromReqArb.read.fire, false.B) // TODO: improve data bandwidth between SourceD and TempDataStorage?
+    io.fromSourceD.read.ready := !wen_ts1                                                                 // TODO: arbiter
+    io.fromSourceD.resp.valid := ren_sourceD_ts2
+    io.fromSourceD.resp.bits  := rdDatas_ts2.asUInt                                                       // 512-bits
+
+    /** [[DataStorage]] is non-blocking, hence we should give a highest priority */
+    io.fromRXDAT.write.ready := !wen_ds_ts1
+
+    /** Flush data SRAM entry of [[TempDataStorage]] */
     when(io.flushEntry.valid) {
         valids(io.flushEntry.bits).map(_ := false.B)
     }
 
     assert(
-        !(io.flushEntry.valid && tempDataSRAMs.map(_.io.w.req.fire).orR && freeDataIdx === io.flushEntry.bits),
+        !(io.flushEntry.valid && Cat(tempDataSRAMs.map(_.io.w.req.fire)).orR && freeDataIdx === io.flushEntry.bits),
         "io.flushEntry should not be valid when there is a write operation on tempDataSRAM"
     )
 

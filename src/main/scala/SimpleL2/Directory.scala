@@ -32,6 +32,13 @@ object MixedState {
     val TTD = "b1011".U // Trunk Dirty
     val TC  = "b1100".U // Tip Clean
     val TD  = "b1101".U // Tip Dirty
+
+    def apply(dirty: Bool, shared: Bool, state: UInt) = {
+        require(state.getWidth == 2)
+        val mixedState = WireInit(0.U(MixedState.width.W))
+        mixedState := Cat(state, shared, dirty)
+        mixedState
+    }
 }
 
 class MixedState {
@@ -54,6 +61,28 @@ trait HasMixedState {
     def isTip = state(3, 2) === TLState.TIP
 }
 
+class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {
+    val dirty        = Bool()
+    val state        = UInt(TLState.width.W)
+    val fromPrefetch = Bool()
+    val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
+    val clientsOH    = UInt(nrClients.W)
+}
+
+object DirectoryMetaEntryNoTag {
+    def apply(dirty: Bool, state: UInt, alias: UInt, clientsOH: UInt, fromPrefetch: Bool)(implicit p: Parameters) = {
+        require(state.getWidth == TLState.width)
+
+        val meta = Wire(new DirectoryMetaEntryNoTag)
+        meta.aliasOpt.map(_ := alias)
+        meta.fromPrefetch := fromPrefetch
+        meta.dirty        := dirty
+        meta.state        := state
+        meta.clientsOH    := clientsOH
+        meta
+    }
+}
+
 class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedState {
     val fromPrefetch = Bool()
     val tag          = UInt(tagBits.W)
@@ -64,11 +93,21 @@ class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedS
 object DirectoryMetaEntry {
     def apply(fromPrefetch: Bool, state: UInt, tag: UInt, aliasOpt: Option[UInt], clientsOH: UInt)(implicit p: Parameters) = {
         val meta = Wire(new DirectoryMetaEntry)
+        meta.aliasOpt.map(_ := aliasOpt.getOrElse(0.U))
         meta.fromPrefetch := fromPrefetch
         meta.state        := state
         meta.tag          := tag
-        meta.aliasOpt.map(_ := aliasOpt.getOrElse(0.U))
-        meta.clientsOH := clientsOH
+        meta.clientsOH    := clientsOH
+        meta
+    }
+
+    def apply(tag: UInt, dirMetaEntryNoTag: DirectoryMetaEntryNoTag)(implicit p: Parameters) = {
+        val meta = WireInit(0.U.asTypeOf(new DirectoryMetaEntry))
+        meta.aliasOpt.map(_ := dirMetaEntryNoTag.aliasOpt.getOrElse(0.U))
+        meta.fromPrefetch := dirMetaEntryNoTag.fromPrefetch
+        meta.state        := MixedState(dirMetaEntryNoTag.dirty, dirMetaEntryNoTag.clientsOH.orR, dirMetaEntryNoTag.state)
+        meta.tag          := tag
+        meta.clientsOH    := dirMetaEntryNoTag.clientsOH
         meta
     }
 

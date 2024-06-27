@@ -10,16 +10,10 @@ import SimpleL2.Bundles._
 import dataclass.data
 import freechips.rocketchip.diplomacy.BufferParams.flow
 
-object DataDestination extends ChiselEnum {
-    val TXDAT           = Value(0.U)
-    val SourceD         = Value(1.U)
-    val TempDataStorage = Value(2.U)
-}
-
 class DSRead()(implicit p: Parameters) extends L2Bundle {
     val set  = UInt(setBits.W)
     val way  = UInt(wayBits.W)
-    val dest = DataDestination()
+    val dest = UInt(DataDestination.width.W)
 }
 
 class DSWrite()(implicit p: Parameters) extends L2Bundle {
@@ -45,7 +39,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
         val toTempDS = new Bundle {
             val dsResp_ds4 = ValidIO(new DSResp)
-            val dsDest_ds4 = Output(DataDestination())
+            val dsDest_ds4 = Output(UInt(DataDestination.width.W))
         }
 
         val toTXDAT = new Bundle {

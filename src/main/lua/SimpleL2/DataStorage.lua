@@ -20,6 +20,9 @@ local dsResp_ds4 = ([[
     | data
 ]]):bundle {hier = cfg.top, prefix = "io_toTempDS_dsResp_ds4_", name = "dsResp_ds4"}
 
+local TXDAT = ("0b0001"):number()
+local SourceD = ("0b0010"):number()
+local TempDataStorage = ("0b0100"):number()
 
 local dsWrWay_s3 = dut.io_dsWrWay_s3
 local rd_crdv = dut.io_dsRead_s3_crdv
@@ -63,7 +66,7 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
             dsRead_s3.bits.way:set(1)
-            dsRead_s3.bits.dest:set(1) -- 1: SourceD
+            dsRead_s3.bits.dest:set(SourceD)
 
         env.negedge()
             -- 
@@ -83,7 +86,7 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
             dsRead_s3.bits.way:set(1)
-            dsRead_s3.bits.dest:set(1) -- 1: SourceD
+            dsRead_s3.bits.dest:set(SourceD)
 
         env.negedge()
             dsRead_s3.valid:set(0)

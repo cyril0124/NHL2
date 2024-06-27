@@ -23,7 +23,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val d            = DecoupledIO(new TLBundleD(tlBundleParams))
         val task         = Flipped(DecoupledIO(new TaskBundle))
-        val data         = Flipped(DecoupledIO(new DataSelectorOut))
+        val beatData     = Flipped(DecoupledIO(new DataSelectorOut))
         val dataId       = Input(UInt(dataIdBits.W))
         val tempDataRead = DecoupledIO(new TempDataRead)
         val tempDataResp = Flipped(ValidIO(UInt(dataBits.W)))
@@ -43,7 +43,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     val deqNeedData = WireInit(false.B)
     taskQueue.io.enq <> io.task
 
-    assert(!(taskQueue.io.count === 0.U && io.data.valid), "should alloc task before data arrive!")
+    assert(!(taskQueue.io.count === 0.U && io.beatData.valid && !(io.task.fire && io.beatData.fire)), "should alloc task before data arrive!")
 
     /** [[tmpDataBuffer]] is used for storing the temporary data from both [[TempDataStorage]] or [[DataStorage]] */
     val tmpDataBuffer     = Reg(UInt(dataBits.W))
@@ -111,11 +111,12 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         MuxCase(
             false.B,
             Seq(
-                (outState === Normal && nextOutState === Normal)   -> (io.data.valid && io.data.bits.last),
-                (outState === Normal && nextOutState === Stall)    -> false.B,
-                (outState === Stall && nextOutState === Normal)    -> true.B,
-                (outState === Stall && nextOutState === FetchData) -> isLastOutData,
-                (outState === FetchData && nextOutState === Stall) -> isLastOutData
+                (outState === Normal && nextOutState === Normal)       -> (io.beatData.valid && io.beatData.bits.last),
+                (outState === Normal && nextOutState === Stall)        -> false.B,
+                (outState === Stall && nextOutState === Normal)        -> true.B,
+                (outState === Stall && nextOutState === FetchData)     -> isLastOutData,
+                (outState === FetchData && nextOutState === Stall)     -> isLastOutData,
+                (outState === FetchData && nextOutState === FetchData) -> isLastOutData
             )
         ),
         io.d.fire
@@ -124,13 +125,13 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     // assert(!(outState === FetchData && !deqNeedData))
 
     /** temporary data will be stored into [[tmpDataBuffer]] */
-    val isNotLastData = io.data.fire && !io.data.bits.last
-    val isLastData    = io.data.fire && io.data.bits.last
-    assert(!(isLastData && RegNext(isLastData)), "io.data.bits.last is ASSERTED for continuous cycles!")
-    when(outState === Normal && nextOutState === Stall && isNotLastData) {
+    val isNotLastBeatData = io.beatData.fire && !io.beatData.bits.last
+    val isLastBeatData    = io.beatData.fire && io.beatData.bits.last
+    assert(!(isLastBeatData && RegNext(isLastBeatData)), "io.beatData.bits.last is ASSERTED for continuous cycles!")
+    when(outState === Normal && nextOutState === Stall && isNotLastBeatData) {
         assert(deqNeedData)
-        tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.data.bits.data)
-    }.elsewhen(outState === Stall && isLastData) {
+        tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.beatData.bits.data)
+    }.elsewhen(outState === Stall && isLastBeatData) {
 
         /**
           * If [[taskQueue]] has only one entry being used and the [[outState]] is [[Stall]] then the deq task should be GrantData/AccessAckData.
@@ -138,9 +139,9 @@ class SourceD()(implicit p: Parameters) extends L2Module {
           */
         assert(Mux(taskQueue.io.count === 1.U, deqNeedData, taskQueue.io.count >= 2.U))
 
-        tmpDataBuffer     := Cat(io.data.bits.data, tmpDataBuffer(255, 0))
+        tmpDataBuffer     := Cat(io.beatData.bits.data, tmpDataBuffer(255, 0))
         tmpDataBufferFull := true.B
-    }.elsewhen(outState === Stall && nextOutState === Stall && isNotLastData) {
+    }.elsewhen(outState === Stall && nextOutState === Stall && isNotLastBeatData) {
 
         /**
           * If [[taskQueue]] has only one entry being used and the [[outState]] is [[Stall]] then the deq task should be GrantData/AccessAckData.
@@ -148,7 +149,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
           */
         assert(Mux(taskQueue.io.count === 1.U, deqNeedData, taskQueue.io.count >= 2.U))
 
-        tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.data.bits.data)
+        tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.beatData.bits.data)
     }.elsewhen(outState === FetchData && io.tempDataResp.fire) {
         tmpDataBuffer     := io.tempDataResp.bits
         tmpDataBufferFull := true.B
@@ -159,14 +160,14 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     }
 
     /** back-pressure for the incoming datas */
-    io.data.ready := ~tmpDataBufferFull
+    io.beatData.ready := ~tmpDataBufferFull
     dontTouch(tmpDataBufferFull)
 
     /** 
      * [[dataIdQueue]] is used for storing the [[dataId]] of the incoming 
      * datas which cannot be stored in both [[tmpDataBuffer]] or send out directly 
      */
-    dataIdQueue.io.enq.valid := io.data.valid && !io.data.ready && io.data.bits.last
+    dataIdQueue.io.enq.valid := io.beatData.valid && !io.beatData.ready && io.beatData.bits.last
     dataIdQueue.io.enq.bits  := io.dataId
     dataIdQueue.io.deq.ready := deqTask.valid && io.tempDataRead.fire
     dataIdCount              := dataIdQueue.io.count
@@ -175,6 +176,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     /** read data back from [[TempDataBuffer]] if [[tmpDataBuffer]] is empty */
     io.tempDataRead.valid       := (outState === FetchData && nextOutState =/= Stall || outState === Stall && nextOutState === FetchData) && isLastOutData && dataIdQueue.io.count =/= 0.U
     io.tempDataRead.bits.dataId := dataIdQueue.io.deq.bits
+    io.tempDataRead.bits.dest   := DontCare
     assert(
         !(io.tempDataRead.fire && RegNext(io.tempDataRead.fire) && io.tempDataRead.bits.dataId === RegNext(io.tempDataRead.bits.dataId)),
         "try to read the same dataId twice!"
@@ -188,7 +190,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         MuxCase(
             false.B,
             Seq(
-                (outState === Normal)    -> io.data.valid,
+                (outState === Normal)    -> io.beatData.valid,
                 (outState === Stall)     -> true.B,
                 (outState === FetchData) -> (io.tempDataResp.fire || tmpDataBufferFull)
             )
@@ -201,9 +203,9 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.d.bits.data := Mux(
         deqNeedData,
         MuxCase(
-            io.data.bits.data,
+            io.beatData.bits.data,
             Seq(
-                (outState === Normal)                                                              -> io.data.bits.data,
+                (outState === Normal)                                                              -> io.beatData.bits.data,
                 (outState === Stall)                                                               -> beatDatas(beatCnt),
                 (outState === FetchData && io.d.ready && !io.tempDataResp.valid)                   -> beatDatas(beatCnt),
                 (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 0.U) -> io.tempDataResp.bits(255, 0),

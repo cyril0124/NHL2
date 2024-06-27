@@ -19,9 +19,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.tl  <> DontCare
     io.chi <> DontCare
 
+    io.tl.e.ready := true.B
+
     /** Channels */
     val sinkA   = Module(new SinkA)
     val sinkC   = Module(new SinkC)
+    val sinkE   = Module(new SinkE)
     val sourceD = Module(new SourceD)
     val txreq   = Module(new TXREQ)
     val rxdat   = Module(new RXDAT)
@@ -43,9 +46,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sinkA.io.a <> io.tl.a
     sinkC.io.c <> io.tl.c
+    sinkE.io.e <> io.tl.e
 
     reqArb.io              <> DontCare
-    reqArb.io.taskMSHR_s0  <> missHandler.io.mpTask
+    reqArb.io.taskMSHR_s0  <> missHandler.io.tasks.mpTask
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
     reqArb.io.taskSinkC_s1 <> sinkC.io.task
     reqArb.io.dataSinkC_s1 := sinkC.io.taskData
@@ -53,13 +57,13 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.resetFinish  <> dir.io.resetFinish
     reqArb.io.dsWrCrd      := ds.io.dsWrite_s2.crdv
 
-    mainPipe.io                  <> DontCare
-    mainPipe.io.mpReq_s2         <> reqArb.io.mpReq_s2
-    mainPipe.io.dirResp_s3       <> dir.io.dirResp_s3
-    mainPipe.io.mshrFreeOH_s3    := missHandler.io.mshrFreeOH_s3
-    mainPipe.io.replay_s4.ready  := true.B // TODO:
-    mainPipe.io.sourceD_s4.ready := true.B // TODO:
-    mainPipe.io.dsRdCrd          := ds.io.dsRead_s3.crdv
+    mainPipe.io                 <> DontCare
+    mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2
+    mainPipe.io.dirResp_s3      <> dir.io.dirResp_s3
+    mainPipe.io.mshrFreeOH_s3   := missHandler.io.mshrFreeOH_s3
+    mainPipe.io.replay_s4.ready := true.B // TODO:
+    // mainPipe.io.sourceD_s4.ready := true.B // TODO:
+    mainPipe.io.dsRdCrd := ds.io.dsRead_s3.crdv
 
     ds.io.dsWrite_s2.valid := reqArb.io.dsWrite_s2.valid
     ds.io.dsWrite_s2.bits  := reqArb.io.dsWrite_s2.bits
@@ -71,15 +75,18 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     tempDS.io.fromDS.dsResp_ds4 := ds.io.toTempDS.dsResp_ds4
     tempDS.io.fromDS.dsDest_ds4 := ds.io.toTempDS.dsDest_ds4
-    // ds.io.toTXDAT.dsResp_ds4
+    tempDS.io.fromReqArb.read   <> reqArb.io.tempDsRead_s1
+    tempDS.io.fromRXDAT.write   <> rxdat.io.toTempDS.dataWr
 
     missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
-    missHandler.io.rxdat        <> rxdat.io.resp
+    missHandler.io.resps.rxdat  <> rxdat.io.resp
+    missHandler.io.resps.sinke  <> sinkE.io.resp
 
-    txreq.io.mshrTask <> missHandler.io.txreq
+    txreq.io.mshrTask <> missHandler.io.tasks.txreq
 
-    sourceD.io.task         <> mainPipe.io.sourceD_s4
-    sourceD.io.data         <> tempDS.io.toSourceD.dataOut
+    // sourceD.io.task         <> mainPipe.io.sourceD_s4
+    arbTask(Seq(mainPipe.io.sourceD_s2, mainPipe.io.sourceD_s4), sourceD.io.task)
+    sourceD.io.beatData     <> tempDS.io.toSourceD.beatData
     sourceD.io.dataId       := tempDS.io.freeDataId
     sourceD.io.tempDataRead <> tempDS.io.fromSourceD.read
     sourceD.io.tempDataResp <> tempDS.io.fromSourceD.resp
@@ -89,7 +96,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     io.tl.d      <> sourceD.io.d
     io.chi.txreq <> txreq.io.out
-    io.chi.txrsp <> missHandler.io.txrsp
+    io.chi.txrsp <> missHandler.io.tasks.txrsp
     io.chi.rxdat <> rxdat.io.rxdat
 
     dontTouch(reqArb.io)

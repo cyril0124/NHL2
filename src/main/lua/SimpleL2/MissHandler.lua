@@ -108,11 +108,11 @@ local test_resp_rxdat = env.register_test_case "test_resp_rxdat" {
             missHandler.io_mshrFreeOH_s3:expect(2)
 
         env.negedge()
-            dut.io_rxdat_valid:set(1)
-            dut.io_rxdat_bits_txnID:set(0)
+            dut.io_resps_rxdat_valid:set(1)
+            dut.io_resps_rxdat_bits_txnID:set(0)
         env.negedge()
             missHandler.mshrs_0.io_resps_rxdat_valid:expect(1)
-            dut.io_rxdat_valid:set(0)
+            dut.io_resps_rxdat_valid:set(0)
         env.negedge()
             missHandler.mshrs_0.io_resps_rxdat_valid:expect(0)
 

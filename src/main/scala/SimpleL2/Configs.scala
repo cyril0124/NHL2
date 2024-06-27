@@ -61,6 +61,7 @@ trait HasL2Param {
     val nrClients    = l2param.nrClients
     val dataSramBank = l2param.dataSramBank
     val metaSramBank = l2param.metaSramBank
+    val nrBeat       = l2param.blockBytes / l2param.beatBytes
 
     val enableClockGate         = l2param.enableClockGate
     val nrTempDataEntry         = l2param.nrTempDataEntry

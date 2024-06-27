@@ -18,7 +18,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
 
         /** Stage 2 */
-        val mpReq_s2 = Flipped(ValidIO(new TaskBundle))
+        val mpReq_s2   = Flipped(ValidIO(new TaskBundle))
+        val sourceD_s2 = Decoupled(new TaskBundle)
 
         /** Stage 3 */
         val dirResp_s3    = Flipped(ValidIO(new DirResp))
@@ -54,6 +55,12 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     valid_s2 := io.mpReq_s2.valid
     task_s2  := io.mpReq_s2.bits
+
+    val isSourceD_s2 = task_s2.opcode === Grant || task_s2.opcode === GrantData || task_s2.opcode === AccessAckData || task_s2.opcode === AccessAck || task_s2.opcode === ReleaseAck
+    io.sourceD_s2.valid := valid_s2 && task_s2.isMshrTask && isSourceD_s2
+    io.sourceD_s2.bits  <> task_s2
+
+    assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "sourceD_s2 should always be ready")
 
     // -----------------------------------------------------------------------------------------
     // Stage 3
@@ -155,10 +162,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         // TODO: Release should always hit
     }
 
-    io.mshrAlloc_s3.valid         := mshrAlloc_s3
-    io.mshrAlloc_s3.bits.dirResp  := dirResp_s3
-    io.mshrAlloc_s3.bits.fsmState := mshrAllocStates
-    io.mshrAlloc_s3.bits.req      := task_s3
+    io.mshrAlloc_s3.valid                := mshrAlloc_s3
+    io.mshrAlloc_s3.bits.dirResp         := dirResp_s3
+    io.mshrAlloc_s3.bits.fsmState        := mshrAllocStates
+    io.mshrAlloc_s3.bits.req             := task_s3
+    io.mshrAlloc_s3.bits.req.isAliasTask := cacheAlias_s3
 
     /** coherency check */
     when(valid_s3) {
@@ -179,9 +187,12 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
       *     => Get is a TL-UL message which will not modify the coherent state
       *     => Prefetch only change the L2 state and not response upwards to L1
       */
-    val dirWen_a_s3 = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3
-    val dirWen_b_s3 = false.B // TODO: Snoop
-    val dirWen_c_s3 = task_s3.isChannelC && hit_s3
+    val dirWen_mshr_s3 = task_s3.isMshrTask && task_s3.updateDir
+    val dirWen_a_s3    = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3
+    val dirWen_b_s3    = false.B // TODO: Snoop
+    val dirWen_c_s3    = task_s3.isChannelC && hit_s3
+
+    val newMeta_mshr_s3 = DirectoryMetaEntry(task_s3.tag, task_s3.newMetaEntry)
 
     val newMeta_a_s3 = DirectoryMetaEntry(
         fromPrefetch = false.B,                                                                                                 // TODO:
@@ -223,14 +234,15 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         clientsOH = Mux(task_s3.param === TtoN || task_s3.param === BtoN, meta_s3.clientsOH & ~reqClientOH_s3, meta_s3.clientsOH /* Release.TtoB */ )
     )
 
-    val dirWen_s3 = !mshrAlloc_s3 && (dirWen_a_s3 || dirWen_b_s3 || dirWen_c_s3) && valid_s3
+    val dirWen_s3 = !mshrAlloc_s3 && (dirWen_mshr_s3 || dirWen_a_s3 || dirWen_b_s3 || dirWen_c_s3) && valid_s3
     io.dirWrite_s3.valid      := dirWen_s3
     io.dirWrite_s3.bits.set   := task_s3.set
     io.dirWrite_s3.bits.wayOH := Mux(hit_s3, dirResp_s3.wayOH, task_s3.wayOH)
     io.dirWrite_s3.bits.meta := MuxCase(
         0.U.asTypeOf(new DirectoryMetaEntry),
         Seq(
-            dirWen_a_s3 -> newMeta_a_s3,
+            dirWen_mshr_s3 -> newMeta_mshr_s3,
+            dirWen_a_s3    -> newMeta_a_s3,
             // dirWen_b_s3 -> newMeta_b_s3, // TODO:
             dirWen_c_s3 -> newMeta_c_s3 // TODO:
         )
@@ -240,11 +252,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val dsRen_s3 = hit_s3 && (isAcquireBlock_s3 || isGet_s3) && !io.mshrAlloc_s3.valid && valid_s3
     io.dsRead_s3.bits.set  := task_s3.set
     io.dsRead_s3.bits.way  := OHToUInt(io.dirResp_s3.bits.wayOH)
-    io.dsRead_s3.bits.dest := DataDestination.SourceD // TODO:
+    io.dsRead_s3.bits.dest := DataDestination.SourceD // TODO: DataDestination.TempDataStorage
     io.dsRead_s3.valid     := dsRen_s3
 
     val replayValid_s3 = io.mshrAlloc_s3.valid && !io.mshrAlloc_s3.ready && valid_s3
-    val respValid_s3   = !mshrAlloc_s3 && valid_s3
+    val respValid_s3   = !mshrAlloc_s3 && !task_s3.isMshrTask && valid_s3
     val respOpcode_s3  = WireInit(0.U(math.max(task_s3.opcode.getWidth, task_s3.chiOpcode.getWidth).W))
     respOpcode_s3 := MuxCase( // TODO:
         DontCare,

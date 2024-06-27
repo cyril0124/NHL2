@@ -21,10 +21,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val mshrAlloc_s3  = Flipped(Decoupled(new MshrAllocBundle))
         val mshrFreeOH_s3 = Output(UInt(nrMSHR.W))
 
-        val mpTask = DecoupledIO(new TaskBundle)
-        val txreq  = DecoupledIO(new CHIBundleREQ(chiBundleParams))
-        val txrsp  = DecoupledIO(new CHIBundleRSP(chiBundleParams))
-        val rxdat  = Flipped(ValidIO(new CHIRespBundle(chiBundleParams)))
+        val tasks = new MshrTasks
+        val resps = new MshrResps
     })
 
     io <> DontCare
@@ -41,12 +39,18 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.alloc_s3.bits  := io.mshrAlloc_s3.bits
     }
 
-    val rxdatMatchOH = UIntToOH(io.rxdat.bits.txnID)
+    val rxdatMatchOH = UIntToOH(io.resps.rxdat.bits.txnID)
     mshrs.zip(rxdatMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io.resps.rxdat.valid := io.rxdat.valid && en
-        mshr.io.resps.rxdat.bits  := io.rxdat.bits
+        mshr.io.resps.rxdat.valid := io.resps.rxdat.valid && en
+        mshr.io.resps.rxdat.bits  := io.resps.rxdat.bits
 
         assert(!(mshr.io.resps.rxdat.valid && !mshr.io.status.valid), s"rxdat valid but mshr_${i} invalid")
+    }
+
+    val sinkeMatchOH = UIntToOH(io.resps.sinke.bits.sink)
+    mshrs.zip(sinkeMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
+        mshr.io.resps.sinke.valid := io.resps.sinke.valid && en
+        mshr.io.resps.sinke.bits  := io.resps.sinke.bits
     }
 
     val mshrCount = PopCount(mshrValidVec)
@@ -60,9 +64,9 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    arbTask(mshrs.map(_.io.tasks.txreq), io.txreq)
-    arbTask(mshrs.map(_.io.tasks.txrsp), io.txrsp)
-    arbTask(mshrs.map(_.io.tasks.mpTask), io.mpTask)
+    arbTask(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
+    arbTask(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
+    arbTask(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
 
     dontTouch(io)
 }

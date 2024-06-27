@@ -66,6 +66,15 @@ end
 
 local function TEST_SUCCESS()
     print(">>>TEST_SUCCESS!<<<")
+    print(colors.green .. [[
+  _____         _____ _____ 
+ |  __ \ /\    / ____/ ____|
+ | |__) /  \  | (___| (___  
+ |  ___/ /\ \  \___ \\___ \ 
+ | |  / ____ \ ____) |___) |
+ |_| /_/    \_\_____/_____/ 
+]] .. colors.reset)
+    io.flush()
     end_simulation()
 end
 

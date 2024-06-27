@@ -29,7 +29,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.task.bits.param      := io.c.bits.param
     io.task.bits.source     := io.c.bits.source
     io.task.bits.isPrefetch := false.B
-    io.task.bits.tmpDataID  := DontCare
+    io.task.bits.dataId     := DontCare
     io.task.bits.set        := set
     io.task.bits.tag        := tag
     io.taskData             := io.c.bits.data

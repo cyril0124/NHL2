@@ -22,7 +22,7 @@ local data = ([[
     | valid
     | data
     | last
-]]):bundle {hier = cfg.top, prefix = "io_data_", name = "data"}
+]]):bundle {hier = cfg.top, prefix = "io_beatData_", name = "data"}
 
 local tempDataRead = ([[
     | valid
@@ -352,6 +352,92 @@ local test_grant_mix_grantdata = env.register_test_case "test_grant_mix_grantdat
     end
 }
 
+local test_grantdata_continuous_stall_4 = env.register_test_case "test_grantdata_continuous_stall_4" {
+    function ()
+        env.dut_reset()
+        
+        tl_d.ready:set(0)
+        tempDataRead.ready:set(1)
+
+        verilua "appendTasks" {
+            check_task = function ()
+                for i = 1, 4 do
+                    env.expect_happen_until(100, function (c)
+                        return tl_d:fire() and tl_d.bits.source:get() == i
+                    end)
+                    
+                    tl_d:dump()
+
+                    env.negedge()
+                    env.expect_happen_until(100, function (c)
+                        return tl_d:fire() and tl_d.bits.source:get() == i
+                    end)
+                    
+                    tl_d:dump()
+                end
+            end,
+
+            check_task_1 = function ()
+                env.expect_happen_until(80, function (c)
+                    return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.bits.dataId:get() == 2
+                end)
+
+                env.expect_happen_until(80, function (c)
+                    return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.bits.dataId:get() == 3
+                end)
+
+                env.expect_happen_until(80, function (c)
+                    return tempDataRead.valid:get() == 1 and tempDataRead.ready:get() == 1 and tempDataRead.bits.dataId:get() == 4
+                end)
+            end
+        }
+
+        send_task(1, TLOpcodeD.GrantData)
+        send_task(2, TLOpcodeD.GrantData)
+        send_task(3, TLOpcodeD.GrantData)
+        send_task(4, TLOpcodeD.GrantData)
+        expect.equal(taskQueue.io_count:get(), 4)
+
+        for i = 1, 4 do
+            if i ~= 1 then
+                sourceD.io_dataId:set(i)
+            end
+
+            env.posedge(math.random(3, 10))
+            send_data("0x" .. i .. "00", "0x" .. i .. "10")
+        end
+        
+        env.negedge(math.random(3, 10))
+            tl_d.ready:set(1)
+        
+        env.negedge(math.random(3, 10))
+            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_valid:set(1)
+        env.negedge()
+            sourceD.io_tempDataResp_valid:set(0)
+
+        env.negedge(math.random(3, 10))
+            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_valid:set(1)
+        env.negedge()
+            sourceD.io_tempDataResp_valid:set(0)
+
+        env.negedge(math.random(3, 10))
+            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_valid:set(1)
+        env.negedge()
+            sourceD.io_tempDataResp_valid:set(0)
+        
+        env.negedge(math.random(3, 10))
+            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_valid:set(1)
+        env.negedge()
+            sourceD.io_tempDataResp_valid:set(0)
+
+        env.posedge(500)
+    end
+}
+
 
 verilua "appendTasks" {
     main_task = function ()
@@ -368,8 +454,8 @@ verilua "appendTasks" {
         test_grantdata_no_stall()
         test_grantdata_simple_stall()
         test_grantdata_continuous_stall_2()
-
         test_grant_mix_grantdata()
+        test_grantdata_continuous_stall_4()
 
         env.posedge(100)
 

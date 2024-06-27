@@ -39,9 +39,17 @@ local tl_d = ([[
     | valid
     | ready
     | data
+    | sink
     | source
+    | param
     | opcode
 ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_d_"}
+
+local tl_e = ([[
+    | valid
+    | ready
+    | sink
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_e_"}
 
 tl_a.acquire_block = function (this, addr, param, source)
     assert(addr ~= nil)
@@ -626,6 +634,8 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         env.dut_reset()
         resetFinish:posedge()
 
+        dut.io_tl_d_ready = 1
+
         local sync = ("sync"):ehdl()
         
         verilua "appendTasks" {
@@ -927,9 +937,12 @@ local test_release_hit = env.register_test_case "test_release_hit" {
 
 local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
     function ()
+        local sync = ("sync"):ehdl()
+        
         env.dut_reset()
         resetFinish:posedge()
 
+        dut.io_tl_d_ready:set(0)
         dut.io_chi_txreq_ready:set(1)
         dut.io_chi_txrsp_ready:set(1)
 
@@ -955,7 +968,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         end
 
         verilua "appendTasks" {
-            function ()
+            check_mshr_signals = function ()
                 env.expect_happen_until(10, function()
                     return mshrs[0].state_w_compdat:get() == 1
                 end)
@@ -963,6 +976,65 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                 env.expect_happen_until(10, function()
                     return mshrs[0].state_s_compack:get() == 1
                 end)
+
+                env.expect_happen_until(100, function ()
+                    return mshrs[0].willFree:get() == 1
+                end)
+            end,
+
+            check_mainpipe = function ()
+                env.expect_happen_until(100, function ()
+                    return mp.io_dirWrite_s3_valid:get() == 1 and 
+                            mp.io_dirWrite_s3_bits_meta_tag:get() == 0x20 and 
+                            mp.io_dirWrite_s3_bits_meta_clientsOH:get() == 0x01 and 
+                            mp.io_dirWrite_s3_bits_meta_state:get() == MixedState.TTC
+                end)
+            end,
+
+            -- check_ds = function()
+                
+            -- end
+
+            check_channel = function ()
+                -- 
+                -- check grant data
+                -- 
+                env.expect_happen_until(100, function ()
+                    return tl_d:fire() and 
+                            tl_d.bits.source:get() == 3 and 
+                            tl_d.bits.data:get()[1] == 0xdead and 
+                            tl_d.bits.sink:get() == 0 and 
+                            tl_d.bits.opcode:get() == TLOpcodeD.GrantData and
+                            tl_d.bits.param:get() == TLParam.toT
+                end)
+                tl_d:dump()
+
+                env.expect_happen_until(100, function ()
+                    return tl_d:fire() and 
+                            tl_d.bits.source:get() == 3 and 
+                            tl_d.bits.data:get()[1] == 0xbeef and 
+                            tl_d.bits.sink:get() == 0 and 
+                            tl_d.bits.opcode:get() == TLOpcodeD.GrantData and
+                            tl_d.bits.param:get() == TLParam.toT
+                end)
+                tl_d:dump()
+
+                local sink = tl_d.bits.sink:get()
+
+                -- 
+                -- send grant ack
+                -- 
+                env.negedge()
+                    tl_e.valid:set(1)
+                    tl_e.bits.sink:set(sink)
+                env.negedge()
+                    tl_e.valid:set(0)
+
+                env.expect_not_happen_until(100, function ()
+                    return tl_d:fire()
+                end)
+
+                sync:send()
             end
         }
 
@@ -977,17 +1049,27 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
             chi_rxdat.bits.dataID:set(2) -- last data beat
         env.negedge()
             chi_rxdat.valid:set(0)
+        
+        env.negedge(math.random(10, 20))
+            dut.io_tl_d_ready:set(1)
 
-        env.posedge(100)
+        sync:wait()
+
+        env.posedge(200)
     end
 }
 
 verilua "mainTask" { function ()
-    -- sim.dump_wave()
+    sim.dump_wave()
+
+    -- local test_all = false
+    local test_all = true
 
     -- 
     -- normal test cases
     -- 
+    if test_all then
+        
     mp.dirWen_s3:set_force(0)
         reqArb.io_dsWrCrd:set_force(0)
             test_replay_valid()
@@ -1002,13 +1084,19 @@ verilua "mainTask" { function ()
         test_release_continuous_write()
     mp.dirWen_s3:set_release()
 
+    end
+
     -- 
     -- coherency test cases
-    -- 
+    --
+    if test_all then
+        
     test_sinkA_hit()
     test_release_hit()
-
-    sim.dump_wave()
+    
+    end
+    
+    -- sim.dump_wave()
     test_sinkA_miss()
 
     env.posedge(100)

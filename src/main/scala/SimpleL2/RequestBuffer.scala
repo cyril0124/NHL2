@@ -8,14 +8,8 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
 
-object RequestOwner {
-    val OwnerWidth = 2
-    def Level1 = "b00".U(2.W)
-    def Prefetcher = "b10".U(2.W)
-}
-
 class RequestBufferEntry(implicit p: Parameters) extends L2Bundle {
-    val owner  = UInt(RequestOwner.OwnerWidth.W)
+    val owner  = UInt(RequestOwner.width.W)
     val opcode = UInt(3.W)
     val source = UInt(tlBundleParams.sourceBits.W)
 }
@@ -23,7 +17,7 @@ class RequestBufferEntry(implicit p: Parameters) extends L2Bundle {
 class RequestBuffer()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val sinkA = Flipped(Decoupled(new TLBundleA(tlBundleParams)))
-        val owner = Input(UInt(RequestOwner.OwnerWidth.W))
+        val owner = Input(UInt(RequestOwner.width.W))
     })
 
     io.sinkA       <> DontCare
