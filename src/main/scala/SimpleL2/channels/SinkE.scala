@@ -18,6 +18,7 @@ class SinkE()(implicit p: Parameters) extends L2Module {
 
     io.e.ready        := true.B
     io.resp.valid     := io.e.valid
+    io.resp.bits      := 0.U.asTypeOf(new TLRespBundle(tlBundleParams))
     io.resp.bits.sink := io.e.bits.sink
 }
 

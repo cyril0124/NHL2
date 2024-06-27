@@ -25,8 +25,8 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val task         = Flipped(DecoupledIO(new TaskBundle))
         val beatData     = Flipped(DecoupledIO(new DataSelectorOut))
         val dataId       = Input(UInt(dataIdBits.W))
-        val tempDataRead = DecoupledIO(new TempDataRead)
-        val tempDataResp = Flipped(ValidIO(UInt(dataBits.W)))
+        val tempDataRead = DecoupledIO(new TempDataReadReq)
+        val tempDataResp = Flipped(ValidIO(new TempDataReadResp))
     })
 
     io <> DontCare
@@ -151,7 +151,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
 
         tmpDataBuffer := Cat(tmpDataBuffer(511, 256), io.beatData.bits.data)
     }.elsewhen(outState === FetchData && io.tempDataResp.fire) {
-        tmpDataBuffer     := io.tempDataResp.bits
+        tmpDataBuffer     := io.tempDataResp.bits.data
         tmpDataBufferFull := true.B
     }
 
@@ -208,7 +208,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
                 (outState === Normal)                                                              -> io.beatData.bits.data,
                 (outState === Stall)                                                               -> beatDatas(beatCnt),
                 (outState === FetchData && io.d.ready && !io.tempDataResp.valid)                   -> beatDatas(beatCnt),
-                (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 0.U) -> io.tempDataResp.bits(255, 0),
+                (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 0.U) -> io.tempDataResp.bits.data(255, 0),
                 (outState === FetchData && io.d.ready && io.tempDataResp.valid && beatCnt === 1.U) -> beatDatas(beatCnt)
             )
         ),

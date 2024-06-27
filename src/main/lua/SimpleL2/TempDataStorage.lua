@@ -25,7 +25,7 @@ local sourceD_read = ([[
 
 local sourceD_resp = ([[
     | valid
-    | bits => data
+    | bits_data => data
 ]]):abdl{hier = cfg.top, prefix = "io_fromSourceD_resp_", is_decoupled = false, name = "sourceD_resp"}
 
 local reqArb_read = ([[

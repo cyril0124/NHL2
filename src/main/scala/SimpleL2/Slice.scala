@@ -21,13 +21,15 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     io.tl.e.ready := true.B
 
-    /** Channels */
+    /** TileLink side channels (upstream) */
     val sinkA   = Module(new SinkA)
     val sinkC   = Module(new SinkC)
     val sinkE   = Module(new SinkE)
     val sourceD = Module(new SourceD)
-    val txreq   = Module(new TXREQ)
-    val rxdat   = Module(new RXDAT)
+
+    /** CHI side channels (downstream) */
+    val txreq = Module(new TXREQ)
+    val rxdat = Module(new RXDAT)
 
     /** Other modules */
     val reqArb      = Module(new RequestArbiter)
@@ -38,6 +40,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val missHandler = Module(new MissHandler)
 
     sourceD.io     <> DontCare
+    sinkC.io       <> DontCare
     txreq.io       <> DontCare
     dir.io         <> DontCare
     ds.io          <> DontCare
@@ -52,10 +55,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.taskMSHR_s0  <> missHandler.io.tasks.mpTask
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
     reqArb.io.taskSinkC_s1 <> sinkC.io.task
-    reqArb.io.dataSinkC_s1 := sinkC.io.taskData
-    reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
-    reqArb.io.resetFinish  <> dir.io.resetFinish
-    reqArb.io.dsWrCrd      := ds.io.dsWrite_s2.crdv
+    // reqArb.io.dataSinkC_s1 := sinkC.io.taskData
+    reqArb.io.dirRead_s1  <> dir.io.dirRead_s1
+    reqArb.io.resetFinish <> dir.io.resetFinish
+    // reqArb.io.dsWrCrd      := ds.io.dsWrite_s2.crdv
 
     mainPipe.io                 <> DontCare
     mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2
@@ -65,11 +68,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     // mainPipe.io.sourceD_s4.ready := true.B // TODO:
     mainPipe.io.dsRdCrd := ds.io.dsRead_s3.crdv
 
-    ds.io.dsWrite_s2.valid := reqArb.io.dsWrite_s2.valid
-    ds.io.dsWrite_s2.bits  := reqArb.io.dsWrite_s2.bits
-    ds.io.dsWrWay_s3       := mainPipe.io.dsWrWay_s3
-    ds.io.dsRead_s3.valid  := mainPipe.io.dsRead_s3.valid
-    ds.io.dsRead_s3.bits   := mainPipe.io.dsRead_s3.bits
+    ds.io.dsWrite_s2      <> sinkC.io.toDS.dsWrite_s2
+    ds.io.dsWrWay_s3      := mainPipe.io.dsWrWay_s3
+    ds.io.dsRead_s3.valid := mainPipe.io.dsRead_s3.valid
+    ds.io.dsRead_s3.bits  := mainPipe.io.dsRead_s3.bits
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 

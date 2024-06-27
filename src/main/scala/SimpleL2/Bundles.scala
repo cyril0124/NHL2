@@ -67,5 +67,11 @@ object CreditIO {
 }
 
 class TLRespBundle(params: TLBundleParameters)(implicit p: Parameters) extends L2Bundle {
-    val sink = UInt(params.sinkBits.W)
+    val opcode = UInt(3.W)
+    val param  = UInt(3.W)
+    val sink   = UInt(params.sinkBits.W)
+    val set    = UInt(setBits.W)
+    val tag    = UInt(tagBits.W)
+    val dataId = UInt(dataIdBits.W)
+    val last   = Bool()
 }

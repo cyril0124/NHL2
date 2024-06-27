@@ -15,9 +15,13 @@ class TempDataWrite()(implicit p: Parameters) extends L2Bundle {
     val wrMaskOH = UInt(2.W)
 }
 
-class TempDataRead()(implicit p: Parameters) extends L2Bundle {
-    val dataId = Input(UInt(dataIdBits.W))
+class TempDataReadReq()(implicit p: Parameters) extends L2Bundle {
+    val dataId = UInt(dataIdBits.W)
     val dest   = UInt(DataDestination.width.W) // Data output destination
+}
+
+class TempDataReadResp()(implicit p: Parameters) extends L2Bundle {
+    val data = UInt(dataBits.W)
 }
 
 class TempDataEntry()(implicit p: Parameters) extends L2Bundle {
@@ -36,22 +40,26 @@ object TempDataEntry {
 
 class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val fromReqArb = new Bundle {
-            val read = Flipped(DecoupledIO(new TempDataRead))
-        }
-
         val fromDS = new Bundle {
             val dsResp_ds4 = Flipped(ValidIO(new DSResp))
             val dsDest_ds4 = Input(UInt(DataDestination.width.W))
         }
 
-        val fromSourceD = new Bundle {
-            val read = Flipped(DecoupledIO(new TempDataRead))
-            val resp = ValidIO(UInt(dataBits.W))
-        }
-
         val fromRXDAT = new Bundle {
             val write = Flipped(DecoupledIO(new TempDataWrite))
+        }
+
+        val fromSinkC = new Bundle {
+            val write = Flipped(DecoupledIO(new TempDataWrite)) // TODO:
+        }
+
+        val toDS = new Bundle {
+            val dsWrite = DecoupledIO(new DSWrite) // TODO:
+        }
+
+        val fromSourceD = new Bundle {
+            val read = Flipped(DecoupledIO(new TempDataReadReq))
+            val resp = ValidIO(new TempDataReadResp)
         }
 
         val toSourceD = new Bundle {
@@ -59,12 +67,20 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
             val dataId   = Output(UInt(dataIdBits.W))
         }
 
-        val toDS = new Bundle {
-            // val write = ValidIO
+        val toTXDAT = new Bundle {
+            val resp = ValidIO(new TempDataReadResp) // TODO:
         }
 
+        val fromReqArb = new Bundle {
+            val read = Flipped(DecoupledIO(new TempDataReadReq))
+            // TODO: set and way for dsWrite
+            // val dsWrSet
+            // val dsWrWay
+        }
+
+        val flushEntry = Flipped(ValidIO(UInt(dataIdBits.W))) // TODO: from MainPipe
+
         val freeDataId = Output(UInt(dataIdBits.W))
-        val flushEntry = Flipped(ValidIO(UInt(dataIdBits.W)))
     })
 
     io <> DontCare
@@ -193,10 +209,10 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     io.freeDataId               := freeDataIdx
 
     /** Arbitration between [[RequestArbiter]]'s read and [[SourceD]]'s read */
-    io.fromReqArb.read.ready  := !io.fromSourceD.read.valid && !RegNext(io.fromReqArb.read.fire, false.B) // TODO: improve data bandwidth between SourceD and TempDataStorage?
-    io.fromSourceD.read.ready := !wen_ts1                                                                 // TODO: arbiter
-    io.fromSourceD.resp.valid := ren_sourceD_ts2
-    io.fromSourceD.resp.bits  := rdDatas_ts2.asUInt                                                       // 512-bits
+    io.fromReqArb.read.ready      := !io.fromSourceD.read.valid && !RegNext(io.fromReqArb.read.fire, false.B) // TODO: improve data bandwidth between SourceD and TempDataStorage?
+    io.fromSourceD.read.ready     := !wen_ts1                                                                 // TODO: arbiter
+    io.fromSourceD.resp.valid     := ren_sourceD_ts2
+    io.fromSourceD.resp.bits.data := rdDatas_ts2.asUInt                                                       // 512-bits
 
     /** [[DataStorage]] is non-blocking, hence we should give a highest priority */
     io.fromRXDAT.write.ready := !wen_ds_ts1
