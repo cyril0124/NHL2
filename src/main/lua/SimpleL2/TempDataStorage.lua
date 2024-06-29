@@ -7,7 +7,14 @@ local tempDS = dut.u_TempDataStorage
 local ds_write = ([[
     | valid
     | data
-]]):bundle{hier = cfg.top, prefix = "io_fromDS_dsResp_ds4_"}
+]]):bundle{hier = cfg.top, prefix = "io_fromDS_dsResp_ds4_", name = "ds_write"}
+
+local to_ds_write = ([[
+    | valid
+    | data
+    | set
+    | way
+]]):bundle{hier = cfg.top, prefix = "io_toDS_dsWrite_", name = "to_ds_write"}
 
 local rxdat_write = ([[
     | valid
@@ -15,7 +22,16 @@ local rxdat_write = ([[
     | wrMaskOH
     | dataId
     | beatData
-]]):bundle{hier = cfg.top, prefix = "io_fromRXDAT_write_"}
+]]):bundle{hier = cfg.top, prefix = "io_fromRXDAT_write_", name = "rxdat_write"}
+
+local sinkC_write = ([[
+    | valid
+    | ready
+    | wrMaskOH
+    | dataId
+    | beatData
+]]):bundle{hier = cfg.top, prefix = "io_fromSinkC_write_", name = "sinkC_write"}
+
 
 local sourceD_read = ([[
     | valid
@@ -45,15 +61,16 @@ local dataOut = ([[
     | ready
     | data
     | last
-]]):bundle{hier = cfg.top, prefix = "io_toSourceD_beatData_"}
+]]):bundle{hier = cfg.top, prefix = "io_toSourceD_beatData_", name = "dataOut"}
 
 
 local TXDAT = ("0b0001"):number()
 local SourceD = ("0b0010"):number()
 local TempDataStorage = ("0b0100"):number()
+local DataStorage = ("0b1000"):number()
 local nrTempDataEntry = 16
 
-local test_basic_read_write = env.register_test_case "test_basic_read_write" {
+local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_write" {
     function ()
         env.dut_reset() 
 
@@ -233,7 +250,7 @@ local test_read_and_flush_entry = env.register_test_case "test_read_and_flush_en
     end
 }
 
-local test_write_until_full = env.register_test_case "test_write_until_full" {
+local test_ds_write_until_full = env.register_test_case "test_ds_write_until_full" {
     function ()
         env.dut_reset()
 
@@ -373,8 +390,6 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
             rxdat_write.bits.beatData:set_str("0xdddd")
             rxdat_write.bits.wrMaskOH:set(0x01)
             rxdat_write.valid:set(1)
-            -- tempDS.valids_1_0:expect(0)
-            -- tempDS.valids_1_1:expect(0)
         env.negedge()
             tempDS.valids_0_0:expect(1)
             rxdat_write.valid:set(0)
@@ -392,55 +407,245 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
     end
 }
 
--- local test_reqArb_read = env.register_test_case "test_reqArb_read" {
---     function ()
---         env.dut_reset()
+local test_sinkc_write = env.register_test_case "test_sinkc_write" {
+    function ()
+        env.dut_reset()
 
---         local function write_entry(data_id, data_str_1, data_str_2)
---             env.negedge()
---                 rxdat_write.ready:expect(1)
---                 rxdat_write.valid:set(1)
---                 rxdat_write.bits.dataId:set(data_id)
---                 rxdat_write.bits.beatData:set_str(data_str_1)
---                 rxdat_write.bits.wrMaskOH:set(0x01)
---             env.negedge()
---                 rxdat_write.bits.beatData:set_str(data_str_2)
---                 rxdat_write.bits.wrMaskOH:set(0x02)
---                 tempDS.valids_0_0:expect(1)
---             env.negedge()
---                 rxdat_write.valid:set(0)
---         end
+        local function read_back_and_check(dataId, data_str)
+            dut.io_toSourceD_beatData_ready:set(1)
+            env.negedge()
+                sourceD_read.valid:set(1)
+                sourceD_read.bits.dataId:set(dataId)
+            env.negedge()
+                sourceD_read.valid:set(0)
+            env.posedge()
+                sourceD_resp.valid:expect(1)
+                sourceD_resp:dump()
+                expect.equal(sourceD_resp.data:get_str(HexStr), data_str)
+            env.posedge()
+                sourceD_resp.valid:expect(0)
+        end
+                sinkC_write.bits.dataId:set(0)
 
---         write_entry(0, "0xdead", "0xbeef")
+        -- 
+        -- continuous write
+        -- 
+        env.negedge()
+            sinkC_write.ready:expect(1)
+            sinkC_write.valid:set(1)
+            sinkC_write.bits.dataId:set(0)
+            sinkC_write.bits.beatData:set_str("0xdead")
+            sinkC_write.bits.wrMaskOH:set(0x01)
+        env.negedge()
+            sinkC_write.bits.beatData:set_str("0xbeef")
+            sinkC_write.bits.wrMaskOH:set(0x02)
+            tempDS.valids_0_0:expect(1)
+        env.negedge()
+            sinkC_write.valid:set(0)
+            tempDS.valids_0_1:expect(1)
+        read_back_and_check(0, "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")
+        
+        -- 
+        -- non-continuous write
+        --
+        env.negedge()
+            sinkC_write.ready:expect(1)
+            sinkC_write.bits.dataId:set(1)
+            sinkC_write.bits.beatData:set_str("0xdddd")
+            sinkC_write.bits.wrMaskOH:set(0x01)
+            sinkC_write.valid:set(1)
+        env.negedge()
+            tempDS.valids_0_0:expect(1)
+            sinkC_write.valid:set(0)
+        env.negedge(math.random(5, 20))
+            tempDS.valids_0_0:expect(1)
+            sinkC_write.bits.beatData:set_str("0xbbbb")
+            sinkC_write.bits.wrMaskOH:set(0x02)
+            sinkC_write.valid:set(1)
+        env.negedge()
+            sinkC_write.valid:set(0)
+            tempDS.valids_0_1:expect(1)
+        read_back_and_check(1, "000000000000000000000000000000000000000000000000000000000000bbbb000000000000000000000000000000000000000000000000000000000000dddd")
+                sinkC_write.bits.dataId:set(0)
 
---         env.negedge()
---             reqArb_read.ready:expect(1)
---             reqArb_read.bits.dataId:set(0)
---             reqArb_read.valid:set(1)
---         env.negedge()
---             reqArb_read.valid:set(0)
+        env.posedge(100)
+    end
+}
 
---         env.negedge()
+local test_write_priority = env.register_test_case "test_write_priority" {
+    function ()
+        env.dut_reset()
 
---         env.posedge(100)
---     end
--- }
+        -- DataStorage write should block SinkC and RXDAT write
+        env.negedge()
+            ds_write.valid:set(1)
+                dut.io_fromDS_dsDest_ds4:set(TempDataStorage)
+            sinkC_write.valid:set(1)
+                sinkC_write.bits.wrMaskOH:set(0x01)
+                sinkC_write.bits.dataId:set(0)
+            rxdat_write.valid:set(1)
+                rxdat_write.bits.wrMaskOH:set(0x01)
+                rxdat_write.bits.dataId:set(0)
+        env.negedge()
+            sinkC_write.ready:expect(0)
+            rxdat_write.ready:expect(0)
+            ds_write.valid:set(0)
+            sinkC_write.valid:set(0)
+            rxdat_write.valid:set(0)
+
+        -- RXDAT write should block SinkC write
+        env.negedge()
+            sinkC_write.valid:set(1)
+                sinkC_write.bits.wrMaskOH:set(0x01)
+                sinkC_write.bits.dataId:set(1)
+            rxdat_write.valid:set(1)
+                rxdat_write.bits.wrMaskOH:set(0x01)
+                rxdat_write.bits.dataId:set(1)
+        env.negedge()
+            sinkC_write.ready:expect(0)
+            rxdat_write.ready:expect(1)
+            sinkC_write.valid:set(0)
+            rxdat_write.valid:set(0)
+
+        -- SourceD write should block RXDAT and SinkC write
+        dut.io_toSourceD_beatData_ready:set(0)
+        env.negedge()
+            ds_write.valid:set(1)
+                dut.io_fromDS_dsDest_ds4:set(SourceD)
+            sinkC_write.valid:set(1)
+                sinkC_write.bits.wrMaskOH:set(0x01)
+                sinkC_write.bits.dataId:set(2)
+            rxdat_write.valid:set(1)
+                rxdat_write.bits.wrMaskOH:set(0x01)
+                rxdat_write.bits.dataId:set(2)
+        env.negedge()
+            tempDS.stallOnSourceD_ts1:expect(1)
+            sinkC_write.ready:expect(0)
+            rxdat_write.ready:expect(0)
+            ds_write.valid:set(0)
+            rxdat_write.valid:set(0)
+            sinkC_write.valid:set(0)
+
+        env.posedge(100)
+    end
+}
+
+local test_write_to_ds = env.register_test_case "test_write_to_ds" {
+    function ()
+        env.dut_reset()
+
+        env.negedge()
+            ds_write.valid:set(1)
+            ds_write.bits.data:set_str("0x87654321")
+            dut.io_fromDS_dsDest_ds4:set(TempDataStorage)
+        env.negedge()
+            ds_write.valid:set(0)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return to_ds_write:fire() and to_ds_write.bits.data:get()[1] == 0x87654321 and to_ds_write.bits.set:get() == 0x10 and to_ds_write.bits.way:get() == 0x01
+                end)
+                to_ds_write:dump()
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return to_ds_write:fire()
+                end)
+            end
+        }
+
+        env.negedge()
+            reqArb_read.ready:expect(1)
+            reqArb_read.valid:set(1)
+            reqArb_read.bits.dataId:set(0)
+            reqArb_read.bits.dest:set(DataStorage)
+            dut.io_fromReqArb_dsWrSet:set(0x10)
+            dut.io_fromReqArb_dsWrWay:set(0x01)
+        env.negedge()
+            reqArb_read.valid:set(0)
+
+        env.posedge(100)
+    end
+}
+
+local test_write_to_ds_and_sourceD = env.register_test_case "test_write_to_ds_and_sourceD" {
+    function ()
+        env.dut_reset()
+
+        dut.io_toSourceD_beatData_ready:set(1)
+
+        env.negedge()
+            ds_write.valid:set(1)
+            ds_write.bits.data:set_str("0x87654321")
+            dut.io_fromDS_dsDest_ds4:set(TempDataStorage)
+        env.negedge()
+            ds_write.valid:set(0)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return to_ds_write:fire() and to_ds_write.bits.data:get()[1] == 0x87654321 and to_ds_write.bits.set:get() == 0x10 and to_ds_write.bits.way:get() == 0x01
+                end)
+                to_ds_write:dump()
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return to_ds_write:fire()
+                end)
+            end,
+            function ()
+                env.expect_happen_until(100, function ()
+                    return dataOut:fire() and dataOut.bits.data:get()[1] == 0x87654321 and dataOut.bits.last:get() == 0
+                end)
+                dataOut:dump()
+
+                env.posedge()
+                env.expect_happen_until(100, function ()
+                    return dataOut:fire() and dataOut.bits.data:get()[1] == 0 and dataOut.bits.last:get() == 1
+                end)
+                dataOut:dump()
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return dataOut:fire()
+                end)
+            end
+        }
+
+        env.negedge()
+            reqArb_read.ready:expect(1)
+            reqArb_read.valid:set(1)
+            reqArb_read.bits.dataId:set(0)
+            reqArb_read.bits.dest:set(DataStorage + SourceD)
+            dut.io_fromReqArb_dsWrSet:set(0x10)
+            dut.io_fromReqArb_dsWrWay:set(0x01)
+        env.negedge()
+            reqArb_read.valid:set(0)
+
+        env.posedge(100)
+    end
+}
 
 verilua "appendTasks" {
     maint_task = function ()
         sim.dump_wave()
         env.dut_reset()
 
-        test_basic_read_write()
         test_flush_entry()
         test_read_and_flush_entry()
-        test_write_until_full()
         test_bypass_sourceD()
+
+        test_basic_ds_read_write()
+        test_ds_write_until_full()
         test_write_on_stalled_sourceD()
-
         test_rxdat_write()
+        test_sinkc_write()
 
-        -- test_reqArb_read()
+        test_write_priority()
+
+        test_write_to_ds()
+        test_write_to_ds_and_sourceD()
 
         env.posedge(100)
         env.TEST_SUCCESS()

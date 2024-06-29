@@ -64,6 +64,7 @@ class MshrTasks()(implicit p: Parameters) extends L2Bundle {
 class MshrResps()(implicit p: Parameters) extends L2Bundle {
     val rxdat = Flipped(ValidIO(new CHIRespBundle(chiBundleParams)))
     val sinke = Flipped(ValidIO(new TLRespBundle(tlBundleParams)))
+    val sinkc = Flipped(ValidIO(new TLRespBundle(tlBundleParams)))
 }
 
 class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
@@ -211,20 +212,28 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
             gotDirty := gotDirty || rxdat.bits.resp === Resp.UC_PD
         }
     }
-    assert(!(io.resps.rxdat.fire && state.w_compdat), s"mshr_${id} is not watting for rxdat")
+    assert(!(rxdat.fire && state.w_compdat), s"mshr_${id} is not watting for rxdat")
 
+    /**
+      * A MSHR will wait GrantAck for Acquire requests.
+      * If mshr not receive a GrantAck, it cannot be freed. 
+      * This allow external logic to check the mshr to determine whether the Grant/GrantData has been received by upstream cache.
+      * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
+      */
     val sinke = io.resps.sinke
     when(sinke.fire) {
-
-        /**
-          * A MSHR will wait GrantAck for Acquire requests.
-          * If mshr not receive a GrantAck, it cannot be freed. 
-          * This allow external logic to check the mshr to determine whether the Grant/GrantData has been received by upstream cache.
-          * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
-          */
         state.w_grantack := true.B
     }
-    assert(!(io.resps.sinke.fire && state.w_grantack), s"mshr_${id} is not watting for sinke")
+    assert(!(sinke.fire && state.w_grantack), s"mshr_${id} is not watting for sinke")
+
+    /**
+      * Receive ProbeAck/ProbeAckData
+      */
+    val sinkc = io.resps.sinkc
+    when(sinkc.fire) {
+        // TODO:
+    }
+    assert(!(sinkc.fire && !(state.w_probeack && state.w_pprobeack && state.w_rprobeack)), s"mshr_${id} is not watting for sinkc")
 
     // val rxrsp = io.resps.rxrsp
 

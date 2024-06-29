@@ -83,13 +83,6 @@ local function reset_ready()
     dut.io_dirRead_s1_ready = 0
 end
 
-local function send_wr_crd()
-    dut.io_dsWrCrd = 1
-    env.negedge()
-    dut.io_dsWrCrd = 0
-    env.negedge()
-end
-
 local test_basic_mshr_req = env.register_test_case "test_basic_mshr_req" {
     function ()
         env.dut_reset()
@@ -125,7 +118,6 @@ local test_basic_sink_req = env.register_test_case "test_basic_sink_req" {
     function ()
         env.dut_reset()
         set_ready()
-        send_wr_crd()
 
         env.posedge()
 
@@ -150,7 +142,6 @@ local test_mshr_block_sink_req = env.register_test_case "test_mshr_block_sink_re
     function ()
         env.dut_reset()
         set_ready()
-        send_wr_crd()
 
         env.posedge()
 
@@ -191,7 +182,7 @@ local test_sinkC_block_sinkA = env.register_test_case "test_sinkC_block_sinkA" {
     function ()
         env.dut_reset()
         set_ready()
-        send_wr_crd()
+        -- send_wr_crd()
 
         env.posedge()
 
@@ -217,65 +208,13 @@ local test_sinkC_block_sinkA = env.register_test_case "test_sinkC_block_sinkA" {
     end
 }
 
-local test_basic_release_data = env.register_test_case "test_release_data" {
-    function ()
-        env.dut_reset()
-        set_ready()
-        send_wr_crd()
-
-        env.posedge()
-        
-        env.negedge()
-            expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
-            taskSinkC_s1.valid:set(1)
-            taskSinkC_s1.bits.set:set(0x01)
-            taskSinkC_s1.bits.tag:set(0x02)
-            taskSinkC_s1.bits.opcode:set(TLOpcodeC.ReleaseData)
-            dataSinkC_s1:set_str("0x1234") -- beat 0
-        env.posedge()
-            expect.equal(reqArb.io_dirRead_s1_valid:get(), 1)
-        env.negedge()
-            expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
-            dataSinkC_s1:set_str("0x5678") -- beat 1
-        env.posedge()
-            expect.equal(reqArb.io_dsWrite_s2_valid:get(), 1)
-            expect.equal(reqArb.io_dsWrite_s2_bits_set:get(), 0x1)
-            expect.equal(reqArb.io_dsWrite_s2_bits_data:get_str(HexStr), "00000000000000000000000000000000000000000000000000000000000056780000000000000000000000000000000000000000000000000000000000001234")
-        env.negedge()
-            expect.equal(taskSinkC_s1.ready:get(), 0)
-            expect.equal(reqArb.dsWrCnt:get(), 0)
-            taskSinkC_s1.valid:set(0)
-        
-        env.posedge(math.random(5, 10), function (c)
-            expect.equal(taskSinkC_s1.ready:get(), 0)
-            expect.equal(reqArb.dsWrCnt:get(), 0) -- should not be valid until new credit return
-        end)
-
-        -- Release can be accepted witout watting for the credit return
-        env.negedge()
-            taskSinkC_s1.bits.opcode:set(TLOpcodeC.Release)
-        env.negedge()
-            expect.equal(taskSinkC_s1.ready:get(), 1)
-
-        send_wr_crd()
-        expect.equal(reqArb.dsWrCnt:get(), 1)
-        
-        env.posedge(10)
-        reset_ready()
-    end
-}
-
 local test_basic_release = env.register_test_case "test_basic_release" {
     function ()
         env.dut_reset()
         set_ready()
-        send_wr_crd()
 
         env.negedge()
             expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
             taskSinkC_s1.valid:set(1)
             taskSinkC_s1.bits.set:set(0x01)
             taskSinkC_s1.bits.tag:set(0x02)
@@ -284,16 +223,12 @@ local test_basic_release = env.register_test_case "test_basic_release" {
             expect.equal(reqArb.io_dirRead_s1_valid:get(), 1)
         env.negedge()
             expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.io_dsWrite_s2_valid:get(), 0)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
             taskSinkC_s1.valid:set(0)
         env.negedge()
             expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
         
         env.posedge(math.random(3, 10), function (c)
             expect.equal(taskSinkC_s1.ready:get(), 1)
-            expect.equal(reqArb.dsWrCnt:get(), 1)
         end)
 
         env.posedge(10)
@@ -313,7 +248,7 @@ verilua "mainTask" {
         test_mshr_block_sink_req()
         test_sinkC_block_sinkA()
 
-        test_basic_release_data()
+        -- test_basic_release_data() -- this test is moved into Slice.lua / SinkC.lua
         test_basic_release()
 
         env.TEST_SUCCESS()

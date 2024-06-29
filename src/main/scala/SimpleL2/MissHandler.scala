@@ -39,19 +39,44 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.alloc_s3.bits  := io.mshrAlloc_s3.bits
     }
 
-    val rxdatMatchOH = UIntToOH(io.resps.rxdat.bits.txnID)
+    val rxdat        = io.resps.rxdat
+    val rxdatMatchOH = UIntToOH(rxdat.bits.txnID)
     mshrs.zip(rxdatMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io.resps.rxdat.valid := io.resps.rxdat.valid && en
-        mshr.io.resps.rxdat.bits  := io.resps.rxdat.bits
+        mshr.io.resps.rxdat.valid := rxdat.valid && en
+        mshr.io.resps.rxdat.bits  := rxdat.bits
 
         assert(!(mshr.io.resps.rxdat.valid && !mshr.io.status.valid), s"rxdat valid but mshr_${i} invalid")
     }
+    assert(!(rxdat.fire && !rxdatMatchOH.orR), "rxdat does not match any mshr! txnID => %d/0x%x", rxdat.bits.txnID, rxdat.bits.txnID)
 
-    val sinkeMatchOH = UIntToOH(io.resps.sinke.bits.sink)
+    val sinke        = io.resps.sinke
+    val sinkeMatchOH = UIntToOH(sinke.bits.sink)
     mshrs.zip(sinkeMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io.resps.sinke.valid := io.resps.sinke.valid && en
-        mshr.io.resps.sinke.bits  := io.resps.sinke.bits
+        mshr.io.resps.sinke.valid := sinke.valid && en
+        mshr.io.resps.sinke.bits  := sinke.bits
+
+        assert(!(mshr.io.resps.sinke.valid && !mshr.io.status.valid), s"sinke valid but mshr_${i} invalid")
     }
+    assert(!(sinke.fire && !sinkeMatchOH.orR), "sinke does not match any mshr! sink => %d/0x%x", sinke.bits.sink, sinke.bits.sink)
+
+    val sinkc           = io.resps.sinkc
+    val sinkcSetMatchOH = VecInit(mshrs.map(_.io.status.set === sinkc.bits.set)).asUInt
+    val sinkcTagMatchOH = VecInit(mshrs.map(_.io.status.tag === sinkc.bits.tag)).asUInt
+    val sinkcMatchOH    = mshrValidVec & sinkcSetMatchOH & sinkcTagMatchOH
+    mshrs.zip(sinkcMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
+        mshr.io.resps.sinkc.valid := sinkc.valid && en
+        mshr.io.resps.sinkc.bits  := sinkc.bits
+
+        assert(!(mshr.io.resps.sinkc.valid && !mshr.io.status.valid), s"sinkc valid but mshr_${i} invalid")
+    }
+    assert(
+        !(sinkc.fire && !sinkcMatchOH.orR),
+        "sinkc does not match any mshr! set => %d/0x%x, tag => %d/0x%x",
+        sinkc.bits.set,
+        sinkc.bits.set,
+        sinkc.bits.tag,
+        sinkc.bits.tag
+    )
 
     val mshrCount = PopCount(mshrValidVec)
     val mshrFull  = mshrCount >= nrMSHR.U

@@ -33,6 +33,20 @@ def test_all(test_targets):
 | [{index}/{max_tests}] => test SUCCESS! package: {package} target: {target}  
 ---------------------------------------------------------
 """)
+        
+def test_all_summary(test_targets):
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    RESET = "\033[0m"
+    print("\n---------------------- test_all summary ---------------------")
+    for index, (package, target, cmd) in enumerate(test_targets):
+        with open(f".verilua/{target}/run.log", 'r') as file:
+            content = file.read()
+            if ">>>TEST_SUCCESS!<<<" in content:
+                print(f"[{index:2}] {f"{package}.{target}":40} test {GREEN}SUCCESS!{RESET} |")
+            else:
+                print(f"[{index:2}] {f"{package}.{target}":40} test  {RED}FAILED!{RESET} |")
+    print("--------------------------------------------------------------\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
@@ -62,4 +76,5 @@ if __name__ == "__main__":
             json_data = json.load(file)
         test_targets = [(entry['package'], entry['target'], entry.get('unit_test_cmd', "")) for entry in json_data if entry['unit_test']]
         test_all(test_targets)
+        test_all_summary(test_targets)
         

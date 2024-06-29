@@ -52,6 +52,13 @@ local resp = ([[
     | dataId
 ]]):bundle{hier = cfg.top, prefix = "io_resp_", name = "resp"}
 
+local dsWrite = ([[
+    | valid
+    | ready
+    | bits_data => data
+    | bits_set => set
+]]):abdl{hier = cfg.top, prefix = "io_dsWrite_s2_", name = "dsWrite_s2", is_decoupled = false}
+
 local tempDS = ([[
     | valid
     | wrMaskOH
@@ -59,22 +66,35 @@ local tempDS = ([[
     | dataId
 ]]):bundle{hier = cfg.top, prefix = "io_toTempDS_dataWr_", name = "tempDS"}
 
+local respDest = ([[
+    | valid
+    | mshrId
+    | set 
+    | tag
+    | isTempDS
+    | isDS
+]]):bundle{hier = cfg.top, prefix = "io_respDest_", name = "respDest"}
+
 local sinkC = dut.u_SinkC
 
-local function send_crd()
+local function send_respDest(set, tag,mshrId, isTempDS, isDS)
     env.negedge()
-        dut.io_toDS_dsWrite_s2_crdv:set(1)
+        respDest.valid:set(1)
+        respDest.bits.mshrId:set(mshrId)
+        respDest.bits.set:set(set)
+        respDest.bits.tag:set(tag)
+        respDest.bits.isTempDS:set(isTempDS)
+        respDest.bits.isDS:set(isDS)
     env.negedge()
-        dut.io_toDS_dsWrite_s2_crdv:set(0)
+        respDest.valid:set(0)
     env.negedge()
 end
-
 
 local test_simple_releasedata = env.register_test_case "test_simple_releasedata" {
     function ()
         env.dut_reset()
 
-        send_crd()
+        dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(1)
 
         verilua "appendTasks" {
@@ -98,6 +118,7 @@ local test_simple_releasedata = env.register_test_case "test_simple_releasedata"
 
         env.negedge()
             sinkC.first:expect(1)
+            tl_c.ready:expect(1)
             tl_c.bits.address:set(to_address(0x10, 0x20), true)
             tl_c.bits.opcode:set(TLOpcodeC.ReleaseData)
             tl_c.bits.data:set_str("0xdead")
@@ -109,7 +130,6 @@ local test_simple_releasedata = env.register_test_case "test_simple_releasedata"
             tl_c.ready:expect(1)
             tl_c.bits.data:set_str("0xbeef")
         env.negedge()
-            tl_c.ready:expect(0) -- credit has been consumed
             tl_c.valid:set(0)
 
         env.posedge(500)
@@ -120,6 +140,7 @@ local test_simple_release = env.register_test_case "test_simple_release" {
     function ()
         env.dut_reset()
 
+        dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(1)
 
         verilua "appendTasks" {
@@ -143,6 +164,7 @@ local test_simple_release = env.register_test_case "test_simple_release" {
 
         env.negedge()
             sinkC.first:expect(1)
+            tl_c.ready:expect(1)
             tl_c.bits.address:set(to_address(0x10, 0x20), true)
             tl_c.bits.opcode:set(TLOpcodeC.Release)
             tl_c.bits.source:set(8)
@@ -160,7 +182,10 @@ local test_simple_release = env.register_test_case "test_simple_release" {
 local test_simple_probeackdata = env.register_test_case "test_simple_probeackdata" {
     function ()
        env.dut_reset()
+    
+       send_respDest(0x10, 0x20, 0, 1, 0) -- send to TempDS
 
+       dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
        dut.io_toTempDS_dataWr_ready:set(1)
 
@@ -192,8 +217,9 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
             end
        }
         
-       env.negedge()
+        env.negedge(3)
             sinkC.first:expect(1)
+            tl_c.ready:expect(1)
             tl_c.bits.address:set(to_address(0x10, 0x20), true)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
             tl_c.bits.data:set_str("0xdead")
@@ -207,7 +233,36 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
         env.negedge()
             tl_c.valid:set(0)
        
-       env.posedge(200)
+        env.posedge(200)
+
+        send_respDest(0x10, 0x20, 0, 0, 1) -- send to DS
+        -- send_crd()
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return dsWrite.valid:get() == 1 and dsWrite.data:get_str(HexStr) == "000000000000000000000000000000000000000000000000000000000000bbbb000000000000000000000000000000000000000000000000000000000000dddd"
+                end)
+            end
+        }
+
+        env.negedge(3)
+            sinkC.first:expect(1)
+            tl_c.ready:expect(1)
+            tl_c.bits.address:set(to_address(0x10, 0x20), true)
+            tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
+            tl_c.bits.data:set_str("0xdddd")
+            tl_c.bits.source:set(8)
+            tl_c.bits.size:set(6) -- 2^6 = 64 Bytes
+            tl_c.valid:set(1)
+        env.negedge()
+            sinkC.first:expect(0)
+            tl_c.ready:expect(1)
+            tl_c.bits.data:set_str("0xbbbb")
+        env.negedge()
+            tl_c.valid:set(0)
+
+        env.posedge(200)
     end
 }
 
@@ -215,6 +270,7 @@ local test_simple_probeack = env.register_test_case "test_simple_probeack" {
     function ()
        env.dut_reset()
 
+       dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
        dut.io_toTempDS_dataWr_ready:set(1)
 
@@ -238,6 +294,7 @@ local test_simple_probeack = env.register_test_case "test_simple_probeack" {
 
         env.negedge()
             sinkC.first:expect(1)
+            tl_c.ready:expect(1)
             tl_c.bits.address:set(to_address(0x10, 0x20), true)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAck)
             tl_c.bits.source:set(8)
@@ -256,12 +313,14 @@ local test_stalled_release_releasedata = env.register_test_case "test_stalled_re
     function ()
         env.dut_reset()
 
+        dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(0)
         dut.io_toTempDS_dataWr_ready:set(0)
 
         env.posedge()
 
         env.negedge()
+            tl_c.ready:expect(1)
             tl_c.bits.opcode:set(TLOpcodeC.ReleaseData)
             tl_c.bits.size:set(6)
             tl_c.valid:set(1)
@@ -295,12 +354,14 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
     function ()
         env.dut_reset()
 
+        dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(0)
         dut.io_toTempDS_dataWr_ready:set(0)
 
         env.posedge()
 
         env.negedge()
+            tl_c.ready:expect(0)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
             tl_c.bits.size:set(6)
             tl_c.valid:set(1)
@@ -352,10 +413,13 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
 
         -- probeack cannot be stalled
         env.negedge()
+            tl_c.ready:expect(0)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAck)
             tl_c.valid:set(1)
         env.negedge()
             tl_c.valid:set(0)
+
+        -- TODO: dsWrite_s2 stall
 
         env.posedge(100)
     end

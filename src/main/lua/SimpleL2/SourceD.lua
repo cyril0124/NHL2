@@ -322,7 +322,7 @@ local test_grantdata_continuous_stall_2 = env.register_test_case "test_grantdata
 
         env.negedge(math.random(3, 10))
             tl_d.ready:set(0)
-            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_bits_data:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
             sourceD.io_tempDataResp_valid:set(1)
         env.negedge()
             sourceD.io_tempDataResp_valid:set(0)
@@ -411,25 +411,25 @@ local test_grantdata_continuous_stall_4 = env.register_test_case "test_grantdata
             tl_d.ready:set(1)
         
         env.negedge(math.random(3, 10))
-            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_bits_data:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
             sourceD.io_tempDataResp_valid:set(1)
         env.negedge()
             sourceD.io_tempDataResp_valid:set(0)
 
         env.negedge(math.random(3, 10))
-            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_bits_data:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
             sourceD.io_tempDataResp_valid:set(1)
         env.negedge()
             sourceD.io_tempDataResp_valid:set(0)
 
         env.negedge(math.random(3, 10))
-            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_bits_data:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
             sourceD.io_tempDataResp_valid:set(1)
         env.negedge()
             sourceD.io_tempDataResp_valid:set(0)
         
         env.negedge(math.random(3, 10))
-            sourceD.io_tempDataResp_bits:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
+            sourceD.io_tempDataResp_bits_data:set_str("0x00000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000500")
             sourceD.io_tempDataResp_valid:set(1)
         env.negedge()
             sourceD.io_tempDataResp_valid:set(0)

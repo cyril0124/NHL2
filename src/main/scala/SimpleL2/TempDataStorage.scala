@@ -50,11 +50,11 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val fromSinkC = new Bundle {
-            val write = Flipped(DecoupledIO(new TempDataWrite)) // TODO:
+            val write = Flipped(DecoupledIO(new TempDataWrite))
         }
 
         val toDS = new Bundle {
-            val dsWrite = DecoupledIO(new DSWrite) // TODO:
+            val dsWrite = ValidIO(new DSWrite) // TODO:
         }
 
         val fromSourceD = new Bundle {
@@ -72,10 +72,9 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val fromReqArb = new Bundle {
-            val read = Flipped(DecoupledIO(new TempDataReadReq))
-            // TODO: set and way for dsWrite
-            // val dsWrSet
-            // val dsWrWay
+            val read    = Flipped(DecoupledIO(new TempDataReadReq))
+            val dsWrSet = Input(UInt(setBits.W))
+            val dsWrWay = Input(UInt(wayBits.W))
         }
 
         val flushEntry = Flipped(ValidIO(UInt(dataIdBits.W))) // TODO: from MainPipe
@@ -98,6 +97,7 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val wen_sourceD_ts1    = stallOnSourceD_ts1
     val wen_ds_ts1         = io.fromDS.dsDest_ds4 === DataDestination.TempDataStorage && io.fromDS.dsResp_ds4.valid
     val wen_rxdat_ts1      = io.fromRXDAT.write.fire
+    val wen_sinkc_ts1      = io.fromSinkC.write.fire
     val ren_sourceD_ts1    = io.fromSourceD.read.fire
     val ren_reqArb_ts1     = io.fromReqArb.read.fire
     assert(
@@ -107,17 +107,49 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         wen_ds_ts1,
         wen_rxdat_ts1
     )
-    assert(PopCount(Seq(ren_sourceD_ts1, ren_reqArb_ts1)) <= 1.U, "ren_sourceD_ts1: %d, ren_reqArb_ts1: %d", ren_sourceD_ts1, ren_reqArb_ts1)
-    assert(!(wen_sourceD_ts1 && wen_ds_ts1), "wen_sourceD_ts1: %d, wen_ds_ts1: %d", wen_sourceD_ts1, wen_ds_ts1)
+    assert(PopCount(Seq(ren_sourceD_ts1, ren_reqArb_ts1)) <= 1.U, "multiple read! ren_sourceD_ts1: %d, ren_reqArb_ts1: %d", ren_sourceD_ts1, ren_reqArb_ts1)
+    assert(
+        PopCount(Seq(wen_sourceD_ts1, wen_ds_ts1, wen_rxdat_ts1, wen_sinkc_ts1, ren_sourceD_ts1, ren_reqArb_ts1)) <= 1.U,
+        "multiple write! wen_sourceD_ts1: %d, wen_ds_ts1: %d, wen_rxdat_ts1: %d, wen_sinkc_ts1: %d, ren_sourceD_ts1: %d, ren_reqArb_ts1: %d",
+        wen_sourceD_ts1,
+        wen_ds_ts1,
+        wen_rxdat_ts1,
+        wen_sinkc_ts1,
+        ren_sourceD_ts1,
+        ren_reqArb_ts1
+    )
+    assert(!(wen_sourceD_ts1 && wen_ds_ts1), "wen_sourceD_ts1 and wen_ds_ts1 are both true! only one can be true")
 
-    val wen_ts1      = wen_sourceD_ts1 || wen_ds_ts1 || wen_rxdat_ts1
-    val wrIdx_ts1    = Mux(io.fromRXDAT.write.valid, io.fromRXDAT.write.bits.dataId, freeDataIdx)                                           // Mux(io.fromDS.dsResp_ds4.valid, freeDataIdx, DontCare) // TODO:
-    val wrMaskOH_ts1 = MuxCase("b00".U, Seq((wen_sourceD_ts1 || wen_ds_ts1) -> "b11".U, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.wrMaskOH)) // TODO:
+    val wen_ts1 = wen_sourceD_ts1 || wen_ds_ts1 || wen_rxdat_ts1 || wen_sinkc_ts1
+    val wrIdx_ts1 = MuxCase(
+        freeDataIdx,
+        Seq(
+            io.fromRXDAT.write.valid   -> io.fromRXDAT.write.bits.dataId,
+            io.fromDS.dsResp_ds4.valid -> freeDataIdx,
+            io.fromSinkC.write.valid   -> io.fromSinkC.write.bits.dataId
+        )
+    )
+    val wrMaskOH_ts1 = MuxCase(
+        "b00".U,
+        Seq(
+            (wen_sourceD_ts1 || wen_ds_ts1) -> "b11".U,
+            wen_rxdat_ts1                   -> io.fromRXDAT.write.bits.wrMaskOH,
+            wen_sinkc_ts1                   -> io.fromSinkC.write.bits.wrMaskOH
+        )
+    )
+
     val ren_ts1      = ren_sourceD_ts1 || ren_reqArb_ts1
     val rdIdx_ts1    = Mux(ren_sourceD_ts1, io.fromSourceD.read.bits.dataId, io.fromReqArb.read.bits.dataId)
     val rdDest_ts1   = Mux(ren_reqArb_ts1, io.fromReqArb.read.bits.dest, DataDestination.SourceD)
     val rdDataId_ts1 = Mux(ren_reqArb_ts1, io.fromReqArb.read.bits.dataId, io.fromSourceD.read.bits.dataId)
-    assert(!(wen_ts1 && !wrMaskOH_ts1.orR), "wen_ts1 but wrMaskOH_ts1 is 0b00")
+    assert(
+        !(wen_ts1 && !wrMaskOH_ts1.orR),
+        "wen_ts1 but wrMaskOH_ts1 is 0b00, wen_sourceD:%d, wen_ds:%d, wen_rxdat:%d, wen_sinkc:%d",
+        wen_sourceD_ts1,
+        wen_ds_ts1,
+        wen_rxdat_ts1,
+        wen_sinkc_ts1
+    )
     assert(!(wen_ts1 && ren_ts1), "try to write and read at the same time")
 
     val wrData_ts1 = MuxCase(
@@ -127,10 +159,13 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         )
     )
 
+    val dsWrSet_ts1 = io.fromReqArb.dsWrSet
+    val dsWrWay_ts1 = io.fromReqArb.dsWrWay
+
     /** 
-     * Write beatData(32-bytes) into internal SRAM.
-     * A complete cacheline data(64-bytes) should be splited into multiple banks due to physical constrain or chip technolocy limitation(for more information, please refer to the SRAM data book provided by specific foundary).
-     */
+      * Write beatData(32-bytes) into internal SRAM.
+      * A complete cacheline data(64-bytes) should be splited into multiple banks due to physical constrain or chip technolocy limitation(for more information, please refer to the SRAM data book provided by specific foundary).
+      */
     val tempDataSRAMs = Seq.fill(nrBeat) {
         Module(
             new SRAMTemplate(
@@ -156,7 +191,8 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
                 0.U.asTypeOf(new TempDataEntry),
                 Seq(
                     (wen_sourceD_ts1 || wen_ds_ts1) -> TempDataEntry(wrData_ts1(255 * i + 255, i * 256)),
-                    wen_rxdat_ts1                   -> TempDataEntry(io.fromRXDAT.write.bits.beatData)
+                    wen_rxdat_ts1                   -> TempDataEntry(io.fromRXDAT.write.bits.beatData),
+                    wen_sinkc_ts1                   -> TempDataEntry(io.fromSinkC.write.bits.beatData)
                 )
             ),
             setIdx = Mux(wen_rxdat_ts1, if (i == 0) wrIdx_ts1 else RegEnable(wrIdx_ts1, false.B, wen_ts1), wrIdx_ts1),
@@ -192,13 +228,13 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val dataToSourceD_ts2 = (rdDest_ts2 & DataDestination.SourceD).orR
     val dataToDs_ts2      = (rdDest_ts2 & DataDestination.DataStorage).orR
     val readToSourceD_ts2 = ren_ts2 && dataToSourceD_ts2 || RegNext(ren_ts2 && dataToSourceD_ts2, false.B)
-    // assert(PopCount(Seq(dataToSourceD_ts2, dataToDs_ts2)) <= 1.U)
+    val readToDS_ts2      = ren_ts2 && dataToDs_ts2
 
     /** 
-     * Split 512-bits of data into two 256-bits data. The splited data is originated from [[DataStorage]].
-     * If there is a hit on SinkA request, then we will need to bypass the data readed from [[DataStorage]] to [[SourceD]], 
-     * [[TempDataStorage]] is acted as a bypass data path in this case.
-     */
+      * Split 512-bits of data into two 256-bits data. The splited data is originated from [[DataStorage]].
+      * If there is a hit on SinkA request, then we will need to bypass the data readed from [[DataStorage]] to [[SourceD]], 
+      * [[TempDataStorage]] is acted as a bypass data path in this case.
+      */
     val dataSel = Module(new DataSelector)
     dataSel.io.dataIn.valid := io.fromDS.dsResp_ds4.valid || ren_ts2 && dataToSourceD_ts2
     dataSel.io.dataIn.bits  := Mux(readToSourceD_ts2, rdDatas_ts2.asUInt, io.fromDS.dsResp_ds4.bits.data)
@@ -208,14 +244,25 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     io.toSourceD.dataId         := Mux(ren_ts2 && dataToSourceD_ts2, rdDataId_ts2, freeDataIdx)
     io.freeDataId               := freeDataIdx
 
+    val dsWrSet_ts2 = RegEnable(dsWrSet_ts1, ren_ts1)
+    val dsWrWay_ts2 = RegEnable(dsWrWay_ts1, ren_ts1)
+    io.toDS.dsWrite.valid     := ren_ts2 && readToDS_ts2
+    io.toDS.dsWrite.bits.data := rdDatas_ts2.asUInt
+    io.toDS.dsWrite.bits.set  := dsWrSet_ts2
+    io.toDS.dsWrite.bits.way  := dsWrWay_ts2
+
     /** Arbitration between [[RequestArbiter]]'s read and [[SourceD]]'s read */
     io.fromReqArb.read.ready      := !io.fromSourceD.read.valid && !RegNext(io.fromReqArb.read.fire, false.B) // TODO: improve data bandwidth between SourceD and TempDataStorage?
     io.fromSourceD.read.ready     := !wen_ts1                                                                 // TODO: arbiter
     io.fromSourceD.resp.valid     := ren_sourceD_ts2
     io.fromSourceD.resp.bits.data := rdDatas_ts2.asUInt                                                       // 512-bits
 
-    /** [[DataStorage]] is non-blocking, hence we should give a highest priority */
-    io.fromRXDAT.write.ready := !wen_ds_ts1
+    /** 
+      * [[DataStorage]] is non-blocking, hence we should give a highest priority.
+      * Priority =>  [[DataStorage]] > [[SourceD]](stall on SourceD) > [[RXDAT]] > [[SinkC]]
+      */
+    io.fromRXDAT.write.ready := !wen_ds_ts1 && !wen_sourceD_ts1
+    io.fromSinkC.write.ready := !wen_ds_ts1 && !wen_sourceD_ts1 && !wen_rxdat_ts1
 
     /** Flush data SRAM entry of [[TempDataStorage]] */
     when(io.flushEntry.valid) {

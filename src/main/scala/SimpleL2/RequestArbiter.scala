@@ -19,7 +19,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         /** Channel request */
         val taskSinkA_s1 = Flipped(Decoupled(new TaskBundle))
         val taskSinkC_s1 = Flipped(Decoupled(new TaskBundle))
-        val dataSinkC_s1 = Input(UInt((beatBytes * 8).W))
         val taskSnoop_s1 = Flipped(Decoupled(new TaskBundle))
 
         /** Other request */
@@ -31,6 +30,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
         /** Read [[TempDataStorage]] */
         val tempDsRead_s1 = DecoupledIO(new TempDataReadReq)
+        val dsWrSet_s1    = Output(UInt(setBits.W))
+        val dsWrWay_s1    = Output(UInt(wayBits.W))
+
+        val dsRefillWriteCrdv = Input(Bool())
 
         /** Send task to [[MainPipe]] */
         val mpReq_s2 = ValidIO(new TaskBundle)
@@ -45,11 +48,26 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val valid_s1        = WireInit(false.B)
     val beatCntSinkC_s1 = RegInit(0.U(1.W))
 
+    val dsCreditCnt    = RegInit(0.U(1.W))
+    val tempDsRefillDs = io.tempDsRead_s1.fire && (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR
+    when(io.dsRefillWriteCrdv && !tempDsRefillDs) {
+        dsCreditCnt := dsCreditCnt + 1.U
+        assert(dsCreditCnt === 0.U)
+    }.elsewhen(!io.dsRefillWriteCrdv && tempDsRefillDs) {
+        dsCreditCnt := dsCreditCnt - 1.U
+        assert(dsCreditCnt === 1.U)
+    }
+
     // -----------------------------------------------------------------------------------------
     // Stage 0
     // -----------------------------------------------------------------------------------------
     // TODO: block mshr
-    io.taskMSHR_s0.ready := !valid_s1 && io.resetFinish && beatCntSinkC_s1 =/= 1.U
+    io.taskMSHR_s0.ready := !valid_s1 && io.resetFinish && beatCntSinkC_s1 =/= 1.U &&
+                            Mux(
+                                io.taskMSHR_s0.bits.readTempDs && (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR, 
+                                dsCreditCnt === 1.U, 
+                                true.B
+                            )
 
     // -----------------------------------------------------------------------------------------
     // Stage 1
@@ -97,6 +115,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.tempDsRead_s1.valid       := isTaskMSHR_s1 && task_s1.readTempDs && valid_s1
     io.tempDsRead_s1.bits.dataId := task_s1.dataId
     io.tempDsRead_s1.bits.dest   := task_s1.tempDsDest
+    io.dsWrSet_s1                := task_s1.set
+    io.dsWrWay_s1                := task_s1.wayOH
 
     val fireVec_s1 = VecInit(Seq(io.taskSinkA_s1.fire, io.taskSinkC_s1.fire, io.taskSnoop_s1.fire, io.taskCMO_s1.fire, io.taskReplay_s1.fire))
     dontTouch(fireVec_s1)

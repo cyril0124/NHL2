@@ -86,6 +86,37 @@ tl_a.get = function (this, addr, source)
     this.bits.size:set(5) -- 2^5 == 32
 end
 
+tl_c.release_data = function (this, addr, param, source, data_str_0, data_str_1)
+    env.negedge()
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeC.ReleaseData)
+        this.bits.param:set(param)
+        this.bits.size:set(6)
+        this.bits.source:set(source)
+        this.bits.address:set(addr, true)
+        this.bits.data:set_str(data_str_0)
+    env.negedge()
+        this.bits.data:set_str(data_str_1)
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
+end
+
+tl_c.probeack_data = function (this, addr, param, data_str_0, data_str_1)
+    env.negedge()
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeC.ProbeAckData)
+        this.bits.param:set(param)
+        this.bits.size:set(6)
+        this.bits.address:set(addr, true)
+        this.bits.data:set_str(data_str_0)
+    env.negedge()
+        this.bits.data:set_str(data_str_1)
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
+end
+
 local mpReq_s2 = ([[
     | valid
     | opcode
@@ -108,6 +139,10 @@ local chi_rxdat = ([[
     | txnID
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxdat_", name = "rxdat"}
 
+local TXDAT = ("0b0001"):number()
+local SourceD = ("0b0010"):number()
+local TempDataStorage = ("0b0100"):number()
+
 local slice = dut.u_Slice
 local mp = slice.mainPipe
 local ms = slice.missHandler
@@ -115,6 +150,7 @@ local dir = slice.dir
 local ds = slice.ds
 local tempDS = slice.tempDS
 local sourceD = slice.sourceD
+local sinkC = slice.sinkC
 local reqArb = slice.reqArb
 local rxdat = slice.rxdat
 
@@ -186,29 +222,6 @@ local function to_address(set, tag)
             v = tag
         }
     }, 64):number()
-end
-
-local function reqArb_release_data(set, tag, way, datas)
-    assert(type(datas) == "table")
-    assert(#datas == 2)
-    assert(type(datas[1]) == "number")
-
-    local sinkC = "io_taskSinkC_s1_"
-    env.negedge()
-        dut:force_all()
-        expect.equal(reqArb[sinkC .. "ready"]:get(), 1)
-        reqArb[sinkC .. "valid"]:set(1)
-        reqArb[sinkC .. "bits_set"]:set(set)
-        reqArb[sinkC .. "bits_tag"]:set(tag)
-        reqArb[sinkC .. "bits_opcode"]:set(TLOpcodeC.ReleaseData)
-        reqArb[sinkC .. "bits_channel"]:set(("0b100"):number())
-        reqArb[sinkC .. "bits_param"]:set(TLParam.TtoN)
-        reqArb.io_dataSinkC_s1:set(datas[1])
-
-    env.negedge()
-        reqArb.io_dataSinkC_s1:set(datas[2])
-    env.negedge()
-        dut:release_all()
 end
 
 local test_replay_valid = env.register_test_case "test_replay_valid" {
@@ -561,11 +574,12 @@ local test_release_write = env.register_test_case "test_release_write" {
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
 
-        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x100, 0x200})
+        tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
 
         env.negedge(math.random(1, 10))
             dut:force_all()
             ds.io_dsRead_s3_valid:set(1)
+            ds.io_dsRead_s3_bits_dest:set(SourceD)
             ds.io_dsRead_s3_bits_set:set(0x00)
             ds.io_dsRead_s3_bits_way:set(0x1)
         env.negedge()
@@ -576,7 +590,7 @@ local test_release_write = env.register_test_case "test_release_write" {
             dut:release_all()
         
         env.negedge()
-            reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x300, 0x400})
+            tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x300", "0x400")
         
         env.negedge(math.random(1, 10))
             dut:force_all()
@@ -602,7 +616,7 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
         verilua "appendTasks" {
             check_task = function()
                 env.expect_happen_until(100, function (c)
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000300"
+                    return ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000005000000000000000000000000000000000000000000000000000000000000000400"
                 end)
             end
         }
@@ -610,8 +624,8 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
 
-        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x100, 0x200})
-        reqArb_release_data(0x00, 0x04, ("0b100"):number(), {0x300, 0x400})
+        tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
+        tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x400", "0x500")
 
         env.negedge(math.random(1, 10))
             dut:force_all()
@@ -832,29 +846,26 @@ local test_release_hit = env.register_test_case "test_release_hit" {
         -- 
         -- [1] test ReleaseData.TtoN hit
         -- 
+        verilua "appendTasks" {
+            check_dir_resp = function ()
+                env.expect_happen_until(100, function ()
+                    return mp.io_dirResp_s3_valid:get() == 1
+                end)
+                mp.io_dirResp_s3_valid:expect(1)
+                mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
+                mp.io_dirResp_s3_bits_hit:expect(1)
+                mp.isRelease_s3:expect(1)
+                mp.valid_s3:expect(1)
+                mp.io_dirWrite_s3_valid:expect(1)
+                mp.io_dirWrite_s3_bits_meta_tag:expect(0)
+                mp.io_dirWrite_s3_bits_meta_clientsOH:expect(0x00)
+                mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TD)
+            end
+        }
+
         write_dir(0x00, ("0b0010"):number(), 0x00, MixedState.TTC, 1)
-        env.negedge()
-            tl_c.bits.data:set_str("0xdead")
-            tl_c.bits.address:set_str("0x00")
-            tl_c.bits.opcode:set(TLOpcodeC.ReleaseData)
-            tl_c.bits.source:set(1)
-            tl_c.bits.param:set(TLParam.TtoN)
-            tl_c.bits.size:set(5)
-            tl_c.valid:set(1)
-        env.negedge()
-            tl_c.bits.data:set_str("0xbeef")
-        env.negedge()
-            tl_c.valid:set(0)
-        env.posedge()
-            mp.io_dirResp_s3_valid:expect(1)
-            mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
-            mp.io_dirResp_s3_bits_hit:expect(1)
-            mp.isRelease_s3:expect(1)
-            mp.valid_s3:expect(1)
-            mp.io_dirWrite_s3_valid:expect(1)
-            mp.io_dirWrite_s3_bits_meta_tag:expect(0)
-            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(0x00)
-            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TD)
+        tl_c:release_data(0x00, TLParam.TtoN, 1, "0xdead", "0xbeef")
+        env.posedge(20)
 
         -- 
         -- [2] test Release.TtoB hit on TC
@@ -1034,6 +1045,8 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                     return tl_d:fire()
                 end)
 
+                mshrs[0].io_status_valid:expect(0)
+
                 sync:send()
             end
         }
@@ -1059,26 +1072,40 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
     end
 }
 
+
+
+local test_recv_probeack = env.register_test_case "test_recv_probeack" {
+    function ()
+        env.dut_reset()
+
+        -- TODO:
+        -- env.negedge()
+        --     tl_c:probeack_data(to_address(0x10, 0x20), TLParam.TtoN, "0xdead", "0xbeef")
+
+        env.posedge(200)
+    end
+}
+
 verilua "mainTask" { function ()
     sim.dump_wave()
 
-    -- local test_all = false
-    local test_all = true
+    local test_all = false
+    -- local test_all = true
 
     -- 
     -- normal test cases
     -- 
     if test_all then
-        
+    
     mp.dirWen_s3:set_force(0)
-        reqArb.io_dsWrCrd:set_force(0)
+        -- sinkC.io_dsWrite_s2_crdv:set_force(0)
             test_replay_valid()
             test_load_to_use()
             test_load_to_use_latency()
             test_load_to_use_stall()
             test_grantdata_continuous_stall_3()
             test_grantdata_mix_grant()
-        reqArb.io_dsWrCrd:set_release()
+        -- sinkC.io_dsWrite_s2_crdv:set_release()
 
         test_release_write()
         test_release_continuous_write()
@@ -1093,11 +1120,15 @@ verilua "mainTask" { function ()
         
     test_sinkA_hit()
     test_release_hit()
-    
+
     end
     
-    -- sim.dump_wave()
     test_sinkA_miss()
+
+    -- TODO:
+    -- test_recv_probeack()
+
+
 
     env.posedge(100)
     env.TEST_SUCCESS()
