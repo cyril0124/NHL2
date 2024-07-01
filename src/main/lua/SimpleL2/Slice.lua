@@ -1,15 +1,19 @@
 local utils = require "LuaUtils"
 local env = require "env"
 local tl = require "TileLink"
+local chi = require "CHI"
 local verilua = verilua
 local assert = assert
 local expect = env.expect
 
 local TLParam = tl.TLParam
 local TLOpcodeA = tl.TLOpcodeA
+local TLOpcodeB = tl.TLOpcodeB
 local TLOpcodeC = tl.TLOpcodeC
 local TLOpcodeD = tl.TLOpcodeD
 local MixedState = tl.MixedState
+
+local OpcodeDAT = chi.OpcodeDAT
 
 local resetFinish = (cfg.top .. ".u_Slice.dir.io_resetFinish"):chdl()
 
@@ -22,7 +26,18 @@ local tl_a = ([[
     | source
     | address
     | user_alias
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_a_"}
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_a_", name = "tl_a"}
+
+local tl_b = ([[
+    | valid
+    | ready
+    | opcode
+    | param
+    | size
+    | source
+    | address
+    | data
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_b_", name = "tl_b"}
 
 local tl_c = ([[
     | valid
@@ -33,7 +48,7 @@ local tl_c = ([[
     | source
     | address
     | data
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_c_"}
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_c_", name = "tl_c"}
 
 local tl_d = ([[
     | valid
@@ -43,15 +58,15 @@ local tl_d = ([[
     | source
     | param
     | opcode
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_d_"}
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_d_", name = "tl_d"}
 
 local tl_e = ([[
     | valid
     | ready
     | sink
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_e_"}
+]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_e_", name = "tl_e"}
 
-tl_a.acquire_block = function (this, addr, param, source)
+tl_a.acquire_block_1 = function (this, addr, param, source)
     assert(addr ~= nil)
     assert(param ~= nil)
 
@@ -61,6 +76,22 @@ tl_a.acquire_block = function (this, addr, param, source)
     this.bits.param:set(param)
     this.bits.source:set(source or 0)
     this.bits.size:set(5) -- 2^5 == 32
+end
+
+tl_a.acquire_block = function (this, addr, param, source)
+    assert(addr ~= nil)
+    assert(param ~= nil)
+
+    env.negedge()
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeA.AcquireBlock)
+        this.bits.address:set(addr, true)
+        this.bits.param:set(param)
+        this.bits.source:set(source or 0)
+        this.bits.size:set(5) -- 2^5 == 32
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
 end
 
 tl_a.acquire_perm = function (this, addr, param, source)
@@ -117,6 +148,28 @@ tl_c.probeack_data = function (this, addr, param, data_str_0, data_str_1)
     env.negedge()
 end
 
+tl_c.probeack = function (this, addr, param, source)
+    env.negedge()
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeC.ProbeAck)
+        this.bits.source:set(source)
+        this.bits.param:set(param)
+        this.bits.size:set(5)
+        this.bits.address:set(addr, true)
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
+end
+
+
+tl_e.grantack = function (this, sink)
+    env.negedge()
+        this.valid:set(1)
+        this.bits.sink:set(sink)
+    env.negedge()
+        this.valid:set(0)
+end
+
 local mpReq_s2 = ([[
     | valid
     | opcode
@@ -124,20 +177,52 @@ local mpReq_s2 = ([[
     | tag
 ]]):bundle {hier = cfg.top .. ".u_Slice.reqArb", is_decoupled = true, prefix = "io_mpReq_s2_", name = "mpReq_s2"}
 
-local txreq = ([[
+local chi_txreq = ([[
     | valid
     | ready
     | opcode
     | addr
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "txreq"}
+]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "chi_txreq"}
+
+local chi_txrsp = ([[
+    | valid
+    | ready
+    | opcode
+    | txnID
+]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txrsp_", name = "chi_txrsp"}
 
 local chi_rxdat = ([[
     | valid
     | ready
+    | opcode
     | dataID
     | data
     | txnID
+    | dbID
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxdat_", name = "rxdat"}
+
+chi_rxdat.compdat = function (this, txn_id, data_str_0, data_str_1, dbID)
+    local dbID = dbID or 0
+    env.negedge()
+        chi_rxdat.bits.txnID:set(txn_id)
+        chi_rxdat.bits.dataID:set(0)
+        chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+        chi_rxdat.bits.data:set_str(data_str_0)
+        chi_rxdat.bits.dbID:set(dbID)
+        chi_rxdat.valid:set(1)
+    env.negedge()
+        chi_rxdat.bits.data:set_str(data_str_1)
+        chi_rxdat.bits.dataID:set(2) -- last data beat
+    env.negedge()
+        chi_rxdat.valid:set(0)
+end
+
+local mp_dirResp = ([[
+    | valid
+    | bits_hit => hit
+    | bits_wayOH => way
+    | {p}_state => state
+]]):abdl {hier = cfg.top .. ".u_Slice.mainPipe", is_decoupled = true, prefix = "io_dirResp_s3_", name = "mp_dirResp", p = "bits_meta"}
 
 local TXDAT = ("0b0001"):number()
 local SourceD = ("0b0010"):number()
@@ -233,7 +318,7 @@ local test_replay_valid = env.register_test_case "test_replay_valid" {
         ms.io_mshrAlloc_s3_ready:set_force(0)
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 8) -- set = 0x00, tag = 0x04
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8) -- set = 0x00, tag = 0x04
         env.negedge()
             tl_a.valid:set(0)
         
@@ -271,7 +356,7 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
         slice.io_tl_d_ready:set(1)
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
         env.negedge()
             tl_a.valid:set(0)
 
@@ -325,7 +410,7 @@ local test_load_to_use_latency = env.register_test_case "test_load_to_use_latenc
         local end_cycle = 0
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
         
         start_cycle = env.cycles()
 
@@ -356,7 +441,7 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
         slice.io_tl_d_ready:set(0)
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 8)
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -462,11 +547,11 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
         }
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 1)
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 1)
         env.negedge()
-            tl_a:acquire_block(0x20000, TLParam.NtoT, 2)
+            tl_a:acquire_block_1(0x20000, TLParam.NtoT, 2)
         env.negedge()
-            tl_a:acquire_block(0x30000, TLParam.NtoT, 3)
+            tl_a:acquire_block_1(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -534,11 +619,11 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
         }
 
         env.negedge()
-            tl_a:acquire_block(0x10000, TLParam.NtoT, 1)
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 1)
         env.negedge()
             tl_a:acquire_perm(0x20000, TLParam.NtoT, 2)
         env.negedge()
-            tl_a:acquire_block(0x30000, TLParam.NtoT, 3)
+            tl_a:acquire_block_1(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
 
@@ -704,6 +789,7 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
                     expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
                     expect.equal(mp.needProbeOnHit_a_s3:get(), 1)
                     expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
+                env.dut_reset() -- prevent tempDS entry leak assert
 
                 -- [7] stage 2 & stage 3
                 sync:wait()
@@ -712,13 +798,14 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
                     expect.equal(mp.io_mshrAlloc_s3_valid:get(), 1)
                     expect.equal(mp.needProbeOnHit_a_s3:get(), 1)
                     expect.equal(mp.io_dirWrite_s3_valid:get(), 0)
-
+                env.dut_reset() -- prevent tempDS entry leak assert
             end
         }
 
         -- 
         -- [1] test AcquirePerm.NtoT hit on Tip Clean
         -- 
+        print "[1] test AcquirePerm.NtoT hit on Tip Clean"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
         env.negedge()
             tl_a:acquire_perm(to_address(0, 4), TLParam.NtoT, 1)
@@ -731,9 +818,10 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         -- 
         -- [2] test AcquireBlock.NtoT hit on Tip Clean
         -- 
+        print "[2] test AcquireBlock.NtoT hit on Tip Clean"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
         env.negedge()
-            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28) -- source = 28 ==> clientsOH = "0b10"
+            tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28) -- source = 28 ==> clientsOH = "0b10"
         env.negedge()
             tl_a.valid:set(0)
         sync:send()
@@ -743,6 +831,7 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         -- 
         -- [3] test Get hit on Tip Clean
         -- 
+        print "[3] test Get hit on Tip Clean"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 0)
         env.negedge()
             tl_a:get(to_address(0, 4), TLParam.NtoT, 28)
@@ -755,9 +844,10 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         -- 
         -- [4] test AcquireBlock hit on Tip Clean but met CacheAlias
         -- 
+        print "[4] test AcquireBlock hit on Tip Clean but met CacheAlias"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 2)
         env.negedge()
-            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+            tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28)
             tl_a.bits.user_alias:set(1)
         env.negedge()
             tl_a.valid:set(0)
@@ -768,9 +858,10 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         -- 
         -- [5] test AcquireBlock.NtoT hit and need read downward
         --
+        print "[5] test AcquireBlock.NtoT hit and need read downward"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.BC, 0)
         env.negedge()
-            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+            tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28)
         env.negedge()
             tl_a.valid:set(0)
         sync:send()
@@ -780,26 +871,28 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         -- 
         -- [6] test AcquireBlock.NtoT hit and need probe upward
         --
+        print "[6] test AcquireBlock.NtoT hit and need probe upward"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, 1)
         env.negedge()
-            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+            tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28)
         env.negedge()
             tl_a.valid:set(0)
         sync:send()
 
-        env.posedge(20)
+        resetFinish:posedge()
+
+        env.posedge(200)
 
         -- 
         -- [7] test Get hit and need probe upward
         --
+        print "[7] test Get hit and need probe upward"
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, 1)
         env.negedge()
             tl_a:get(to_address(0, 4), 28)
         env.negedge()
             tl_a.valid:set(0)
         sync:send()
-
-        env.posedge(20)
 
         env.posedge(100)
     end
@@ -814,7 +907,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         -- [1] test AcquireBlock miss
         -- 
         env.negedge()
-            tl_a:acquire_block(to_address(0, 4), TLParam.NtoT, 28)
+            tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28)
         env.negedge()
             tl_a.valid:set(0)
         env.posedge(2)
@@ -958,7 +1051,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         dut.io_chi_txrsp_ready:set(1)
 
         env.negedge()
-            tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
+            tl_a:acquire_block_1(to_address(0x10, 0x20), TLParam.NtoT, 3)
             tl_a.valid:set(1)
         env.negedge()
             tl_a.valid:set(0)
@@ -967,9 +1060,9 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
             mp.io_dirResp_s3_bits_hit:expect(0)
         
         env.expect_happen_until(10, function ()
-            return txreq.valid:get() == 1 and txreq.ready:get() == 1
+            return chi_txreq.valid:get() == 1 and chi_txreq.ready:get() == 1
         end)
-        txreq:dump()
+        chi_txreq:dump()
         mshrs[0].io_status_valid:expect(1)
         mshrs[0].io_status_set:expect(0x10)
         mshrs[0].io_status_tag:expect(0x20)
@@ -1002,10 +1095,6 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                 end)
             end,
 
-            -- check_ds = function()
-                
-            -- end
-
             check_channel = function ()
                 -- 
                 -- check grant data
@@ -1035,11 +1124,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                 -- 
                 -- send grant ack
                 -- 
-                env.negedge()
-                    tl_e.valid:set(1)
-                    tl_e.bits.sink:set(sink)
-                env.negedge()
-                    tl_e.valid:set(0)
+                tl_e:grantack(sink)
 
                 env.expect_not_happen_until(100, function ()
                     return tl_d:fire()
@@ -1052,35 +1137,239 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         }
 
         -- send data to l2cache
-        env.negedge()
-            chi_rxdat.bits.txnID:set(0)
-            chi_rxdat.bits.dataID:set(0)
-            chi_rxdat.bits.data:set_str("0xdead")
-            chi_rxdat.valid:set(1)
-        env.negedge()
-            chi_rxdat.bits.data:set_str("0xbeef")
-            chi_rxdat.bits.dataID:set(2) -- last data beat
-        env.negedge()
-            chi_rxdat.valid:set(0)
+        chi_rxdat:compdat(0, "0xdead", "0xbeef")
         
         env.negedge(math.random(10, 20))
             dut.io_tl_d_ready:set(1)
 
         sync:wait()
 
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0xdead and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                end)
+            end
+        }
+
+        -- read back data from DataStorage
+        env.negedge(math.random(1, 10))
+            dut:force_all()
+            ds.io_dsRead_s3_valid:set(1)
+            ds.io_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_dsRead_s3_bits_set:set(0x10)
+            ds.io_dsRead_s3_bits_way:set(0x00)
+        env.negedge()
+            dut:release_all()
+            dut:force_all()
+            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+        env.negedge(10)
+            dut:release_all()
+
         env.posedge(200)
     end
 }
 
-
-
-local test_recv_probeack = env.register_test_case "test_recv_probeack" {
+local test_acquire_and_release = env.register_test_case "test_acquire_and_release" {
     function ()
         env.dut_reset()
+        resetFinish:posedge()
 
-        -- TODO:
-        -- env.negedge()
-        --     tl_c:probeack_data(to_address(0x10, 0x20), TLParam.TtoN, "0xdead", "0xbeef")
+        tl_d.ready:set(1)
+        chi_txrsp.ready:set(1)
+        chi_txreq.ready:set(1)
+
+        -- 
+        -- send acquire block
+        -- 
+        verilua "appendTasks" {
+            check_mp = function ()
+                env.expect_happen_until(100, function ()
+                    return mp_dirResp.valid:get() == 1
+                end)
+                mp_dirResp:dump()
+                mp_dirResp.hit:expect(0)
+                mp_dirResp.state:expect(MixedState.I)
+
+                env.expect_happen_until(100, function ()
+                    return mp.io_dirWrite_s3_valid:get() == 1 and 
+                            mp.io_dirWrite_s3_bits_meta_tag:get() == 0x20 and 
+                            mp.io_dirWrite_s3_bits_meta_state:get() == MixedState.TTC and
+                            mp.io_dirWrite_s3_bits_meta_clientsOH:get() == 0x01
+                end)
+            end,
+
+            check_d_resp = function ()
+                env.expect_happen_until(100, function ()
+                    return tl_d:fire() and tl_d.bits.data:get()[1] == 0xdead and tl_d.bits.param:get() == TLParam.toT
+                end)
+                tl_d:dump()
+
+                env.expect_happen_until(100, function ()
+                    return tl_d:fire() and tl_d.bits.data:get()[1] == 0xbeef and tl_d.bits.param:get() == TLParam.toT
+                end)
+                tl_d:dump()
+            end,
+        }
+        
+        tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
+        
+        env.negedge(math.random(10, 20))
+        chi_rxdat:compdat(0, "0xdead", "0xbeef")
+
+        env.negedge(math.random(10, 20))
+        mshrs[0].io_status_valid:expect(1)
+        tl_e:grantack(0)
+
+        env.negedge(math.random(10, 20))
+        mshrs[0].io_status_valid:expect(0)
+
+
+        -- 
+        -- read back data from DataStorage
+        -- 
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0xdead and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                end)
+            end
+        }
+
+        env.negedge(math.random(1, 10))
+            dut:force_all()
+            ds.io_dsRead_s3_valid:set(1)
+            ds.io_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_dsRead_s3_bits_set:set(0x10)
+            ds.io_dsRead_s3_bits_way:set(0x00)
+        env.negedge()
+            dut:release_all()
+            dut:force_all()
+            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+        env.negedge(10)
+            dut:release_all()
+
+
+        -- 
+        -- send release data
+        -- 
+        verilua "appendTasks" {
+            check_c_resp = function ()
+                env.expect_happen_until(100, function ()
+                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.ReleaseAck and tl_d.bits.source:get() == 11
+                end)
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return tl_d:fire()
+                end)
+            end
+        }
+        env.negedge()
+        tl_c:release_data(to_address(0x10, 0x20), TLParam.TtoN, 11, "0x100", "0x200")
+
+        env.negedge(20)
+
+        -- 
+        -- read back data from DataStorage
+        -- 
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0x100 and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                end)
+                ds.io_toTempDS_dsResp_ds4_bits_data:dump()
+            end
+        }
+
+        env.negedge(math.random(1, 10))
+            dut:force_all()
+            ds.io_dsRead_s3_valid:set(1)
+            ds.io_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_dsRead_s3_bits_set:set(0x10)
+            ds.io_dsRead_s3_bits_way:set(0x00)
+        env.negedge()
+            dut:release_all()
+            dut:force_all()
+            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+        env.negedge(10)
+            dut:release_all()
+
+        env.posedge(200)
+    end
+}
+
+local test_acquire_probe = env.register_test_case "test_acquire_probe" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+        
+        tl_d.ready:set(1)
+        chi_txrsp.ready:set(1)
+        chi_txreq.ready:set(1)
+
+        do
+            print "core 1 acquire"
+            local source = 28 -- core 1 source
+            tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source) -- core 1 acquire, source = 3
+            
+            -- wait txreq
+            env.expect_happen_until(20, function ()
+                return chi_txreq.valid:get() == 1
+            end)
+            chi_txreq:dump()
+
+            env.negedge(5)
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", 5) -- dbID = 5
+
+            env.expect_happen_until(20, function ()
+                return chi_txrsp.valid:get() == 1
+            end)
+            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+            chi_txrsp:dump()
+
+            env.expect_happen_until(20, function ()
+                return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0xdead
+            end)
+
+            env.expect_happen_until(20, function ()
+                return tl_d:fire() and tl_d.bits.source:get() == source and tl_d.bits.data:get()[1] == 0xbeef
+            end)
+            local sink = tl_d.bits.sink:get()
+
+            tl_e:grantack(sink)
+        end
+
+        do
+            print "core 0 acquire"
+            local source = 1 -- core 0 source
+            tl_b.ready:set(1)
+            
+            tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source) -- core 0 acquire
+            
+            env.expect_happen_until(20, function ()
+                return mp_dirResp.valid:get() == 1 and mp_dirResp.hit:get() == 1 and mp_dirResp.state:get() == MixedState.TTC
+            end)
+            mp_dirResp:dump()
+            mp.needProbeOnHit_a_s3:expect(1)
+
+            -- wait Probe.toN
+            env.expect_happen_until(20, function ()
+                return tl_b:fire() and tl_b.bits.address:get() == to_address(0x10, 0x20) and tl_b.bits.opcode:get() == TLOpcodeB.Probe and tl_b.bits.param:get() == TLParam.toN
+            end)
+            tl_b:dump()
+
+            -- send ProbeAck.TtoN(data is not modified in core 1)
+            env.negedge(5)
+            tl_c:probeack(to_address(0x10, 0x20), TLParam.TtoN, 28)
+
+            env.expect_happen_until(20, function ()
+                return tl_d:fire()
+            end)
+            tl_d:dump()
+
+
+        end
 
         env.posedge(200)
     end
@@ -1117,18 +1406,15 @@ verilua "mainTask" { function ()
     -- coherency test cases
     --
     if test_all then
-        
+    
     test_sinkA_hit()
     test_release_hit()
+    test_sinkA_miss()
+    test_acquire_and_release()
 
     end
     
-    test_sinkA_miss()
-
-    -- TODO:
-    -- test_recv_probeack()
-
-
+    test_acquire_probe()
 
     env.posedge(100)
     env.TEST_SUCCESS()

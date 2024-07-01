@@ -77,6 +77,7 @@ local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_writ
         -- 
         -- ds_write data
         -- 
+        print "ds_write data"
         env.negedge()
             ds_write.valid:set(1)
             ds_write.bits.data:set_str("0x12345678")
@@ -90,6 +91,7 @@ local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_writ
         -- 
         -- sourceD_read back data
         -- 
+        print "sourceD_read back data"
         env.negedge()
             sourceD_read.valid:set(1)
             sourceD_read.bits.dataId:set(0)
@@ -101,21 +103,24 @@ local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_writ
             expect.equal(sourceD_resp.data:get()[1], 0x12345678)
 
         -- 
-        -- sourceD_read again
+        -- check data entry
         -- 
+        print "check data entry"
         env.negedge()
-            sourceD_read.valid:set(1)
-            sourceD_read.bits.dataId:set(0)
+            tempDS.valids_0_0:expect(0)
+            tempDS.valids_0_1:expect(0)
+        
+        -- 
+        -- ds_write two entry data
+        -- 
+        print "ds_write two entry data"
         env.negedge()
-            sourceD_read.valid:set(0)
-
-        env.posedge()
-            expect.equal(sourceD_resp.valid:get(), 1)
-            expect.equal(sourceD_resp.data:get()[1], 0x12345678)
-
-        -- 
-        -- ds_write another data
-        -- 
+            ds_write.valid:set(1)
+            ds_write.bits.data:set_str("0x12345678")
+            dut.io_fromDS_dsDest_ds4:set(TempDataStorage)
+        env.negedge()
+            ds_write.valid:set(0)
+        
         env.negedge()
             ds_write.valid:set(1)
             ds_write.bits.data:set_str("0x87654321")
@@ -130,6 +135,7 @@ local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_writ
         -- 
         -- continuous sourceD_read
         -- 
+        print "continuous sourceD_read"
         verilua "appendTasks" {
             check_task = function()
                 local first_resp_cycle = 0
@@ -154,8 +160,9 @@ local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_writ
             sourceD_read.bits.dataId:set(0)
         env.negedge()
             sourceD_read.valid:set(0)
-
-        expect.equal(tempDS.freeDataIdx:get(), 2)
+            tempDS.freeDataIdx:expect(1)
+        env.negedge()
+            tempDS.freeDataIdx:expect(0)
 
         env.posedge(100)
     end
@@ -366,6 +373,7 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
         -- 
         -- continuous write
         -- 
+        print "continuous write"
         env.negedge()
             rxdat_write.ready:expect(1)
             rxdat_write.valid:set(1)
@@ -379,11 +387,13 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
         env.negedge()
             rxdat_write.valid:set(0)
             tempDS.valids_0_1:expect(1)
+        print "start read_back_and_check"
         read_back_and_check(0, "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")
         
         -- 
         -- non-continuous write
         --
+        print "non-continuous write"
         env.negedge()
             rxdat_write.ready:expect(1)
             rxdat_write.bits.dataId:set(1)
@@ -391,16 +401,19 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
             rxdat_write.bits.wrMaskOH:set(0x01)
             rxdat_write.valid:set(1)
         env.negedge()
-            tempDS.valids_0_0:expect(1)
+            tempDS.valids_1_0:expect(1)
+            tempDS.valids_1_1:expect(0)
             rxdat_write.valid:set(0)
         env.negedge(math.random(5, 20))
-            tempDS.valids_0_0:expect(1)
+            tempDS.valids_1_0:expect(1)
             rxdat_write.bits.beatData:set_str("0xbbbb")
             rxdat_write.bits.wrMaskOH:set(0x02)
             rxdat_write.valid:set(1)
         env.negedge()
             rxdat_write.valid:set(0)
-            tempDS.valids_0_1:expect(1)
+            tempDS.valids_1_0:expect(1)
+            tempDS.valids_1_1:expect(1)
+        print "start read_back_and_check"
         read_back_and_check(1, "000000000000000000000000000000000000000000000000000000000000bbbb000000000000000000000000000000000000000000000000000000000000dddd")
 
         env.posedge(100)
@@ -430,6 +443,7 @@ local test_sinkc_write = env.register_test_case "test_sinkc_write" {
         -- 
         -- continuous write
         -- 
+        print "continuous write"
         env.negedge()
             sinkC_write.ready:expect(1)
             sinkC_write.valid:set(1)
@@ -443,11 +457,13 @@ local test_sinkc_write = env.register_test_case "test_sinkc_write" {
         env.negedge()
             sinkC_write.valid:set(0)
             tempDS.valids_0_1:expect(1)
+        print "start read_back_and_check"
         read_back_and_check(0, "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")
         
         -- 
         -- non-continuous write
         --
+        print "non-continuous write"
         env.negedge()
             sinkC_write.ready:expect(1)
             sinkC_write.bits.dataId:set(1)
@@ -455,16 +471,17 @@ local test_sinkc_write = env.register_test_case "test_sinkc_write" {
             sinkC_write.bits.wrMaskOH:set(0x01)
             sinkC_write.valid:set(1)
         env.negedge()
-            tempDS.valids_0_0:expect(1)
+            tempDS.valids_1_0:expect(1)
             sinkC_write.valid:set(0)
         env.negedge(math.random(5, 20))
-            tempDS.valids_0_0:expect(1)
+            tempDS.valids_1_0:expect(1)
             sinkC_write.bits.beatData:set_str("0xbbbb")
             sinkC_write.bits.wrMaskOH:set(0x02)
             sinkC_write.valid:set(1)
         env.negedge()
             sinkC_write.valid:set(0)
-            tempDS.valids_0_1:expect(1)
+            tempDS.valids_1_1:expect(1)
+        print "start read_back_and_check"
         read_back_and_check(1, "000000000000000000000000000000000000000000000000000000000000bbbb000000000000000000000000000000000000000000000000000000000000dddd")
                 sinkC_write.bits.dataId:set(0)
 
@@ -526,7 +543,7 @@ local test_write_priority = env.register_test_case "test_write_priority" {
             rxdat_write.valid:set(0)
             sinkC_write.valid:set(0)
 
-        env.posedge(100)
+        env.posedge(50)
     end
 }
 
@@ -565,7 +582,7 @@ local test_write_to_ds = env.register_test_case "test_write_to_ds" {
         env.negedge()
             reqArb_read.valid:set(0)
 
-        env.posedge(100)
+        env.posedge(200)
     end
 }
 
@@ -623,7 +640,7 @@ local test_write_to_ds_and_sourceD = env.register_test_case "test_write_to_ds_an
         env.negedge()
             reqArb_read.valid:set(0)
 
-        env.posedge(100)
+        env.posedge(200)
     end
 }
 

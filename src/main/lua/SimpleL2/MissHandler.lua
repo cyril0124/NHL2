@@ -11,6 +11,7 @@ local alloc = ([[
     | req_tag
     | req_source
     | req_channel
+    | dirResp_meta_clientsOH
 ]]):bdl {hier = cfg.top, prefix = "io_mshrAlloc_s3_"}
 
 local test_basic_alloc = env.register_test_case "test_basic_alloc" {
@@ -20,6 +21,7 @@ local test_basic_alloc = env.register_test_case "test_basic_alloc" {
         env.negedge()
             alloc.valid:set(1)
             alloc.bits.req_set:set(0x12)
+            alloc.bits.dirResp_meta_clientsOH:set(0x02) -- prevent assert 
         env.negedge()
             alloc.valid:set(0)
 
