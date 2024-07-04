@@ -63,11 +63,11 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // TODO: block mshr
     io.taskMSHR_s0.ready := !valid_s1 && io.resetFinish && beatCntSinkC_s1 =/= 1.U &&
-                            Mux(
-                                io.taskMSHR_s0.bits.readTempDs && (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR, 
-                                dsCreditCnt === 1.U, 
-                                true.B
-                            )
+        Mux(
+            io.taskMSHR_s0.bits.readTempDs && (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR,
+            dsCreditCnt === 1.U,
+            true.B
+        )
 
     // -----------------------------------------------------------------------------------------
     // Stage 1
@@ -108,7 +108,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     fire_s1 := io.dirRead_s1.ready && (valid_s1 && Mux(task_s1.readTempDs, io.tempDsRead_s1.ready, true.B) || chosenTask_s1.fire)
 
-    io.dirRead_s1.valid    := fire_s1
+    io.dirRead_s1.valid    := fire_s1 && !task_s1.isMshrTask
     io.dirRead_s1.bits.set := task_s1.set
     io.dirRead_s1.bits.tag := task_s1.tag
 
@@ -116,7 +116,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.tempDsRead_s1.bits.dataId := task_s1.dataId
     io.tempDsRead_s1.bits.dest   := task_s1.tempDsDest
     io.dsWrSet_s1                := task_s1.set
-    io.dsWrWay_s1                := task_s1.wayOH
+    io.dsWrWay_s1                := OHToUInt(task_s1.wayOH)
 
     val fireVec_s1 = VecInit(Seq(io.taskSinkA_s1.fire, io.taskSinkC_s1.fire, io.taskSnoop_s1.fire, io.taskCMO_s1.fire, io.taskReplay_s1.fire))
     dontTouch(fireVec_s1)

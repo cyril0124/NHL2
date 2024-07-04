@@ -18,7 +18,7 @@ object DataDestination {
 }
 
 object L2Channel extends ChiselEnum {
-    // ChiselEnum should be strictly increase!
+    // ChiselEnum value should be strictly increased!
     val TXREQ    = Value("b000".U) // CHI output channels
     val ChannelA = Value("b001".U) // TileLink output channels
     val ChannelB = Value("b010".U) // TileLink output channels

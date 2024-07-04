@@ -150,7 +150,7 @@ local function mux_case(input_key, mismatch_bypass)
         end
 
         local allow_less_than_two_case = mismatch_bypass or case_table.default ~= nil
-        assert(not(case_count <= 2 and not allow_less_than_two_case), "at least two cases  case_count => " .. case_count)
+        assert(not(case_count < 2 and not allow_less_than_two_case), "at least two cases  case_count => " .. case_count)
 
         for key, func in pairs(case_table) do
             if key == input_key then

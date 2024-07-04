@@ -11,9 +11,11 @@ import dataclass.data
 import freechips.rocketchip.diplomacy.BufferParams.flow
 
 class DSRead()(implicit p: Parameters) extends L2Bundle {
-    val set  = UInt(setBits.W)
-    val way  = UInt(wayBits.W)
-    val dest = UInt(DataDestination.width.W)
+    val set       = UInt(setBits.W)
+    val way       = UInt(wayBits.W)
+    val dest      = UInt(DataDestination.width.W)
+    val hasDataId = Bool()
+    val dataId    = UInt(dataIdBits.W)
 }
 
 class DSWrite()(implicit p: Parameters) extends L2Bundle {
@@ -49,8 +51,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
           * [[SourceD]](GrantData/AccessAckData) or [[TempDataStorage]] depending on the [[dsDest_ds4]].
           */
         val toTempDS = new Bundle {
-            val dsResp_ds4 = ValidIO(new DSResp)
-            val dsDest_ds4 = Output(UInt(DataDestination.width.W))
+            val dsResp_ds4      = ValidIO(new DSResp)
+            val dsDest_ds4      = Output(UInt(DataDestination.width.W))
+            val dsHasDataId_ds4 = Output(Bool())
+            val dsDataId_ds4    = Output(UInt(dataIdBits.W))
         }
 
         /** 
@@ -109,10 +113,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     rdQueue.io.enq.bits  := io.dsRead_s3.bits
     assert(!(rdQueue.io.enq.valid && !rdQueue.io.enq.ready), "rdQueue should not blocking the input request!")
 
-    val ren_ds1    = rdQueue.io.deq.fire
-    val rdReq_ds1  = rdQueue.io.deq.bits
-    val rdDest_ds1 = rdReq_ds1.dest
-    val rdIdx_ds1  = Cat(rdReq_ds1.way, rdReq_ds1.set)
+    val ren_ds1         = rdQueue.io.deq.fire
+    val rdReq_ds1       = rdQueue.io.deq.bits
+    val rdHasDataId_ds1 = rdReq_ds1.hasDataId
+    val rdDataId_ds1    = rdReq_ds1.dataId
+    val rdDest_ds1      = rdReq_ds1.dest
+    val rdIdx_ds1       = Cat(rdReq_ds1.way, rdReq_ds1.set)
 
     val rdCrdCnt_s3 = RegInit(0.U(log2Ceil(rdQueueEntries + 1).W))
     io.dsRead_s3.crdv := (rdCrdCnt_s3 < rdQueueEntries.U || ren_ds1) && !reset.asBool
@@ -194,25 +200,31 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // DataStorage Stage 2 (read accept)
     // -----------------------------------------------------------------------------------------
-    val wen_ds2    = RegNext(fire_ds1 || fire_refill_ds1, false.B)
-    val ren_ds2    = RegNext(ren_ds1, false.B)
-    val rdDest_ds2 = RegEnable(rdDest_ds1, ren_ds1)
+    val wen_ds2         = RegNext(fire_ds1 || fire_refill_ds1, false.B)
+    val ren_ds2         = RegNext(ren_ds1, false.B)
+    val rdHasDataId_ds2 = RegEnable(rdHasDataId_ds1, ren_ds1)
+    val rdDataId_ds2    = RegEnable(rdDataId_ds1, ren_ds1)
+    val rdDest_ds2      = RegEnable(rdDest_ds1, ren_ds1)
     assert(PopCount(Seq(wen_ds2, ren_ds2)) <= 1.U)
 
     // -----------------------------------------------------------------------------------------
     // DataStorage Stage 3 (read finish && ECC)
     // -----------------------------------------------------------------------------------------
-    val ren_ds3    = RegNext(ren_ds2, false.B)
-    val rdData_ds3 = RegEnable(dataSRAM.io.r.resp.data(0), ren_ds2)
-    val rdDest_ds3 = RegEnable(rdDest_ds2, ren_ds2)
+    val ren_ds3         = RegNext(ren_ds2, false.B)
+    val rdData_ds3      = RegEnable(dataSRAM.io.r.resp.data(0), ren_ds2)
+    val rdHasDataId_ds3 = RegEnable(rdHasDataId_ds2, ren_ds2)
+    val rdDataId_ds3    = RegEnable(rdDataId_ds2, ren_ds2)
+    val rdDest_ds3      = RegEnable(rdDest_ds2, ren_ds2)
     // TODO: ECC
 
     // -----------------------------------------------------------------------------------------
     // DataStorage Stage 4 (data output)
     // -----------------------------------------------------------------------------------------
-    val ren_ds4    = RegNext(ren_ds3, false.B)
-    val rdData_ds4 = RegEnable(rdData_ds3, ren_ds3)
-    val rdDest_ds4 = RegEnable(rdDest_ds3, ren_ds3)
+    val ren_ds4         = RegNext(ren_ds3, false.B)
+    val rdData_ds4      = RegEnable(rdData_ds3, ren_ds3)
+    val rdHasDataId_ds4 = RegEnable(rdHasDataId_ds3, ren_ds3)
+    val rdDataId_ds4    = RegEnable(rdDataId_ds3, ren_ds3)
+    val rdDest_ds4      = RegEnable(rdDest_ds3, ren_ds3)
 
     io.toTXDAT.dsResp_ds4.valid     := rdDest_ds4 === DataDestination.TXDAT && ren_ds4
     io.toTXDAT.dsResp_ds4.bits.data := rdData_ds4.data
@@ -220,6 +232,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     io.toTempDS.dsResp_ds4.valid     := (rdDest_ds4 === DataDestination.TempDataStorage || rdDest_ds4 === DataDestination.SourceD) && ren_ds4
     io.toTempDS.dsResp_ds4.bits.data := rdData_ds4.data
     io.toTempDS.dsDest_ds4           := rdDest_ds4
+    io.toTempDS.dsHasDataId_ds4      := rdHasDataId_ds4
+    io.toTempDS.dsDataId_ds4         := rdDataId_ds4
 
     dsReady_s2 := !ren_ds1 && !wen_ds1
     dsReady_s3 := !ren_ds2 && !wen_ds2

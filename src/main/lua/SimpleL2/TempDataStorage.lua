@@ -70,6 +70,21 @@ local TempDataStorage = ("0b0100"):number()
 local DataStorage = ("0b1000"):number()
 local nrTempDataEntry = 16
 
+local function read_back_and_check(dataId, data_str)
+    dut.io_toSourceD_beatData_ready:set(1)
+    env.negedge()
+        sourceD_read.valid:set(1)
+        sourceD_read.bits.dataId:set(dataId)
+    env.negedge()
+        sourceD_read.valid:set(0)
+    env.posedge()
+        sourceD_resp.valid:expect(1)
+        sourceD_resp:dump()
+        expect.equal(sourceD_resp.data:get_str(HexStr), data_str)
+    env.posedge()
+        sourceD_resp.valid:expect(0)
+end
+
 local test_basic_ds_read_write = env.register_test_case "test_basic_ds_read_write" {
     function ()
         env.dut_reset() 
@@ -355,21 +370,6 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
     function ()
         env.dut_reset()
 
-        local function read_back_and_check(dataId, data_str)
-            dut.io_toSourceD_beatData_ready:set(1)
-            env.negedge()
-                sourceD_read.valid:set(1)
-                sourceD_read.bits.dataId:set(dataId)
-            env.negedge()
-                sourceD_read.valid:set(0)
-            env.posedge()
-                sourceD_resp.valid:expect(1)
-                sourceD_resp:dump()
-                expect.equal(sourceD_resp.data:get_str(HexStr), data_str)
-            env.posedge()
-                sourceD_resp.valid:expect(0)
-        end
-
         -- 
         -- continuous write
         -- 
@@ -423,22 +423,6 @@ local test_rxdat_write = env.register_test_case "test_rxdat_write" {
 local test_sinkc_write = env.register_test_case "test_sinkc_write" {
     function ()
         env.dut_reset()
-
-        local function read_back_and_check(dataId, data_str)
-            dut.io_toSourceD_beatData_ready:set(1)
-            env.negedge()
-                sourceD_read.valid:set(1)
-                sourceD_read.bits.dataId:set(dataId)
-            env.negedge()
-                sourceD_read.valid:set(0)
-            env.posedge()
-                sourceD_resp.valid:expect(1)
-                sourceD_resp:dump()
-                expect.equal(sourceD_resp.data:get_str(HexStr), data_str)
-            env.posedge()
-                sourceD_resp.valid:expect(0)
-        end
-                sinkC_write.bits.dataId:set(0)
 
         -- 
         -- continuous write
@@ -644,6 +628,55 @@ local test_write_to_ds_and_sourceD = env.register_test_case "test_write_to_ds_an
     end
 }
 
+local test_pre_alloc = env.register_test_case "test_pre_alloc" {
+    function ()
+        env.dut_reset()
+
+        for i = 0, nrTempDataEntry - 1 do
+            print("preAlloc " .. i)
+            env.negedge()
+                dut.io_preAlloc:set(1)
+                tempDS.freeDataIdx:expect(i)
+                tempDS["valids_" .. i .. "_0"]:expect(0)
+                tempDS["valids_" .. i .. "_1"]:expect(0)
+                tempDS["preAllocs_" .. i]:expect(0)
+            env.negedge()
+                dut.io_preAlloc:set(0)
+                tempDS.preAllocFull:dump()
+                tempDS.freeDataIdx:_if(tempDS.preAllocFull:is(0)):expect(i + 1)
+                tempDS["valids_" .. i .. "_0"]:expect(0)
+                tempDS["valids_" .. i .. "_1"]:expect(0)
+                tempDS["preAllocs_" .. i]:expect(1)
+        end
+
+        for i = 0, nrTempDataEntry - 1 do
+            print("sinkC write " .. i)
+            env.negedge()
+                sinkC_write.ready:expect(1)
+                sinkC_write.valid:set(1)
+                sinkC_write.bits.dataId:set(i)
+                sinkC_write.bits.beatData:set_str("0xdead")
+                sinkC_write.bits.wrMaskOH:set(0x01)
+                tempDS["valids_" .. i .. "_0"]:expect(0)
+                tempDS["valids_" .. i .. "_1"]:expect(0)
+            env.negedge()
+                sinkC_write.bits.beatData:set_str("0xbeef")
+                sinkC_write.bits.wrMaskOH:set(0x02)
+                tempDS["valids_" .. i .. "_0"]:expect(1)
+                tempDS["valids_" .. i .. "_1"]:expect(0)
+            env.negedge()
+                sinkC_write.valid:set(0)
+                tempDS["valids_" .. i .. "_0"]:expect(1)
+                tempDS["valids_" .. i .. "_1"]:expect(1)
+            read_back_and_check(i, "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")
+            
+            env.negedge(2)
+        end
+
+        env.posedge(200)
+    end
+}
+
 verilua "appendTasks" {
     maint_task = function ()
         sim.dump_wave()
@@ -663,6 +696,8 @@ verilua "appendTasks" {
 
         test_write_to_ds()
         test_write_to_ds_and_sourceD()
+
+        test_pre_alloc()
 
         env.posedge(100)
         env.TEST_SUCCESS()

@@ -82,7 +82,7 @@ trait HasL2Param {
     val tlBundleParams = TLBundleParameters(
         addressBits = addressBits,
         dataBits = beatBytes * 8,
-        sourceBits = 5, // TODO: Parameterize it
+        sourceBits = 6, // TODO: Parameterize it
         sinkBits = 7,
         sizeBits = 3,
         echoFields = Nil,
@@ -96,7 +96,7 @@ trait HasL2Param {
     val chiBundleParams = CHIBundleParameters(
         nodeIdBits = 7,
         addressBits = addressBits,
-        dataBits = dataBits,
+        dataBits = beatBytes * 8,
         dataCheck = false
     )
     // @formatter:on
@@ -107,27 +107,38 @@ trait HasL2Param {
         assert(in.getWidth == width)
     }
 
+    // TODO: Parameterize
     def getClientBitOH(sourceId: UInt): UInt = {
         if (nrClients == 1) {
             1.U(1.W)
         } else {
 
             /** 
-              * Now we suppose that we have 2 clients and each of them owns a unique id range(0 ~ 15, 16~31).
+              * Now we suppose that we have 2 clients and each of them owns an unique id range(0~15(Core 0 DCache), 16~31(Core 1 DCache)).
+              * We also need 2 additional clients to send Get requests also called ICache with id range(32~47(Core 0 ICache), 48~63(Core 1 ICache))
               * So we can use the sourceId to determine which client the request belongs to.
-              * The MSB<5> is used to identify the clientBitOH because 0xF == 0b1111 = 15.
+              * The MSB<5:4> of sourceId is used to identify the clientBitOH because 0xF == 0b1111 = 15.
               * TODO: Parameterize this
               */
             require(nrClients == 2)
-            // widthCheck(sourceId, 5)
-            assert(sourceId <= 31.U)
+            assert(sourceId <= 63.U)
 
             /** 
-              * "0b01" => L1 DCache Core0
-              * "0b10" => L1 DCache Core1
+              * "b01" => L1 DCache Core0
+              * "b10" => L1 DCache Core1
               */
-            Mux(sourceId(4), "b10".U, "b01".U)
+            MuxCase(
+                "b00".U,
+                Seq(
+                    (sourceId(5, 4) === "b00".U) -> "b01".U,
+                    (sourceId(5, 4) === "b01".U) -> "b10".U
+                )
+            )
         }
+    }
+
+    def clientOHToSource(clientBitOH: UInt): UInt = {
+        Mux(clientBitOH === "b10".U, 16.U, 0.U) // TODO:
     }
 
     def parseAddress(x: UInt): (UInt, UInt, UInt) = {
@@ -139,6 +150,13 @@ trait HasL2Param {
 
     def fastArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
+        if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+        for ((a, req) <- arb.io.in.zip(in)) { a <> req }
+        out <> arb.io.out
+    }
+
+    def lfsrArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+        val arb = Module(new LFSRArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out

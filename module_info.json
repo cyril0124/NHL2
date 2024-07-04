@@ -87,7 +87,12 @@
         "package": "SimpleL2",
         "target": "SinkC",
         "unit_test": true
-     },
+    },
+    {
+        "package": "SimpleL2",
+        "target": "LFSRArbiter",
+        "unit_test": true
+    },
     {
         "package": "AsyncBridgeCHI",
         "target": "AsyncBridgeCHI",

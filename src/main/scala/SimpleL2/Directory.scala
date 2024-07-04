@@ -19,24 +19,21 @@ object TLState {
 }
 
 object MixedState {
-    val width = 4
+    val width = 3
 
-    /** [[MixedState]]: MSB <-- | Meta[1:0] | Shared | Dirty | --> LSB Branch Branch: Branch with Shared
-      */
-    val I   = "b0000".U // Invalid
-    val BC  = "b0100".U // Branch Clean
-    val BD  = "b0101".U // Branch Dirty
-    val BBC = "b0110".U // Branch Branch Clean
-    val BBD = "b0111".U // Branch Branch Dirty
-    val TTC = "b1010".U // Trunk Clean
-    val TTD = "b1011".U // Trunk Dirty
-    val TC  = "b1100".U // Tip Clean
-    val TD  = "b1101".U // Tip Dirty
+    /** [[MixedState]]: MSB <-- | Meta[1:0] | Dirty | --> LSB */
+    val I   = "b000".U // Invalid
+    val BC  = "b010".U // Branch Clean
+    val BD  = "b011".U // Branch Dirty
+    val TTC = "b100".U // Trunk Clean
+    val TTD = "b101".U // Trunk Dirty
+    val TC  = "b110".U // Tip Clean
+    val TD  = "b111".U // Tip Dirty
 
-    def apply(dirty: Bool, shared: Bool, state: UInt) = {
+    def apply(dirty: Bool, state: UInt) = {
         require(state.getWidth == 2)
         val mixedState = WireInit(0.U(MixedState.width.W))
-        mixedState := Cat(state, shared, dirty)
+        mixedState := Cat(state, dirty)
         mixedState
     }
 }
@@ -45,20 +42,18 @@ class MixedState {
     val state = UInt(MixedState.width.W)
 
     def isDirty() = state(0)
-    def isShared() = state(1)
-    def isBranch() = state(3, 2) === TLState.BRANCH
-    def isTrunk() = state(3, 2) === TLState.TRUNK
-    def isTip() = state(3, 2) === TLState.TIP
+    def isBranch() = state(2, 1) === TLState.BRANCH
+    def isTrunk() = state(2, 1) === TLState.TRUNK
+    def isTip() = state(2, 1) === TLState.TIP
 }
 
 trait HasMixedState {
     val state = UInt(MixedState.width.W)
 
     def isDirty = state(0)
-    def isShared = state(1)
-    def isBranch = state(3, 2) === TLState.BRANCH
-    def isTrunk = state(3, 2) === TLState.TRUNK
-    def isTip = state(3, 2) === TLState.TIP
+    def isBranch = state(2, 1) === TLState.BRANCH
+    def isTrunk = state(2, 1) === TLState.TRUNK
+    def isTip = state(2, 1) === TLState.TIP
 }
 
 class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {
@@ -88,6 +83,7 @@ class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedS
     val tag          = UInt(tagBits.W)
     val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
     val clientsOH    = UInt(nrClients.W)
+    // val noData       = Bool() // TODO: Indicate that whether DataStorage has data, if L2 receive Comp from lower level, this fild will be set to true
 }
 
 object DirectoryMetaEntry {
@@ -105,7 +101,7 @@ object DirectoryMetaEntry {
         val meta = WireInit(0.U.asTypeOf(new DirectoryMetaEntry))
         meta.aliasOpt.map(_ := dirMetaEntryNoTag.aliasOpt.getOrElse(0.U))
         meta.fromPrefetch := dirMetaEntryNoTag.fromPrefetch
-        meta.state        := MixedState(dirMetaEntryNoTag.dirty, dirMetaEntryNoTag.clientsOH.orR, dirMetaEntryNoTag.state)
+        meta.state        := MixedState(dirMetaEntryNoTag.dirty, dirMetaEntryNoTag.state)
         meta.tag          := tag
         meta.clientsOH    := dirMetaEntryNoTag.clientsOH
         meta
@@ -227,9 +223,9 @@ class Directory()(implicit p: Parameters) extends L2Module {
         assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
     }
     when(!io.resetFinish) {
-        assert(!io.dirRead_s1.fire)
-        assert(!io.dirWrite_s3.fire)
-        assert(!(metaSRAM.io.w.req.valid && !metaSRAM.io.w.req.ready))
+        assert(!io.dirRead_s1.fire, "cannot read directory while not reset finished!")
+        assert(!io.dirWrite_s3.fire, "cannot write directory while not reset finished!")
+        assert(!(metaSRAM.io.w.req.valid && !metaSRAM.io.w.req.ready), "write metaSRAM should always be ready!")
     }
 
     // -----------------------------------------------------------------------------------------
@@ -246,17 +242,20 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val metaRead_s3 = RegEnable(metaRead_s2, reqValid_s2)
     val reqValid_s3 = RegNext(reqValid_s2, false.B)
     val reqTag_s3   = RegEnable(reqTag_s2, reqValid_s2)
-    val stateAll_s3 = metaRead_s3.map(_.state)
-    val tagAll_s3   = metaRead_s3.map(_.tag)
+    val stateVec_s3 = VecInit(metaRead_s3.map(_.state))
+    val tagVec_s3   = VecInit(metaRead_s3.map(_.tag))
+    val invVec_s3   = VecInit(stateVec_s3.map(_ === MixedState.I))
     val hitOH_s3 = VecInit(
-        stateAll_s3
-            .zip(tagAll_s3)
+        stateVec_s3
+            .zip(tagVec_s3)
             .map { case (state, tag) =>
                 state =/= MixedState.I && tag === reqTag_s3
             }
     ).asUInt
     val hit_s3        = hitOH_s3.asUInt.orR
-    val finalWayOH_s3 = Mux(hit_s3, hitOH_s3, UIntToOH(random.LFSR(3)) /* TODO */ )
+    val hasInv_s3     = invVec_s3.asUInt.orR
+    val invWayOH_s3   = PriorityEncoderOH(invVec_s3.asUInt)
+    val finalWayOH_s3 = Mux(hit_s3, hitOH_s3, Mux(hasInv_s3, invWayOH_s3, UIntToOH(random.LFSR(3)) /* TODO */ ))
 
     when(io.resetFinish) {
         assert(PopCount(hitOH_s3) <= 1.U)

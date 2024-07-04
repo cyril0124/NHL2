@@ -16,6 +16,7 @@ class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
     val dirResp  = new DirResp
 }
 
+// TODO: extra MSHR for Snoop, extra MSHR for Release
 class MissHandler()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val mshrAlloc_s3  = Flipped(Decoupled(new MshrAllocBundle))
@@ -48,6 +49,15 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         assert(!(mshr.io.resps.rxdat.valid && !mshr.io.status.valid), s"rxdat valid but mshr_${i} invalid")
     }
     assert(!(rxdat.fire && !rxdatMatchOH.orR), "rxdat does not match any mshr! txnID => %d/0x%x", rxdat.bits.txnID, rxdat.bits.txnID)
+
+    val rxrsp        = io.resps.rxrsp
+    val rxrspMatchOH = UIntToOH(rxrsp.bits.txnID)
+    mshrs.zip(rxrspMatchOH.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
+        mshr.io.resps.rxrsp.valid := rxrsp.valid && en
+        mshr.io.resps.rxrsp.bits  := rxrsp.bits
+
+        assert(!(mshr.io.resps.rxrsp.valid && !mshr.io.status.valid), s"rxrsp valid but mshr_${i} invalid")
+    }
 
     val sinke        = io.resps.sinke
     val sinkeMatchOH = UIntToOH(sinke.bits.sink)
@@ -89,9 +99,10 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    arbTask(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
-    arbTask(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
-    arbTask(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
+    lfsrArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
+    lfsrArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
+    lfsrArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
+    lfsrArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
 
     dontTouch(io)
 }

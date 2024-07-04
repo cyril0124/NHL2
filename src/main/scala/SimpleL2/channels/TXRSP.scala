@@ -20,7 +20,7 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
 
     val nrEntry = 16
     val queue   = Module(new Queue(new CHIBundleRSP(chiBundleParams), nrEntry))
-    queue.io.enq.valid := io.mpTask_s3.ready
+    queue.io.enq.valid := io.mpTask_s3.valid || io.mshrTask.valid
     queue.io.enq.bits  := Mux(io.mpTask_s3.valid, io.mpTask_s3.bits, io.mshrTask.bits)
 
     io.mpTask_s3.ready := queue.io.enq.ready

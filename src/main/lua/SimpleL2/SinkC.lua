@@ -71,18 +71,20 @@ local respDest = ([[
     | mshrId
     | set 
     | tag
+    | dataId
     | isTempDS
     | isDS
 ]]):bundle{hier = cfg.top, prefix = "io_respDest_", name = "respDest"}
 
 local sinkC = dut.u_SinkC
 
-local function send_respDest(set, tag,mshrId, isTempDS, isDS)
+local function send_respDest(set, tag, mshrId, dataId, isTempDS, isDS)
     env.negedge()
         respDest.valid:set(1)
         respDest.bits.mshrId:set(mshrId)
         respDest.bits.set:set(set)
         respDest.bits.tag:set(tag)
+        respDest.bits.dataId:set(dataId)
         respDest.bits.isTempDS:set(isTempDS)
         respDest.bits.isDS:set(isDS)
     env.negedge()
@@ -183,7 +185,8 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
     function ()
        env.dut_reset()
     
-       send_respDest(0x10, 0x20, 0, 1, 0) -- send to TempDS
+       local dataId = 6
+       send_respDest(0x10, 0x20, 0, dataId, 1, 0) -- send to TempDS
 
        dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
@@ -230,12 +233,15 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
             sinkC.first:expect(0)
             tl_c.ready:expect(1)
             tl_c.bits.data:set_str("0xbeef")
+            sinkC.respDestMap_0_valid:expect(1)
         env.negedge()
             tl_c.valid:set(0)
-       
+            sinkC.respDestMap_0_valid:expect(0)
+
         env.posedge(200)
 
-        send_respDest(0x10, 0x20, 0, 0, 1) -- send to DS
+        local dataId = 5
+        send_respDest(0x10, 0x20, 0, dataId, 0, 1) -- send to DS
         -- send_crd()
 
         verilua "appendTasks" {
@@ -259,8 +265,10 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
             sinkC.first:expect(0)
             tl_c.ready:expect(1)
             tl_c.bits.data:set_str("0xbbbb")
+            sinkC.respDestMap_0_valid:expect(1)
         env.negedge()
             tl_c.valid:set(0)
+            sinkC.respDestMap_0_valid:expect(0)
 
         env.posedge(200)
     end
