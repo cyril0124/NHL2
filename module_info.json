@@ -89,8 +89,13 @@
         "unit_test": true
     },
     {
-        "package": "SimpleL2",
+        "package": "Utils",
         "target": "LFSRArbiter",
+        "unit_test": true
+    },
+    {
+        "package": "Utils",
+        "target": "SkidBuffer",
         "unit_test": true
     },
     {
