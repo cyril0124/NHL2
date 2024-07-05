@@ -9,6 +9,7 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
+import os.temp
 
 class Slice()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
@@ -30,6 +31,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     /** CHI side channels (downstream) */
     val txreq = Module(new TXREQ)
     val txrsp = Module(new TXRSP)
+    val txdat = Module(new TXDAT)
     val rxdat = Module(new RXDAT)
     val rxrsp = Module(new RXRSP)
 
@@ -45,45 +47,39 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.c <> io.tl.c
     sinkE.io.e <> io.tl.e
 
-    reqArb.io                   <> DontCare
-    reqArb.io.taskMSHR_s0       <> missHandler.io.tasks.mpTask
-    reqArb.io.taskSinkA_s1      <> sinkA.io.task
-    reqArb.io.taskSinkC_s1      <> sinkC.io.task
-    reqArb.io.dirRead_s1        <> dir.io.dirRead_s1
-    reqArb.io.resetFinish       <> dir.io.resetFinish
-    reqArb.io.dsRefillWriteCrdv := ds.io.refillWrite.crdv
+    reqArb.io              <> DontCare
+    reqArb.io.taskMSHR_s0  <> missHandler.io.tasks.mpTask
+    reqArb.io.taskSinkA_s1 <> sinkA.io.task
+    reqArb.io.taskSinkC_s1 <> sinkC.io.task
+    reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
+    reqArb.io.resetFinish  <> dir.io.resetFinish
 
-    mainPipe.io                       <> DontCare
-    mainPipe.io.mpReq_s2              <> reqArb.io.mpReq_s2
-    mainPipe.io.dirResp_s3            <> dir.io.dirResp_s3
-    mainPipe.io.mshrFreeOH_s3         := missHandler.io.mshrFreeOH_s3
-    mainPipe.io.replay_s4.ready       := true.B // TODO:
-    mainPipe.io.dsRdCrd               := ds.io.dsRead_s3.crdv
-    mainPipe.io.fromTempDS.freeDataId := tempDS.io.freeDataId
+    mainPipe.io                 <> DontCare
+    mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2
+    mainPipe.io.dirResp_s3      <> dir.io.dirResp_s3
+    mainPipe.io.mshrFreeOH_s3   := missHandler.io.mshrFreeOH_s3
+    mainPipe.io.replay_s4.ready := true.B // TODO:
 
-    ds.io.dsWrite_s2        <> sinkC.io.dsWrite_s2
-    ds.io.dsWrWay_s3        := mainPipe.io.dsWrWay_s3
-    ds.io.refillWrite.valid <> tempDS.io.toDS.dsWrite.valid
-    ds.io.refillWrite.bits  := tempDS.io.toDS.dsWrite.bits
-    ds.io.dsRead_s3.valid   := mainPipe.io.dsRead_s3.valid
-    ds.io.dsRead_s3.bits    := mainPipe.io.dsRead_s3.bits
+    ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
+    ds.io.refillWrite                 <> tempDS.io.toDS.refillWrite
+    ds.io.fromMainPipe.dsRead_s3      <> mainPipe.io.toDS.dsRead_s3
+    ds.io.fromMainPipe.dsWrWayOH_s3   := mainPipe.io.toDS.dsWrWayOH_s3
+    ds.io.fromMainPipe.mshrIdx_s3     := mainPipe.io.toDS.mshrIdx_s3
+    ds.io.toTXDAT.dsResp_s6s7.ready   := txdat.io.data_s6s7.ready
+    ds.io.toSourceD.dsResp_s6s7.ready := sourceD.io.data_s6s7.ready
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 
-    tempDS.io.fromDS.dsResp_ds4      := ds.io.toTempDS.dsResp_ds4
-    tempDS.io.fromDS.dsDest_ds4      := ds.io.toTempDS.dsDest_ds4
-    tempDS.io.fromDS.dsHasDataId_ds4 := ds.io.toTempDS.dsHasDataId_ds4
-    tempDS.io.fromDS.dsDataId_ds4    := ds.io.toTempDS.dsDataId_ds4
-    tempDS.io.fromReqArb.read        <> reqArb.io.tempDsRead_s1
-    tempDS.io.fromReqArb.dsWrSet     := reqArb.io.dsWrSet_s1
-    tempDS.io.fromReqArb.dsWrWay     := reqArb.io.dsWrWay_s1
-    tempDS.io.fromRXDAT.write        <> rxdat.io.toTempDS.dataWr
-    tempDS.io.fromSinkC.write        <> sinkC.io.toTempDS.dataWr
-    tempDS.io.flushEntry             := DontCare // TODO:
-    tempDS.io.preAlloc               := mainPipe.io.fromTempDS.preAlloc
-    // tempDS.io.full TOOD: output
+    tempDS.io.fromDS.write            <> ds.io.toTempDS.write_s6
+    tempDS.io.fromRXDAT.write         <> rxdat.io.toTempDS.write
+    tempDS.io.fromSinkC.write         <> sinkC.io.toTempDS.write
+    tempDS.io.fromReqArb.read_s1      <> reqArb.io.tempDsRead_s1
+    tempDS.io.fromReqArb.dsWrSet_s1   := reqArb.io.dsWrSet_s1
+    tempDS.io.fromReqArb.dsWrWayOH_s1 := reqArb.io.dsWrWayOH_s1
+    // tempDS.io.toSourceD.dataOut // TODO:
+    // tempDS.io.toTXDAT.dataOut // TODO:
 
-    sinkC.io.respDest := mainPipe.io.allocDestSinkC_s4 // TODO: connect to MissHandler
+    sinkC.io.respDest_s4 := mainPipe.io.allocDestSinkC_s4 // TODO: connect to MissHandler
 
     missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
     missHandler.io.resps.rxdat  <> rxdat.io.resp
@@ -94,17 +90,22 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
 
-    arbTask(Seq(mainPipe.io.sourceD_s2, mainPipe.io.sourceD_s4), sourceD.io.task)
-    sourceD.io.beatData     <> tempDS.io.toSourceD.beatData
-    sourceD.io.dataId       := tempDS.io.freeDataId
-    sourceD.io.tempDataRead <> tempDS.io.fromSourceD.read
-    sourceD.io.tempDataResp <> tempDS.io.fromSourceD.resp
-
-    rxdat.io.toTempDS.dataId       := tempDS.io.freeDataId
-    rxdat.io.toTempDS.dataWr.ready := true.B // TODO:
+    sourceD.io                 <> DontCare
+    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
+    sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
+    sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
+    sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid     // TODO:
+    sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data // TODO:
 
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s3 := DontCare // TODO:
+
+    txdat.io         <> DontCare
+    txdat.io.task_s2 <> mainPipe.io.txdat_s2
+    txdat.io.data_s2 <> tempDS.io.toTXDAT.data_s2
+    // txdat.io.task_s6s7
+    txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid     // TODO:
+    txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data // TODO:
 
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> missHandler.io.tasks.sourceb

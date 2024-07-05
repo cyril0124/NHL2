@@ -28,14 +28,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
           * Interact with [[MissHandler]], [[MissHandler]] will specify the ProbeAckData destination. 
           * ProbeAckData cannot be received without the resp data destination info sent from [[MissHandler]].
           */
-        val respDest = Flipped(ValidIO(new RespDataDestSinkC))
+        val respDest_s4 = Flipped(ValidIO(new RespDataDestSinkC))
 
-        /** Interact with [[DataStorage]] (for ReleaseData) */
+        /** Interact with [[DataStorage]] (for ReleaseData / ProbeAckData) */
         val dsWrite_s2 = DecoupledIO(new DSWrite)
 
-        /** Interact with [[TempDataStorage]] (for ProbeAckData) */
+        /** Interact with [[TempDataStorage]] (for ReleaseData / ProbeAckData) */
         val toTempDS = new Bundle {
-            val dataWr = DecoupledIO(new TempDataWrite)
+            val write = DecoupledIO(new TempDataWrite)
         }
     })
 
@@ -67,7 +67,6 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         val valid    = Bool()
         val set      = UInt(setBits.W)
         val tag      = UInt(tagBits.W)
-        val dataId   = UInt(dataIdBits.W)
         val isTempDS = Bool()
         val isDS     = Bool()
     }))))
@@ -76,19 +75,17 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     val respValidOH      = VecInit(respDestMap.map(_.valid)).asUInt
     val respMatchOH      = respMatchSetOH & respMatchTagOH & respValidOH
     val respHasMatch     = respMatchOH.orR
-    val respWrDataId     = Mux1H(respMatchOH, respDestMap).dataId
     val respDataToTempDS = Mux1H(respMatchOH, respDestMap).isTempDS // true.B
     val respDataToDS     = Mux1H(respMatchOH, respDestMap).isDS     // false.B
     dontTouch(respDataToTempDS)
     dontTouch(respDataToDS)
-    when(io.respDest.fire) {
-        val entry = respDestMap(io.respDest.bits.mshrId)
+    when(io.respDest_s4.fire) {
+        val entry = respDestMap(io.respDest_s4.bits.mshrId)
         entry.valid    := true.B
-        entry.set      := io.respDest.bits.set
-        entry.tag      := io.respDest.bits.tag
-        entry.dataId   := io.respDest.bits.dataId
-        entry.isTempDS := io.respDest.bits.isTempDS
-        entry.isDS     := io.respDest.bits.isDS
+        entry.set      := io.respDest_s4.bits.set
+        entry.tag      := io.respDest_s4.bits.tag
+        entry.isTempDS := io.respDest_s4.bits.isTempDS
+        entry.isDS     := io.respDest_s4.bits.isDS
         // assert(!entry.valid, "respDestMap[%d] is already valid!", io.respDest.bits.mshrId)
     }
     respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
@@ -119,7 +116,6 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.task.bits.param      := io.c.bits.param
     io.task.bits.source     := io.c.bits.source
     io.task.bits.isPrefetch := false.B
-    io.task.bits.dataId     := DontCare
     io.task.bits.set        := set
     io.task.bits.tag        := tag
 
@@ -128,10 +124,10 @@ class SinkC()(implicit p: Parameters) extends L2Module {
       * ReleaseData is always hit.
       * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
       */
-    io.dsWrite_s2.valid     := io.c.fire && last && (isReleaseData || !isRelease && hasData && respDataToDS)
-    io.dsWrite_s2.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
-    io.dsWrite_s2.bits.set  := set
-    io.dsWrite_s2.bits.way  := DontCare
+    io.dsWrite_s2.valid      := io.c.fire && last && (isReleaseData || !isRelease && hasData && respDataToDS)
+    io.dsWrite_s2.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
+    io.dsWrite_s2.bits.set   := set
+    io.dsWrite_s2.bits.wayOH := DontCare // wayOH is provided in MainPipe stage 3
 
     /**
       * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
@@ -144,7 +140,6 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.resp.bits.sink   := DontCare
     io.resp.bits.set    := set
     io.resp.bits.tag    := tag
-    io.resp.bits.dataId := respWrDataId
     io.resp.bits.last   := hasData && last || !hasData
 
     /** 
@@ -155,15 +150,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
       * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
       * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
       */
-    io.toTempDS.dataWr.valid         := io.c.fire && (first || last) && hasData && !isRelease && respDataToTempDS
-    io.toTempDS.dataWr.bits.beatData := io.c.bits.data
-    io.toTempDS.dataWr.bits.dataId   := respWrDataId
-    io.toTempDS.dataWr.bits.wrMaskOH := Cat(last, first).asUInt
+    io.toTempDS.write.valid     := io.c.fire && last && hasData && !isRelease && respDataToTempDS
+    io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
+    io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
-    io.c.ready := Mux(isRelease, Mux(hasData, io.dsWrite_s2.ready && io.task.ready, io.task.ready) || !first, hasData && io.toTempDS.dataWr.ready || !hasData)
+    io.c.ready := Mux(isRelease, Mux(hasData, io.dsWrite_s2.ready && io.task.ready, io.task.ready) || !first, hasData && io.toTempDS.write.ready || !hasData)
 
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
-    assert(!(io.c.fire && hasData && last && !io.toTempDS.dataWr.fire && !io.dsWrite_s2.valid), "SinkC data is not written into TempDataStorage or DataStorage")
+    assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid), "SinkC data is not written into TempDataStorage or DataStorage")
 
     dontTouch(io)
 }

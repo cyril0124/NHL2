@@ -5,38 +5,60 @@ local dsWrite_s2 = ([[
     | valid
     | ready
     | set
-    | way
+    | wayOH
     | data
 ]]):bundle {hier = cfg.top, prefix = "io_dsWrite_s2_", name = "dsWrite_s2"}
 
 local refillWrite = ([[
     | valid
-    | crdv
-    | bits_set => set
-    | bits_way => way
-    | bits_data => data
-]]):abdl {hier = cfg.top, prefix = "io_refillWrite_", name = "refillWrite"}
+    | set
+    | wayOH
+    | data
+]]):bundle {hier = cfg.top, prefix = "io_refillWrite_", name = "refillWrite"}
 
 local dsRead_s3 = ([[
     | valid
     | set
-    | way
+    | wayOH
     | dest
-]]):bundle {hier = cfg.top, prefix = "io_dsRead_s3_", name = "dsRead_s3"}
+]]):bundle {hier = cfg.top, prefix = "io_fromMainPipe_dsRead_s3_", name = "dsRead_s3"}
 
-local dsResp_ds4 = ([[
+local tempDS_write_s6 = ([[
     | valid
     | data
-]]):bundle {hier = cfg.top, prefix = "io_toTempDS_dsResp_ds4_", name = "dsResp_ds4"}
+    | idx
+]]):bundle {hier = cfg.top, prefix = "io_toTempDS_write_s6_", name = "tempDS_write_s6"}
+
+local sourceD_data = ([[
+    | valid
+    | ready
+    | data
+]]):bundle {hier = cfg.top, prefix = "io_toSourceD_dsResp_s6s7_", name = "sourceD_data"}
+
+local txdat_data = ([[
+    | valid
+    | ready
+    | data
+]]):bundle {hier = cfg.top, prefix = "io_toTXDAT_dsResp_s6s7_", name = "txdat_data"}
 
 local TXDAT = ("0b0001"):number()
 local SourceD = ("0b0010"):number()
 local TempDataStorage = ("0b0100"):number()
 
-local dsWrWay_s3 = dut.io_dsWrWay_s3
+local dsWrWayOH_s3 = dut.io_fromMainPipe_dsWrWayOH_s3
 local rd_crdv = dut.io_dsRead_s3_crdv
 local wr_crdv = dut.io_dsWrite_s2_crdv
 local ds = dut.u_DataStorage
+
+local function refill_data(set, wayOH, data_str)
+    env.negedge()
+        refillWrite.valid:set(1)
+        refillWrite.bits.data:set_str(data_str)
+        refillWrite.bits.wayOH:set(wayOH)
+        refillWrite.bits.set:set(set)
+    env.negedge()
+        refillWrite.valid:set(0)
+end
 
 local test_basic_read_write = env.register_test_case "test_basic_read_write" {
     function ()
@@ -45,99 +67,46 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
         verilua "appendTasks" {
             check_task = function ()        
                 local read_data = 0xff
-        
+
                 env.expect_happen_until(100, function (c)
-                    return dsResp_ds4:fire()
+                    return tempDS_write_s6:fire()
                 end)
-                dsResp_ds4:dump()
-                read_data = dsResp_ds4.bits.data:get()[1]
-                expect.equal(read_data, 0x00)
-                
-                env.posedge()
-                env.expect_happen_until(100, function (c)
-                    return dsResp_ds4:fire()
-                end)
-                dsResp_ds4:dump()
-                read_data = dsResp_ds4.bits.data:get()[1]
+                tempDS_write_s6:dump()
+                read_data = tempDS_write_s6.bits.data:get()[1]
                 expect.equal(read_data, 0xdead)
+                tempDS_write_s6.bits.idx:expect(4)
 
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
-                    return dsResp_ds4:fire()
+                    return tempDS_write_s6:fire()
                 end)
             end
         }
 
         env.negedge()
-            -- 
-            -- write "0xdead" into set=0x01, way=0x01
-            -- 
+            -- write "0xdead" into set=0x01, wayOH=0x01
             dsWrite_s2.ready:expect(1)
             dsWrite_s2.valid:set(1)
             dsWrite_s2.bits.set:set(2)
             dsWrite_s2.bits.data:set(0xdead, true)
-
-            -- 
-            -- [1] read from set=0x01, way=0x01
-            -- 
-            dsRead_s3.valid:set(1)
-            dsRead_s3.bits.set:set(2)
-            dsRead_s3.bits.way:set(1)
-            dsRead_s3.bits.dest:set(SourceD)
-
         env.negedge()
-            -- 
             -- write way is provided in Stage 3
-            -- 
-            dsWrWay_s3:set(1)
-            dsWrite_s2.valid:set(0)
-            
-            dsRead_s3.valid:set(0)
-        
+            dsWrWayOH_s3:set(1)
+            dsWrite_s2.valid:set(0)        
         env.negedge()
-            dsWrWay_s3:set(0)
-            
-            -- 
-            -- [2] read from set=0x01, way=0x01
-            -- 
+            dsWrWayOH_s3:set(0)
+        env.negedge()
+            -- read from set=0x01, wayOH=0x01, mshrIdx_s3=0x04
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
-            dsRead_s3.bits.way:set(1)
-            dsRead_s3.bits.dest:set(SourceD)
+            dsRead_s3.bits.wayOH:set(1)
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrIdx_s3:set(4)
 
         env.negedge()
             dsRead_s3.valid:set(0)
 
-        env.posedge(100)
-    end
-}
-
-local test_credit_transfer = env.register_test_case "test_credit_transfer" {
-    function ()
-        local sync = ("sync"):ehdl()
-
-        env.dut_reset()
-        sync:send()
-
-        verilua "appendTasks" {
-            check_rd_crd = function ()
-                env.expect_happen_until(20, function (c)
-                    return rd_crdv:get() == 1
-                end)
-
-                env.posedge()
-                env.expect_happen_until(20, function (c)
-                    return rd_crdv:get() == 1
-                end)
-
-                env.posedge()
-                env.expect_not_happen_until(20, function (c)
-                    return rd_crdv:get() == 1
-                end)
-            end,
-        }
-
-        env.posedge(100)
+        env.posedge(200)
     end
 }
 
@@ -146,31 +115,27 @@ local test_refill_write = env.register_test_case "test_refill_write" {
         env.dut_reset()
 
         verilua "appendTasks" {
-            function ()
-                env.expect_happen_until(100, function ()
-                    return refillWrite.crdv:get() == 1
-                end)
-                refillWrite:dump()
-            end,
             check_data_resp = function ()
                 env.expect_happen_until(100, function()
-                    return  dsResp_ds4.valid:get() == 1 and dsResp_ds4.bits.data:get()[1] == 0xdead
+                    return  tempDS_write_s6.valid:get() == 1 and tempDS_write_s6.bits.data:get()[1] == 0xdead
                 end)
-                dsResp_ds4:dump()
+                tempDS_write_s6:dump()
             end
         }
 
         env.negedge()
             refillWrite.valid:set(1)
-            refillWrite.data:set_str("0xdead")
-            refillWrite.way:set(("0b0010"):number())
-            refillWrite.set:set(0x02)
+            refillWrite.bits.data:set_str("0xdead")
+            refillWrite.bits.wayOH:set(("0b0010"):number())
+            refillWrite.bits.set:set(0x02)
         env.negedge()
             refillWrite.valid:set(0)
+        env.negedge()
             dsRead_s3.valid:set(1) -- read back
             dsRead_s3.bits.set:set(0x02)
-            dsRead_s3.bits.way:set(("0b0010"):number())
-            dsRead_s3.bits.dest:set(SourceD)
+            dsRead_s3.bits.wayOH:set(("0b0010"):number())
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrIdx_s3:set(4)
         env.negedge()
             dsRead_s3.valid:set(0)
             
@@ -178,30 +143,134 @@ local test_refill_write = env.register_test_case "test_refill_write" {
     end
 }
 
-local test_write_priority = env.register_test_case "test_write_priority" {
+local test_operate_diffrent_way = env.register_test_case "test_operate_diffrent_way" {
     function ()
         env.dut_reset()
 
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return refillWrite.crdv:get() == 1
+                    return tempDS_write_s6:fire()
                 end)
-                refillWrite:dump()
+                tempDS_write_s6:dump()
+                expect.equal(tempDS_write_s6.bits.data:get()[1], 0)
+                expect.equal(tempDS_write_s6.bits.idx:get(), 4)
             end
         }
 
         env.negedge()
             refillWrite.valid:set(1)
-            dsWrite_s2.valid:set(1)
+            refillWrite.bits.data:set_str("0xdead")
+            refillWrite.bits.wayOH:set(("0b0010"):number())
+            refillWrite.bits.set:set(0x03)
+            dsRead_s3.valid:set(1)
+            dsRead_s3.bits.set:set(0x03)
+            dsRead_s3.bits.wayOH:set(("0b0001"):number())
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrIdx_s3:set(4)
         env.negedge()
-            ds.fire_refill_ds1:expect(1)
-            ds.fire_ds1:expect(0)
             refillWrite.valid:set(0)
-            dsWrite_s2.valid:set(0)
-        env.negedge(2)
-            ds.fire_refill_ds1:expect(0)
-            ds.fire_ds1:expect(1)
+            dsRead_s3.valid:set(0)
+
+        env.posedge(100)
+    end
+}
+
+local test_read_to_sourceD = env.register_test_case "test_read_to_sourceD" {
+    function ()
+
+        local function read_to_sourced(set, wayOH)
+            env.negedge()
+                dsRead_s3.valid:set(1)
+                dsRead_s3.bits.set:set(set)
+                dsRead_s3.bits.wayOH:set(wayOH)
+                dsRead_s3.bits.dest:set(SourceD)
+            env.negedge()
+                dsRead_s3.valid:set(0)
+        end
+
+        env.dut_reset()
+
+        sourceD_data.ready:set(1)
+
+        refill_data(0x00, ("0b0001"):number(), "0xdead")
+        refill_data(0x00, ("0b0010"):number(), "0xbeef")
+        refill_data(0x00, ("0b0100"):number(), "0xabab")
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return sourceD_data:fire() and sourceD_data.bits.data:get()[1] == 0xdead
+                end)
+                -- sourceD_data:dump()
+
+                env.negedge()
+                env.expect_happen_until(100, function ()
+                    return sourceD_data:fire() and sourceD_data.bits.data:get()[1] == 0xbeef
+                end)
+                -- sourceD_data:dump()
+            end
+        }
+
+        -- normal read(no stall)
+        read_to_sourced(0x00, ("0b0001"):number())
+        read_to_sourced(0x00, ("0b0010"):number())
+
+        env.negedge(10)
+
+        -- stall(two)
+        sourceD_data.ready:set(0)
+        read_to_sourced(0x00, ("0b0001"):number())
+        read_to_sourced(0x00, ("0b0010"):number())
+
+        env.negedge(10, function ()
+            expect.equal(sourceD_data.bits.data:get()[1], 0xdead)
+            sourceD_data.valid:expect(1)
+            sourceD_data.ready:expect(0)
+        end)
+
+        env.negedge()
+            sourceD_data.ready:set(1)
+        env.posedge()
+            expect.equal(sourceD_data.bits.data:get()[1], 0xdead)
+            sourceD_data.valid:expect(1)
+            sourceD_data.ready:expect(1)
+        env.posedge()
+            expect.equal(sourceD_data.bits.data:get()[1], 0xbeef)
+            sourceD_data.valid:expect(1)
+            sourceD_data.ready:expect(1)
+        env.posedge()
+        env.posedge(10, function ()
+            sourceD_data.valid:expect(0)
+        end)
+
+
+        -- stall(three)
+        -- sourceD_data.ready:set(0)
+        -- read_to_sourced(0x00, ("0b0001"):number())
+        -- read_to_sourced(0x00, ("0b0010"):number())
+        -- read_to_sourced(0x00, ("0b0100"):number())
+
+        -- env.negedge(10, function ()
+        --     expect.equal(sourceD_data.bits.data:get()[1], 0xdead)
+        --     sourceD_data.valid:expect(1)
+        --     sourceD_data.ready:expect(0)
+        -- end)
+
+        -- env.negedge()
+        --     sourceD_data.ready:set(1)
+        -- env.posedge()
+        --     expect.equal(sourceD_data.bits.data:get()[1], 0xdead)
+        --     sourceD_data.valid:expect(1)
+        --     sourceD_data.ready:expect(1)
+        -- env.posedge()
+        --     expect.equal(sourceD_data.bits.data:get()[1], 0xbeef)
+        --     sourceD_data.valid:expect(1)
+        --     sourceD_data.ready:expect(1)
+        -- env.posedge()
+        -- env.posedge(10, function ()
+        --     sourceD_data.valid:expect(0)
+        -- end)
 
         env.posedge(100)
     end
@@ -212,9 +281,9 @@ verilua "mainTask" {
         sim.dump_wave()
 
         test_basic_read_write()
-        test_credit_transfer()
         test_refill_write()
-        test_write_priority()
+        test_operate_diffrent_way()
+        test_read_to_sourceD()
 
         env.posedge(100)
         env.TEST_SUCCESS()

@@ -103,7 +103,6 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val reqNeedB      = needB(req.opcode, req.param)
 
     val dbid            = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
-    val dataId          = RegInit(0.U(dataIdBits.W))
     val gotDirty        = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val needProbe       = RegInit(false.B)
@@ -134,7 +133,6 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
 
         needProbe := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
 
-        dataId          := io.alloc_s3.bits.req.dataId
         gotT            := false.B
         probeAckClients := 0.U
         probeAckParams.foreach(_ := 0.U)
@@ -226,7 +224,6 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     io.tasks.mpTask.bits.set          := req.set
     io.tasks.mpTask.bits.tag          := req.tag
     io.tasks.mpTask.bits.wayOH        := dirResp.wayOH                                                                                                                                    // TODO:
-    io.tasks.mpTask.bits.dataId       := dataId
     io.tasks.mpTask.bits.updateDir    := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
     io.tasks.mpTask.bits.newMetaEntry := newMetaEntry
     io.tasks.mpTask.bits.readTempDs   := needTempDsData
@@ -278,7 +275,6 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val rxdat = io.resps.rxdat
     when(rxdat.fire && rxdat.bits.last) {
         state.w_compdat := true.B
-        dataId          := rxdat.bits.dataId
 
         when(rxdat.bits.chiOpcode === CompData) {
             gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD

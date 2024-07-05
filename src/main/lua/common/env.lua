@@ -191,6 +191,19 @@ local function expect_not_happen_until(limit_cycles, func)
     assert(not ok)
 end
 
+local function call_with_hook_and_callback(hook_func, callback_func, functions)
+    assert(type(hook_func) == "function")
+    assert(type(callback_func) == "function")
+    assert(type(functions) == "table")
+    assert(type(functions[1]) == "function")
+
+    for _, func in pairs(functions) do
+        hook_func()
+        func()
+        callback_func()
+    end
+end
+
 local lester = require "lester"
 local expect = lester.expect
 
@@ -209,4 +222,5 @@ return {
     expect                  = expect,
     expect_happen_until     = expect_happen_until,
     expect_not_happen_until = expect_not_happen_until,
+    call_with_hook_and_callback = call_with_hook_and_callback,
 }

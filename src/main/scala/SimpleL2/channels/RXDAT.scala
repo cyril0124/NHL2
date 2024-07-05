@@ -14,8 +14,7 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
         val rxdat = Flipped(DecoupledIO(new CHIBundleDAT(chiBundleParams)))
         val resp  = ValidIO(new CHIRespBundle(chiBundleParams))
         val toTempDS = new Bundle {
-            val dataWr = DecoupledIO(new TempDataWrite)
-            val dataId = Input(UInt(dataIdBits.W))
+            val write = DecoupledIO(new TempDataWrite)
         }
     })
 
@@ -30,13 +29,11 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
     io.resp.bits.txnID     := io.rxdat.bits.txnID
     io.resp.bits.last      := last
     io.resp.bits.pCrdType  := DontCare
-    io.resp.bits.dataId    := io.toTempDS.dataWr.bits.dataId
 
-    io.rxdat.ready                   := io.toTempDS.dataWr.ready
-    io.toTempDS.dataWr.valid         := io.rxdat.valid && (first || last)
-    io.toTempDS.dataWr.bits.beatData := io.rxdat.bits.data
-    io.toTempDS.dataWr.bits.dataId   := Mux(first, io.toTempDS.dataId, RegEnable(io.toTempDS.dataId, first && io.rxdat.fire))
-    io.toTempDS.dataWr.bits.wrMaskOH := Cat(last, first).asUInt
+    io.rxdat.ready              := io.toTempDS.write.ready
+    io.toTempDS.write.valid     := io.rxdat.valid && last
+    io.toTempDS.write.bits.data := Cat(io.rxdat.bits.data, RegEnable(io.rxdat.bits.data, io.rxdat.fire))
+    io.toTempDS.write.bits.idx  := io.rxdat.bits.txnID
 }
 
 object RXDAT extends App {

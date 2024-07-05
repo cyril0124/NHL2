@@ -324,9 +324,9 @@ local function write_dir(set, wayOH, tag, state, clientsOH)
     env.posedge()
 end
 
-local function write_ds(set, way, data_str)
+local function write_ds(set, wayOH, data_str)
     assert(type(set) == "number")
-    assert(type(way) == "number")
+    assert(type(wayOH) == "number")
     assert(type(data_str) == "string")
 
     env.negedge()
@@ -338,12 +338,26 @@ local function write_ds(set, way, data_str)
     env.negedge()
         ds:release_all()
         ds:force_all()
-            ds.io_dsWrWay_s3:set(way)
+            ds.io_fromMainPipe_dsWrWayOH_s3:set(wayOH)
     
     env.negedge()
         ds:release_all()
     
     env.posedge()
+end
+
+local function write_sinkC_respDestMap(mshrId, set, tag, isTempDS, isDS)
+    env.negedge()
+        dut:force_all()
+        sinkC.io_respDest_s4_valid:set(1)
+        sinkC.io_respDest_s4_bits_mshrId:set(mshrId)
+        sinkC.io_respDest_s4_bits_set:set(set)
+        sinkC.io_respDest_s4_bits_tag:set(tag)
+        sinkC.io_respDest_s4_bits_isTempDS:set(isTempDS)
+        sinkC.io_respDest_s4_bits_isDS:set(isDS)
+    env.negedge()
+        sinkC.io_respDest_s4_valid:set(0)
+        dut:release_all()
 end
 
 local function to_address(set, tag)
@@ -404,7 +418,7 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
         resetFinish:posedge()
 
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
-        write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
@@ -426,7 +440,7 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
             expect.equal(mp.task_s3_param:get(), TLParam.NtoT)
             expect.equal(mp.task_s3_source:get(), 8)
             expect.equal(mp.io_mshrAlloc_s3_valid:get(), 0)
-            expect.equal(ds.io_dsRead_s3_valid:get(), 1)
+            expect.equal(ds.io_fromMainPipe_dsRead_s3_valid:get(), 1)
 
         env.posedge()
             -- expect.equal(mp.valid_s4:get(), 1) -- resp valid
@@ -434,16 +448,24 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
         
         env.posedge()
         --    expect.equal(ds.ren_s5:get(), 1)
-        
-        env.posedge()
-            expect.equal(ds.io_toTempDS_dsResp_ds4_valid:get(), 1)
-            expect.equal(ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr), "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")
-            expect.equal(sourceD.io_d_valid:get(), 1)
-            expect.equal(sourceD.io_d_ready:get(), 1)
 
         env.posedge()
-            expect.equal(sourceD.io_d_valid:get(), 1)
-            expect.equal(sourceD.io_d_ready:get(), 1)
+            sourceD.io_d_ready:expect(1)
+            sourceD.io_d_valid:expect(1)
+            sourceD.io_d_bits_data:dump()
+            sourceD.io_d_bits_data:expect(0xdead)
+
+        env.posedge()
+            sourceD.io_d_ready:expect(1)
+            sourceD.io_d_valid:expect(1)
+            sourceD.io_d_bits_data:dump()
+            sourceD.io_d_bits_data:expect(0xbeef)
+
+        env.posedge()
+        env.posedge(10, function ()
+            tl_d:dump()
+            sourceD.io_d_valid:expect(0)
+        end)
         
         env.posedge()
     end
@@ -455,7 +477,7 @@ local test_load_to_use_latency = env.register_test_case "test_load_to_use_latenc
         resetFinish:posedge()
 
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
-        write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
@@ -483,18 +505,18 @@ local test_load_to_use_latency = env.register_test_case "test_load_to_use_latenc
     end
 }
 
-local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
+local test_load_to_use_stall_simple = env.register_test_case "test_load_to_use_stall_simple" {
     function ()
         env.dut_reset()
         resetFinish:posedge()
-        
+
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
-        write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
 
-        slice.io_tl_d_ready:set(0)
+        tl_d.ready:set(0)
 
         env.negedge()
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
@@ -504,11 +526,56 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
         env.posedge()
             expect.equal(mpReq_s2.valid:get(), 1)
             mpReq_s2:dump()
+
+        verilua "appendTasks" {
+            check_task = function ()
+                env.expect_happen_until(100, function (c)
+                    return tl_d:fire() and tl_d.bits.data:get()[1] == 0xdead
+                end)
+                tl_d:dump()
+
+                env.posedge()
+                env.expect_happen_until(100, function (c)
+                    return tl_d:fire() and tl_d.bits.data:get()[1] == 0xbeef
+                end)
+                tl_d:dump()
+
+                print("data check ok!")
+            end
+        }
+
+        env.posedge(math.random(3, 20))
+            tl_d.ready:set(1)
+            
+        env.posedge(100)
+    end
+}
+
+local test_load_to_use_stall_complex = env.register_test_case "test_load_to_use_stall_complex" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
         
-        env.posedge(4)
-            expect.equal(ds.io_toTempDS_dsResp_ds4_valid:get(), 1)
-            expect.equal(ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr), "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead")            
-            expect.equal(sourceD.io_d_valid:get(), 1)
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
+            {s = 0,   e = 63, v = 0xdead},
+            {s = 256, e = 256 + 63, v = 0xbeef}
+        }, 512))
+
+        write_dir(0x00, ("0b0001"):number(), 0x05, MixedState.TC)    
+        write_ds(0x00, ("0b0001"):number(), utils.bitpat_to_hexstr({
+            {s = 0,   e = 63, v = 0xdead},
+            {s = 256, e = 256 + 63, v = 0xbeef}
+        }, 512))
+
+        tl_d.ready:set(0)
+
+        env.negedge()
+            tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
+        env.negedge()
+            tl_a:acquire_block_1(0x14000, TLParam.NtoT, 8)
+        env.negedge()
+            tl_a.valid:set(0)
         
         verilua "appendTasks" {
             check_task = function ()
@@ -525,10 +592,10 @@ local test_load_to_use_stall = env.register_test_case "test_load_to_use_stall" {
             end
         }
 
-        env.posedge(math.random(3, 20))
-            slice.io_tl_d_ready:set(1)
+        env.negedge(math.random(20, 40))
+            tl_d.ready:set(1)
         
-        env.posedge(100)
+        env.posedge(300)
     end
 }
 
@@ -539,21 +606,21 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
-        write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
 
         -- 0x20000
         write_dir(0x00, ("0b0100"):number(), 0x08, MixedState.TC)    
-        write_ds(0x00, 0x02, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0100"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead1},
             {s = 256, e = 256 + 63, v = 0xbeef1}
         }, 512))
 
         -- 0x30000
         write_dir(0x00, ("0b1000"):number(), 0x0C, MixedState.TC)    
-        write_ds(0x00, 0x03, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b1000"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead2},
             {s = 256, e = 256 + 63, v = 0xbeef2}
         }, 512))
@@ -571,16 +638,6 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
                 end
             end,
 
-            check_task_1 = function()
-                for i = 1, 3 do
-                    env.expect_happen_until(10, function (c)
-                        return ds.io_toTempDS_dsResp_ds4_valid:get() == 1
-                    end)
-                    print("get toTempDS_dsResp_ds4 at", dut.cycles:get(), ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr))
-                    env.negedge()
-                end
-            end,
-
             check_task_2 = function ()
                 local ok = false
                 local datas_0 = {0xdead, 0xdead1, 0xdead2}
@@ -589,10 +646,12 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
                     env.expect_happen_until(100, function (c)
                         return tl_d:fire() and tl_d.bits.data:get()[1] == datas_0[i]
                     end)
+                    tl_d:dump()
 
                     env.expect_happen_until(100, function (c)
                         return tl_d:fire() and tl_d.bits.data:get()[1] == datas_1[i]
                     end)
+                    tl_d:dump()
                 end
 
                 env.negedge()
@@ -603,10 +662,13 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
         }
 
         env.negedge()
+            tl_a.ready:expect(1)
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 1)
         env.negedge()
+            tl_a.ready:expect(1)
             tl_a:acquire_block_1(0x20000, TLParam.NtoT, 2)
         env.negedge()
+            tl_a.ready:expect(1)
             tl_a:acquire_block_1(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
@@ -629,21 +691,21 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC)    
-        write_ds(0x00, 0x01, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0010"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead},
             {s = 256, e = 256 + 63, v = 0xbeef}
         }, 512))
 
         -- 0x20000
         write_dir(0x00, ("0b0100"):number(), 0x08, MixedState.TC)    
-        write_ds(0x00, 0x02, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b0100"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead1},
             {s = 256, e = 256 + 63, v = 0xbeef1}
         }, 512))
 
         -- 0x30000
         write_dir(0x00, ("0b1000"):number(), 0x0C, MixedState.TC)    
-        write_ds(0x00, 0x03, utils.bitpat_to_hexstr({
+        write_ds(0x00, ("0b1000"):number(), utils.bitpat_to_hexstr({
             {s = 0,   e = 63, v = 0xdead2},
             {s = 256, e = 256 + 63, v = 0xbeef2}
         }, 512))
@@ -700,52 +762,20 @@ local test_release_write = env.register_test_case "test_release_write" {
         resetFinish:posedge()
 
         verilua "appendTasks" {
-            check_task = function()
+            check_release_write = function()
                 env.expect_happen_until(100, function (c)
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100"
-                end)
-
-                env.negedge()
-                env.expect_happen_until(100, function (c)
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000300"
+                    return ds.io_dsWrite_s2_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100"
                 end)
             end
         }
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
+        write_sinkC_respDestMap(0, 0x00, 0x04, 1, 0)
 
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
 
-        env.negedge(math.random(1, 10))
-            dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_dest:set(SourceD)
-            ds.io_dsRead_s3_bits_set:set(0x00)
-            ds.io_dsRead_s3_bits_way:set(0x1)
-        env.negedge()
-            dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
-        env.negedge(10)
-            dut:release_all()
-        
-        env.negedge()
-            tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x300", "0x400")
-        
-        env.negedge(math.random(1, 10))
-            dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_set:set(0x00)
-            ds.io_dsRead_s3_bits_way:set(0x1)
-        env.negedge()
-            dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
-        env.negedge(10)
-            dut:release_all()
-
-        env.posedge(100)
+        env.posedge(200)
     end
 }
 
@@ -757,30 +787,23 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
         verilua "appendTasks" {
             check_task = function()
                 env.expect_happen_until(100, function (c)
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000005000000000000000000000000000000000000000000000000000000000000000400"
+                    return ds.io_dsWrite_s2_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100"
+                end)
+
+                env.expect_happen_until(100, function (c)
+                    return ds.io_dsWrite_s2_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000005000000000000000000000000000000000000000000000000000000000000000400"
                 end)
             end
         }
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
+        write_sinkC_respDestMap(0, 0x00, 0x04, 1, 0)
 
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x400", "0x500")
 
-        env.negedge(math.random(1, 10))
-            dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_set:set(0x00)
-            ds.io_dsRead_s3_bits_way:set(0x1)
-        
-        env.negedge()
-            dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
-
         env.posedge(100)
-        dut:release_all()
     end
 }
 
@@ -1203,20 +1226,20 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0xdead and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                    return ds.io_toSourceD_dsResp_s6s7_bits_data:get() == 0xdead
                 end)
             end
         }
         env.negedge(math.random(1, 10))
             dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_dest:set(SourceD)
-            ds.io_dsRead_s3_bits_set:set(0x10)
-            ds.io_dsRead_s3_bits_way:set(0x00)
+            ds.io_fromMainPipe_dsRead_s3_valid:set(1)
+            ds.io_fromMainPipe_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_fromMainPipe_dsRead_s3_bits_set:set(0x10)
+            ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
             dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+            tempDS.io_fromDS_write_valid:set(0)
         env.negedge(10)
             dut:release_all()
 
@@ -1285,21 +1308,21 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0xdead and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                    return ds.io_toTempDS_write_s6_bits_data:get() == 0xdead
                 end)
             end
         }
 
         env.negedge(math.random(1, 10))
             dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_dest:set(SourceD)
-            ds.io_dsRead_s3_bits_set:set(0x10)
-            ds.io_dsRead_s3_bits_way:set(0x00)
+            ds.io_fromMainPipe_dsRead_s3_valid:set(1)
+            ds.io_fromMainPipe_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_fromMainPipe_dsRead_s3_bits_set:set(0x10)
+            ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
             dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+            tempDS.io_fromDS_write_valid:set(0)
         env.negedge(10)
             dut:release_all()
 
@@ -1330,22 +1353,22 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return ds.io_toTempDS_dsResp_ds4_bits_data:get() == 0x100 and ds.io_toTempDS_dsDest_ds4:get() == SourceD
+                    return ds.io_toTempDS_write_s6_bits_data:get() == 0x100
                 end)
-                ds.io_toTempDS_dsResp_ds4_bits_data:dump()
+                ds.io_toTempDS_write_s6_bits_data:dump()
             end
         }
 
         env.negedge(math.random(1, 10))
             dut:force_all()
-            ds.io_dsRead_s3_valid:set(1)
-            ds.io_dsRead_s3_bits_dest:set(SourceD)
-            ds.io_dsRead_s3_bits_set:set(0x10)
-            ds.io_dsRead_s3_bits_way:set(0x00)
+            ds.io_fromMainPipe_dsRead_s3_valid:set(1)
+            ds.io_fromMainPipe_dsRead_s3_bits_dest:set(SourceD)
+            ds.io_fromMainPipe_dsRead_s3_bits_set:set(0x10)
+            ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
             dut:force_all()
-            tempDS.io_fromDS_dsResp_ds4_valid:set(0)
+            tempDS.io_fromDS_write_valid:set(0)
         env.negedge(10)
             dut:release_all()
 
@@ -1355,16 +1378,6 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
 
 local test_probe_toN = env.register_test_case "test_probe_toN" {
     function ()
-        local function dump_tempDS_entry()
-            print("\n------------------- [dump_tempDS_entry] -------------------")
-            for i = 0, 15 do
-                local entry_0 = tempDS["valids_" .. i .. "_0"]
-                local entry_1 = tempDS["valids_" .. i .. "_1"]
-                local preAlloc = tempDS["preAllocs_" .. i]
-                print(("[%2d] valid_0: %d, valid_1: %d, preAlloc: %d"):format(i, entry_0:get(), entry_1:get(), preAlloc:get()))
-            end
-            print()
-        end
         env.dut_reset()
         resetFinish:posedge()
         
@@ -1416,15 +1429,7 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
             end)
             mp_dirResp:dump()
             mp.needProbeOnHit_a_s3:expect(1)
-            mp.io_dsRead_s3_bits_hasDataId:expect(1)
-            local dataId = math.random(1, 8) -- reassign dataId
-            mp.io_mshrAlloc_s3_bits_req_dataId:set_force(dataId)
-            mp.io_dsRead_s3_bits_dataId:set_force(dataId)
-            tempDS.freeDataIdx:set_force(dataId)
             env.negedge()
-            mp.io_mshrAlloc_s3_bits_req_dataId:set_release()
-            mp.io_dsRead_s3_bits_dataId:set_release()
-            tempDS.freeDataIdx:set_release()
 
             -- wait Probe.toN
             env.expect_happen_until(20, function ()
@@ -1450,8 +1455,6 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
             env.negedge(10)
             mshrs[0].io_status_valid:expect(0)
 
-            -- check temp data entry leak
-            dump_tempDS_entry() 
         end
 
         env.negedge(200)
@@ -1466,7 +1469,6 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
                 return mp_dirResp.valid:get() == 1 and mp_dirResp.hit:get() == 1 and mp_dirResp.state:get() == MixedState.TTC
             end)
             mp_dirResp:dump()
-            mp.io_mshrAlloc_s3_bits_req_dataId:dump()
             mp.needProbeOnHit_a_s3:expect(1)
 
             -- wait Probe.toN
@@ -1474,8 +1476,6 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
                 return tl_b:fire() and tl_b.bits.address:is(to_address(0x10, 0x20)) and tl_b.bits.opcode:is(TLOpcodeB.Probe) and tl_b.bits.param:is(TLParam.toN)
             end)
             tl_b:dump()
-
-            dump_tempDS_entry()
 
             -- send ProbeAckData.TtoN(data is modified in core 0)
             env.negedge(5)
@@ -1497,7 +1497,6 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
             env.negedge(10)
             mshrs[0].io_status_valid:expect(0)
 
-            dump_tempDS_entry()
         end
 
         -- env.dut_reset()
@@ -1573,7 +1572,7 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
             verilua "appendTasks" {
                 function ()
                     env.expect_happen_until(20, function ()
-                        return sinkC.io_toTempDS_dataWr_valid:is(1)
+                        return sinkC.io_toTempDS_write_valid:is(1)
                     end)
                 end,
                 function ()
@@ -1947,7 +1946,8 @@ verilua "mainTask" { function ()
         test_replay_valid()
         test_load_to_use()
         test_load_to_use_latency()
-        test_load_to_use_stall()
+        test_load_to_use_stall_simple()
+        test_load_to_use_stall_complex()
         test_grantdata_continuous_stall_3()
         test_grantdata_mix_grant()
         test_release_write()
@@ -1969,12 +1969,11 @@ verilua "mainTask" { function ()
     test_probe_toN()
     test_probe_toB()
 
-    end
-
     test_get_miss() -- TODO: for now we suppose preferCache is true! 
     test_get_hit("probeack_data") -- TODO: for now we suppose preferCache is true! 
     test_get_hit("probeack") -- TODO: for now we suppose preferCache is true! 
-
+    end
+    
     env.posedge(200)
     env.TEST_SUCCESS()
 end }

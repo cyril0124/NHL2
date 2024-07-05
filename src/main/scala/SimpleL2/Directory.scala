@@ -148,7 +148,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val resetIdx = RegInit(sets.U)
 
     val metaSRAM = Module(
-        new BankedSRAM(
+        new BankedSRAM( // TODO: consider SRAMTemplate
             gen = new DirectoryMetaEntry,
             sets = sets,
             ways = ways,

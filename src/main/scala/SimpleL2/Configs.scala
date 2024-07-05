@@ -47,19 +47,20 @@ trait HasL2Param {
     val p: Parameters
     val l2param = p(L2ParamKey)
 
-    val ways         = l2param.ways
-    val sets         = l2param.sets
-    val wayBits      = log2Ceil(l2param.sets)
-    val addressBits  = l2param.addressBits
-    val dataBits     = l2param.dataBits
-    val beatBytes    = l2param.beatBytes
-    val setBits      = log2Ceil(l2param.sets)
-    val offsetBits   = log2Ceil(l2param.blockBytes)
-    val blockBytes   = l2param.blockBytes
-    val tagBits      = l2param.addressBits - setBits - offsetBits
-    val nrMSHR       = l2param.nrMSHR
-    val nrClients    = l2param.nrClients
-    val dataSramBank = l2param.dataSramBank
+    val ways        = l2param.ways
+    val sets        = l2param.sets
+    val wayBits     = log2Ceil(l2param.sets)
+    val addressBits = l2param.addressBits
+    val dataBits    = l2param.dataBits
+    val beatBytes   = l2param.beatBytes
+    val setBits     = log2Ceil(l2param.sets)
+    val offsetBits  = log2Ceil(l2param.blockBytes)
+    val blockBytes  = l2param.blockBytes
+    val tagBits     = l2param.addressBits - setBits - offsetBits
+    val nrMSHR      = l2param.nrMSHR
+    val mshrBits    = log2Ceil(l2param.nrMSHR)
+    val nrClients   = l2param.nrClients
+    // val dataSramBank = l2param.dataSramBank
     val metaSramBank = l2param.metaSramBank
     val nrBeat       = l2param.blockBytes / l2param.beatBytes
 
@@ -156,7 +157,7 @@ trait HasL2Param {
     }
 
     def lfsrArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
-        val arb = Module(new LFSRArbiter[T](chiselTypeOf(out.bits), in.size))
+        val arb = Module(new Utils.LFSRArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
@@ -182,6 +183,6 @@ trait HasL2Param {
     }
 
     def needData(opcode: UInt): Bool = {
-        opcode === ReleaseData
+        opcode === ReleaseData || opcode === GrantData || opcode === AccessAckData
     }
 }

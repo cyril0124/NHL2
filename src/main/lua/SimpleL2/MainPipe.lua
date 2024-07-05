@@ -198,8 +198,7 @@ verilua "mainTask" {
         sim.dump_wave()
         env.dut_reset()
 
-        mp.dsRdCnt:set_force(1)
-        dut.io_sourceD_s4_ready:set(1)
+        dut.io_sourceD_s6s7_ready:set(1)
         dut.io_replay_s4_ready:set(1)
 
         test_basic_acquire("hit")
@@ -210,8 +209,6 @@ verilua "mainTask" {
         for i = 1, 5 do
             test_basic_release("normal")
         end
-
-        mp.dsRdCnt:set_release()
 
         env.TEST_SUCCESS()
     end 

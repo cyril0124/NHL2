@@ -3,34 +3,33 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
+import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, BankedSRAM}
+import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import dataclass.data
-import freechips.rocketchip.diplomacy.BufferParams.flow
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class DSRead()(implicit p: Parameters) extends L2Bundle {
-    val set       = UInt(setBits.W)
-    val way       = UInt(wayBits.W)
-    val dest      = UInt(DataDestination.width.W)
-    val hasDataId = Bool()
-    val dataId    = UInt(dataIdBits.W)
+    val set   = UInt(setBits.W)
+    val wayOH = UInt(wayBits.W)
+    val dest  = UInt(DataDestination.width.W)
 }
 
 class DSWrite()(implicit p: Parameters) extends L2Bundle {
-    val set  = UInt(setBits.W)
-    val way  = UInt(wayBits.W)
-    val data = UInt(dataBits.W)
+    val set   = UInt(setBits.W)
+    val wayOH = UInt(wayBits.W)
+    val data  = UInt(dataBits.W)
 }
 
 class DSResp()(implicit p: Parameters) extends L2Bundle {
     val data = UInt(dataBits.W)
 }
 
-class DSEntry()(implicit p: Parameters) extends L2Bundle {
-    // val ecc = UInt()
-    val data = UInt(dataBits.W)
+class DSEntry(bytes: Int)(implicit p: Parameters) extends L2Bundle {
+    // TODO: ECC
+    val data = UInt((bytes * 8).W)
 }
 
 class DataStorage()(implicit p: Parameters) extends L2Module {
@@ -38,23 +37,19 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
         /** Write interface for [[SinkC]] */
         val dsWrite_s2 = Flipped(DecoupledIO(new DSWrite))
-        val dsWrWay_s3 = Input(UInt(wayBits.W)) // Write wayOH can only be determined when directory result is read back
 
         /** Refilled data from [[TempDataStorage]] */
-        val refillWrite = Flipped(CreditIO(new DSWrite))
+        val refillWrite = Flipped(ValidIO(new DSWrite))
 
         /** Read interface for [[MainPipe]] */
-        val dsRead_s3 = Flipped(CreditIO(new DSRead))
+        val fromMainPipe = new Bundle {
+            val dsRead_s3    = Flipped(ValidIO(new DSRead))
+            val mshrIdx_s3   = Input(UInt(mshrBits.W))
+            val dsWrWayOH_s3 = Input(UInt(ways.W)) // Write wayOH can only be determined when directory result is read back
+        }
 
-        /** 
-          * The data being read will be passed into [[TempDataStorage]], where data will be further transfered into 
-          * [[SourceD]](GrantData/AccessAckData) or [[TempDataStorage]] depending on the [[dsDest_ds4]].
-          */
         val toTempDS = new Bundle {
-            val dsResp_ds4      = ValidIO(new DSResp)
-            val dsDest_ds4      = Output(UInt(DataDestination.width.W))
-            val dsHasDataId_ds4 = Output(Bool())
-            val dsDataId_ds4    = Output(UInt(dataIdBits.W))
+            val write_s6 = ValidIO(new TempDataWrite)
         }
 
         /** 
@@ -62,182 +57,186 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
           * next level cache.
           */
         val toTXDAT = new Bundle {
-            val dsResp_ds4 = ValidIO(new DSResp)
+            val dsResp_s6s7 = DecoupledIO(new DSResp)
+        }
+
+        val toSourceD = new Bundle {
+            val dsResp_s6s7 = DecoupledIO(new DSResp)
         }
     })
 
-    io <> DontCare
+    val ready_s7    = WireInit(false.B)
+    val sramReady   = WireInit(false.B)
+    val wayConflict = WireInit(false.B)
 
-    val dsReady_s2      = WireInit(true.B)
-    val dsReady_s3      = WireInit(true.B)
-    val fire_ds1        = WireInit(false.B)
-    val fire_refill_ds1 = WireInit(false.B)
-    val ready_ds1       = WireInit(false.B)
-
-    val dataSRAM = Module(
-        new BankedSRAM(
-            gen = new DSEntry,
-            sets = sets * ways,
-            ways = 1,
-            nrBank = dataSramBank,
-            singlePort = true,
-            // hasMbist = false /* TODO */,
-            // hasShareBus = false /* TDOO */,
-            hasClkGate = enableClockGate
-            // parentName = parentName + "ds_" /* TODO */
-        )
-    )
-    dataSRAM.io <> DontCare
+    val groupBytes = 16                      // TODO: parameterize
+    val group      = blockBytes / groupBytes // 64 / 16 = 4, each CacheLine is splited into 4 groups of data bytes
+    val dataSRAMs = Seq.fill(ways) {
+        Seq.fill(group) {
+            Module(
+                new SRAMTemplate(
+                    gen = new DSEntry(groupBytes),
+                    set = sets,
+                    way = 1,
+                    singlePort = true,
+                    // hasMbist = false /* TODO */,
+                    // hasShareBus = false /* TDOO */,
+                    hasClkGate = enableClockGate
+                    // parentName = parentName + "ds_" /* TODO */
+                )
+            )
+        }
+    }
 
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
-    val wrSet_s2  = io.dsWrite_s2.bits.set
-    val wrData_s2 = io.dsWrite_s2.bits.data
-    val wen_s2    = io.dsWrite_s2.valid
-    // TODO: calc ECC
+    val wrSet_sinkC_s2  = io.dsWrite_s2.bits.set
+    val wrData_sinkC_s2 = io.dsWrite_s2.bits.data
+    val wen_sinkC_s2    = io.dsWrite_s2.valid
+    // TODO: calculate ECC
 
     assert(!(RegNext(io.dsWrite_s2.valid, false.B) && io.dsWrite_s2.valid), "continuous write!")
 
     // -----------------------------------------------------------------------------------------
     // Stage 3 (mainpipe read)
-    //         &&
-    // DataStorage Stage 1
     // -----------------------------------------------------------------------------------------
-    val wen_ds1        = WireInit(false.B)
-    val wen_refill_ds1 = WireInit(false.B)
+    val ren_s3       = io.fromMainPipe.dsRead_s3.valid
+    val rdDest_s3    = io.fromMainPipe.dsRead_s3.bits.dest
+    val rdWayOH_s3   = io.fromMainPipe.dsRead_s3.bits.wayOH
+    val rdSet_s3     = io.fromMainPipe.dsRead_s3.bits.set
+    val rdMshrIdx_s3 = io.fromMainPipe.mshrIdx_s3
 
-    val rdQueue = Module(new Queue(new DSRead, rdQueueEntries, flow = true))
-    rdQueue.io.deq.ready := dsReady_s3 && !wen_ds1 && !wen_refill_ds1
-    rdQueue.io.enq.valid := io.dsRead_s3.valid
-    rdQueue.io.enq.bits  := io.dsRead_s3.bits
-    assert(!(rdQueue.io.enq.valid && !rdQueue.io.enq.ready), "rdQueue should not blocking the input request!")
+    val wen_sinkC_s3     = RegNext(wen_sinkC_s2, false.B)
+    val wrData_sinkC_s3  = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
+    val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
+    val wrWayOH_sinkC_s3 = io.fromMainPipe.dsWrWayOH_s3
 
-    val ren_ds1         = rdQueue.io.deq.fire
-    val rdReq_ds1       = rdQueue.io.deq.bits
-    val rdHasDataId_ds1 = rdReq_ds1.hasDataId
-    val rdDataId_ds1    = rdReq_ds1.dataId
-    val rdDest_ds1      = rdReq_ds1.dest
-    val rdIdx_ds1       = Cat(rdReq_ds1.way, rdReq_ds1.set)
+    val wen_refill_s3     = io.refillWrite.valid
+    val wrData_refill_s3  = io.refillWrite.bits.data
+    val wrSet_refill_s3   = io.refillWrite.bits.set
+    val wrWayOH_refill_s3 = io.refillWrite.bits.wayOH
 
-    val rdCrdCnt_s3 = RegInit(0.U(log2Ceil(rdQueueEntries + 1).W))
-    io.dsRead_s3.crdv := (rdCrdCnt_s3 < rdQueueEntries.U || ren_ds1) && !reset.asBool
-    when(io.dsRead_s3.crdv && !ren_ds1) {
-        rdCrdCnt_s3 := rdCrdCnt_s3 + 1.U
-        assert(rdCrdCnt_s3 < rdQueueEntries.U)
-    }.elsewhen(!io.dsRead_s3.crdv && ren_ds1) {
-        rdCrdCnt_s3 := rdCrdCnt_s3 - 1.U
-        assert(rdCrdCnt_s3 > 0.U)
+    val wrSet_s3   = Mux(wen_refill_s3, wrSet_refill_s3, wrSet_sinkC_s3)
+    val wrWayOH_s3 = Mux(wen_refill_s3, wrWayOH_refill_s3, wrWayOH_sinkC_s3)
+    val wrData_s3  = Mux(wen_refill_s3, wrData_refill_s3, wrData_sinkC_s3)
+    val wenVec_s3  = Cat(wen_sinkC_s3, wen_refill_s3)
+    val wen_s3     = wenVec_s3.orR
+
+    assert(PopCount(wenVec_s3) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
+    assert(!(wen_s3 && ren_s3 && wayConflict), "read and write at the same time with wayConflict! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
+    // TODO: allow write different way during conetious cycles
+    // TODO: allow read different way during conetious cycles
+
+    dataSRAMs.zipWithIndex.foreach { case (srams, wayIdx) =>
+        val wrWayEn = wrWayOH_s3(wayIdx)
+        val rdWayEn = rdWayOH_s3(wayIdx)
+
+        srams.zipWithIndex.foreach { case (sram, groupIdx) =>
+            sram.io.w.req.valid             := wen_s3 && wrWayEn
+            sram.io.w.req.bits.data(0).data := wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx) // TODO: ECC
+            sram.io.w.req.bits.setIdx       := wrSet_s3
+            sram.io.w.req.bits.waymask.foreach(_ := 1.U)
+
+            sram.io.r.req.valid       := ren_s3 && rdWayEn
+            sram.io.r.req.bits.setIdx := rdSet_s3
+
+            assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
+            assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+        }
     }
+
+    io.dsWrite_s2.ready := !wen_s3
 
     /**
-      * Write data from [[SinkC]]
+      * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
+      * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
       */
-    val wenReg_ds1   = RegInit(false.B)
-    val wrReq_ds1    = RegEnable(io.dsWrite_s2.bits, wen_s2)
-    val wrData_ds1   = wrReq_ds1.data
-    val wrWayReg_ds1 = RegEnable(io.dsWrWay_s3, 0.U, RegNext(wen_s2))
-    val wrWay_ds1    = Mux(RegNext(wen_s2), io.dsWrWay_s3, wrWayReg_ds1)
-    val wrIdx_ds1    = Cat(wrWay_ds1, wrReq_ds1.set)
+    assert(!((wen_s3 || ren_s3) && !sramReady), "sram is not ready!")
 
-    when(fire_ds1 && !wen_s2) {
-        wenReg_ds1 := false.B
-    }.elsewhen(!fire_ds1 && wen_s2) {
-        wenReg_ds1 := true.B
+    // -----------------------------------------------------------------------------------------
+    // Stage 4 (read accept)
+    // -----------------------------------------------------------------------------------------
+    val wen_s4       = RegNext(wen_s3, false.B)
+    val wrWayOH_s4   = RegEnable(wrWayOH_s3, wen_s3)
+    val ren_s4       = RegNext(ren_s3, false.B)
+    val rdWayOH_s4   = RegEnable(rdWayOH_s3, ren_s3)
+    val rdDest_s4    = RegEnable(rdDest_s3, ren_s3)
+    val rdMshrIdx_s4 = RegEnable(rdMshrIdx_s3, ren_s3)
+
+    val hasAccess_s3   = wen_s3 || ren_s3
+    val accessWayOH_s3 = Mux(wen_s3, wrWayOH_s3, rdWayOH_s3)
+    val accessWayOH_s4 = Mux(wen_s4, wrWayOH_s4, rdWayOH_s4)
+    wayConflict := RegNext(hasAccess_s3) && (accessWayOH_s3 & accessWayOH_s4).orR
+    sramReady   := !wayConflict
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 5 (read finish && ECC)
+    // -----------------------------------------------------------------------------------------
+    val ren_s5       = RegNext(ren_s4, false.B)
+    val rdWayOH_s5   = RegEnable(rdWayOH_s4, ren_s4)
+    val rdData_s5    = WireInit(0.U(dataBits.W))
+    val rdDest_s5    = RegEnable(rdDest_s4, ren_s4)
+    val rdMshrIdx_s5 = RegEnable(rdMshrIdx_s4, ren_s4)
+    val rdDataVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) =>
+        VecInit(srams.map(_.io.r.resp.data(0).data)).asUInt
+    })
+    dontTouch(rdDataVec_s5)
+
+    rdData_s5 := Mux1H(rdWayOH_s5, rdDataVec_s5)
+
+    // TODO: ECC Check
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 6 (data output)
+    // -----------------------------------------------------------------------------------------
+    val ren_s6           = RegInit(false.B)
+    val rdData_s6        = RegEnable(rdData_s5, ren_s5)
+    val rdDest_s6        = RegEnable(rdDest_s5, ren_s5)
+    val rdMshrIdx_s6     = RegEnable(rdMshrIdx_s5, ren_s5)
+    val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT && ren_s6
+    val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD && ren_s6
+    val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage
+
+    when(ren_s5 && !fire_s6) {
+        ren_s6 := true.B
+    }.elsewhen(!ren_s5 && fire_s6) {
+        ren_s6 := false.B
+    }.elsewhen(rdDest_s6 === DataDestination.TempDataStorage) {
+        ren_s6 := false.B
     }
 
-    wen_ds1 := wenReg_ds1
+    io.toTempDS.write_s6.valid     := rdDest_s6 === DataDestination.TempDataStorage && ren_s6
+    io.toTempDS.write_s6.bits.data := rdData_s6
+    io.toTempDS.write_s6.bits.idx  := rdMshrIdx_s6
 
-    /**
-      * Write data from [[TempDataStorage]] refill operation
-      */
-    val refillWen         = io.refillWrite.valid
-    val wenReg_refill_ds1 = RegInit(false.B)
-    val wrReq_refill_ds1  = RegEnable(io.refillWrite.bits, refillWen)
-    val wrData_refill_ds1 = wrReq_refill_ds1.data
-    val wrWay_refill_ds1  = wrReq_refill_ds1.way
-    val wrIdx_refill_ds1  = Cat(wrWay_refill_ds1, wrReq_refill_ds1.set)
-    when(fire_refill_ds1 && !refillWen) {
-        wenReg_refill_ds1 := false.B
-    }.elsewhen(!fire_refill_ds1 && refillWen) {
-        wenReg_refill_ds1 := true.B
+    assert(!(readToSourceD_s6 && readToTXDAT_s6))
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 7 (data output)
+    // -----------------------------------------------------------------------------------------
+    val full_s7          = RegInit(false.B)
+    val rdData_s7        = RegEnable(rdData_s6, fire_s6)
+    val rdDest_s7        = RegEnable(rdDest_s6, fire_s6)
+    val readToTXDAT_s7   = rdDest_s7 === DataDestination.TXDAT && full_s7
+    val readToSourceD_s7 = rdDest_s7 === DataDestination.SourceD && full_s7
+    val fire_s7          = io.toTXDAT.dsResp_s6s7.fire || io.toSourceD.dsResp_s6s7.fire
+
+    ready_s7 := !full_s7 || io.toTXDAT.dsResp_s6s7.fire || io.toSourceD.dsResp_s6s7.fire // TODO: timing?
+
+    when(fire_s6 && !fire_s7) {
+        full_s7 := true.B
+    }.elsewhen(!fire_s6 && fire_s7) {
+        full_s7 := false.B
     }
-    wen_refill_ds1 := wenReg_refill_ds1
 
-    val wrCrdCnt_refill_s3 = RegInit(0.U(1.W))
-    io.refillWrite.crdv := (wrCrdCnt_refill_s3 === 0.U || wen_refill_ds1) && !reset.asBool
-    when(io.refillWrite.crdv && !wen_refill_ds1) {
-        wrCrdCnt_refill_s3 := wrCrdCnt_refill_s3 + 1.U
-        assert(wrCrdCnt_refill_s3 < 1.U)
-    }.elsewhen(!io.refillWrite.crdv && wen_refill_ds1) {
-        wrCrdCnt_refill_s3 := wrCrdCnt_refill_s3 - 1.U
-        assert(wrCrdCnt_refill_s3 > 0.U)
-    }
-    assert(!(io.refillWrite.valid && wrCrdCnt_refill_s3 <= 0.U), "refillWrite witout credit!")
+    assert(!(readToSourceD_s7 && readToTXDAT_s7))
 
-    /** 
-      * Write priority: refill write > sinkC write
-      * Write priority > Read priority
-      */
-    fire_refill_ds1 := wen_refill_ds1 && dsReady_s3
-    fire_ds1        := wen_ds1 && dsReady_s3 && !wen_refill_ds1
-    ready_ds1       := fire_ds1 || !wen_ds1
+    io.toTXDAT.dsResp_s6s7.valid     := readToTXDAT_s6 || readToTXDAT_s7
+    io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToSourceD_s7, rdData_s7, rdData_s6)
 
-    dataSRAM.io.r.req.valid       := ren_ds1 && !wen_ds1 && dsReady_s3
-    dataSRAM.io.r.req.bits.setIdx := rdIdx_ds1
-
-    dataSRAM.io.w.req.valid             := fire_refill_ds1 || fire_ds1
-    dataSRAM.io.w.req.bits.data(0).data := Mux(fire_refill_ds1, wrData_refill_ds1, wrData_ds1)
-    dataSRAM.io.w.req.bits.setIdx       := Mux(fire_refill_ds1, wrIdx_refill_ds1, wrIdx_ds1)
-
-    io.dsWrite_s2.ready := !wen_ds1 || fire_ds1
-
-    assert(!(dataSRAM.io.r.req.valid && !dataSRAM.io.r.req.ready), "dataSRAM read request not ready!")
-    assert(!(dataSRAM.io.w.req.valid && !dataSRAM.io.w.req.ready), "dataSRAM write request not ready!")
-    assert(PopCount(Seq(wen_ds1, ren_ds1)) <= 1.U)
-    assert(PopCount(Seq(fire_ds1, fire_refill_ds1)) <= 1.U)
-
-    // -----------------------------------------------------------------------------------------
-    // DataStorage Stage 2 (read accept)
-    // -----------------------------------------------------------------------------------------
-    val wen_ds2         = RegNext(fire_ds1 || fire_refill_ds1, false.B)
-    val ren_ds2         = RegNext(ren_ds1, false.B)
-    val rdHasDataId_ds2 = RegEnable(rdHasDataId_ds1, ren_ds1)
-    val rdDataId_ds2    = RegEnable(rdDataId_ds1, ren_ds1)
-    val rdDest_ds2      = RegEnable(rdDest_ds1, ren_ds1)
-    assert(PopCount(Seq(wen_ds2, ren_ds2)) <= 1.U)
-
-    // -----------------------------------------------------------------------------------------
-    // DataStorage Stage 3 (read finish && ECC)
-    // -----------------------------------------------------------------------------------------
-    val ren_ds3         = RegNext(ren_ds2, false.B)
-    val rdData_ds3      = RegEnable(dataSRAM.io.r.resp.data(0), ren_ds2)
-    val rdHasDataId_ds3 = RegEnable(rdHasDataId_ds2, ren_ds2)
-    val rdDataId_ds3    = RegEnable(rdDataId_ds2, ren_ds2)
-    val rdDest_ds3      = RegEnable(rdDest_ds2, ren_ds2)
-    // TODO: ECC
-
-    // -----------------------------------------------------------------------------------------
-    // DataStorage Stage 4 (data output)
-    // -----------------------------------------------------------------------------------------
-    val ren_ds4         = RegNext(ren_ds3, false.B)
-    val rdData_ds4      = RegEnable(rdData_ds3, ren_ds3)
-    val rdHasDataId_ds4 = RegEnable(rdHasDataId_ds3, ren_ds3)
-    val rdDataId_ds4    = RegEnable(rdDataId_ds3, ren_ds3)
-    val rdDest_ds4      = RegEnable(rdDest_ds3, ren_ds3)
-
-    io.toTXDAT.dsResp_ds4.valid     := rdDest_ds4 === DataDestination.TXDAT && ren_ds4
-    io.toTXDAT.dsResp_ds4.bits.data := rdData_ds4.data
-
-    io.toTempDS.dsResp_ds4.valid     := (rdDest_ds4 === DataDestination.TempDataStorage || rdDest_ds4 === DataDestination.SourceD) && ren_ds4
-    io.toTempDS.dsResp_ds4.bits.data := rdData_ds4.data
-    io.toTempDS.dsDest_ds4           := rdDest_ds4
-    io.toTempDS.dsHasDataId_ds4      := rdHasDataId_ds4
-    io.toTempDS.dsDataId_ds4         := rdDataId_ds4
-
-    dsReady_s2 := !ren_ds1 && !wen_ds1
-    dsReady_s3 := !ren_ds2 && !wen_ds2
-    dontTouch(dsReady_s3)
+    io.toSourceD.dsResp_s6s7.valid     := readToSourceD_s6 || readToSourceD_s7
+    io.toSourceD.dsResp_s6s7.bits.data := Mux(readToSourceD_s7, rdData_s7, rdData_s6)
 
     dontTouch(io)
 }

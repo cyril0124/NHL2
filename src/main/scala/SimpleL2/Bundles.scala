@@ -24,6 +24,7 @@ class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
 
 class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val owner       = UInt(RequestOwner.width.W)
+    val isCHIOpcode = Bool()
     val opcode      = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
     val param       = UInt(3.W)
     val channel     = L2Channel()
@@ -40,11 +41,11 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
     val readTempDs = Bool()
     val tempDsDest = UInt(DataDestination.width.W)
-    val dataId     = UInt(log2Ceil(nrTempDataEntry).W)
 
     val updateDir    = Bool()
     val newMetaEntry = new DirectoryMetaEntryNoTag
 
+    def mshrIdx = sink
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
     def isSnoop = channel === L2Channel.ChannelB && !isMshrTask

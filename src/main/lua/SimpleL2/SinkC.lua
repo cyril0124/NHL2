@@ -61,10 +61,9 @@ local dsWrite = ([[
 
 local tempDS = ([[
     | valid
-    | wrMaskOH
-    | beatData
-    | dataId
-]]):bundle{hier = cfg.top, prefix = "io_toTempDS_dataWr_", name = "tempDS"}
+    | data
+    | idx
+]]):bundle{hier = cfg.top, prefix = "io_toTempDS_write_", name = "tempDS"}
 
 local respDest = ([[
     | valid
@@ -74,7 +73,7 @@ local respDest = ([[
     | dataId
     | isTempDS
     | isDS
-]]):bundle{hier = cfg.top, prefix = "io_respDest_", name = "respDest"}
+]]):bundle{hier = cfg.top, prefix = "io_respDest_s4_", name = "respDest"}
 
 local sinkC = dut.u_SinkC
 
@@ -108,6 +107,17 @@ local test_simple_releasedata = env.register_test_case "test_simple_releasedata"
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
                     return task.valid:get() == 1
+                end)
+            end,
+
+            check_data_wr = function ()
+                env.expect_happen_until(100, function ()
+                    return dsWrite.valid:get() == 1 and dsWrite.data:get()[1] == 0xdead and dsWrite.set:get() == 0x10
+                end)
+
+                env.negedge()
+                env.expect_not_happen_until(100, function ()
+                    return dsWrite.valid:is(1)
                 end)
             end,
 
@@ -190,7 +200,7 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
 
        dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
-       dut.io_toTempDS_dataWr_ready:set(1)
+       dut.io_toTempDS_write_ready:set(1)
 
        verilua "appendTasks" {
             check_resp = function ()
@@ -210,12 +220,12 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
             end,
             check_tempDS = function ()
                 env.expect_happen_until(100, function ()
-                    return tempDS:fire() and tempDS.bits.wrMaskOH:get() == ("0b01"):number() and tempDS.bits.beatData:get()[1] == 0xdead
+                    return tempDS:fire() and tempDS.bits.data:get()[1] == 0xdead
                 end)
 
                 env.negedge()
-                env.expect_happen_until(100, function ()
-                    return tempDS:fire() and tempDS.bits.wrMaskOH:get() == ("0b10"):number() and tempDS.bits.beatData:get()[1] == 0xbeef
+                env.expect_not_happen_until(100, function ()
+                    return tempDS:fire()
                 end)
             end
        }
@@ -280,7 +290,7 @@ local test_simple_probeack = env.register_test_case "test_simple_probeack" {
 
        dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
-       dut.io_toTempDS_dataWr_ready:set(1)
+       dut.io_toTempDS_write_ready:set(1)
 
        verilua "appendTasks" {
             check_resp = function ()
@@ -323,7 +333,7 @@ local test_stalled_release_releasedata = env.register_test_case "test_stalled_re
 
         dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(0)
-        dut.io_toTempDS_dataWr_ready:set(0)
+        dut.io_toTempDS_write_ready:set(0)
 
         env.posedge()
 
@@ -364,7 +374,7 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
 
         dut.io_dsWrite_s2_ready:set(1)
         dut.io_task_ready:set(0)
-        dut.io_toTempDS_dataWr_ready:set(0)
+        dut.io_toTempDS_write_ready:set(0)
 
         env.posedge()
 

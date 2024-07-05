@@ -208,6 +208,4 @@ class CHIRespBundle(params: CHIBundleParameters)(implicit p: Parameters) extends
     val respErr   = UInt(2.W)
     val resp      = UInt(3.W)
     val pCrdType  = UInt(4.W)
-
-    val dataId = UInt(dataIdBits.W)
 }

@@ -25,7 +25,6 @@ class RXRSP()(implicit p: Parameters) extends L2Module {
     io.resp.bits.dbID      := io.rxrsp.bits.dbID
     io.resp.bits.txnID     := io.rxrsp.bits.txnID
     io.resp.bits.last      := true.B
-    io.resp.bits.dataId    := DontCare
 }
 
 object RXRSP extends App {

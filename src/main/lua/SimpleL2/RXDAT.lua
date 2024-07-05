@@ -5,28 +5,20 @@ local test_wrdata_no_stall = env.register_test_case "test_wrdata_no_stall" {
     function ()
         env.dut_reset()
 
-        dut.io_toTempDS_dataWr_ready:set(1)
-        dut.io_toTempDS_dataId:set(10)
+        dut.io_toTempDS_write_ready:set(1)
 
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(10, function ()
-                    return dut.io_toTempDS_dataWr_valid:get() == 1 and 
-                            dut.io_toTempDS_dataWr_bits_dataId:get() == 10 and
-                            dut.io_toTempDS_dataWr_bits_wrMaskOH:get() == 0x01 and
-                            dut.io_toTempDS_dataWr_bits_beatData:get() == 0xdead
+                    return dut.io_toTempDS_write_valid:is(1) and 
+                            dut.io_toTempDS_write_bits_idx:is(10) and
+                            dut.io_toTempDS_write_bits_data:get_str(HexStr) == "000000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"
                 end)
-
-                env.expect_happen_until(10, function ()
-                    return dut.io_toTempDS_dataWr_valid:get() == 1 and 
-                            dut.io_toTempDS_dataWr_bits_dataId:get() == 10 and
-                            dut.io_toTempDS_dataWr_bits_wrMaskOH:get() == 0x02 and
-                            dut.io_toTempDS_dataWr_bits_beatData:get() == 0xbeef
-                end)
+                dut.io_toTempDS_write_bits_data:dump()
 
                 env.posedge()
                 env.expect_not_happen_until(10, function ()
-                    return dut.io_toTempDS_dataWr_valid:get() == 1
+                    return dut.io_toTempDS_write_valid:get() == 1
                 end)
             end
         }
@@ -34,6 +26,7 @@ local test_wrdata_no_stall = env.register_test_case "test_wrdata_no_stall" {
         env.negedge()
             dut.io_rxdat_bits_dataID:set(("0b00"):number())
             dut.io_rxdat_bits_data:set_str("0xdead")
+            dut.io_rxdat_bits_txnID:set(10)
             dut.io_rxdat_valid:set(1)
         env.negedge()
             dut.io_rxdat_bits_data:set_str("0xbeef")
@@ -49,8 +42,7 @@ local test_wrdata_stall = env.register_test_case "test_wrdata_stall" {
     function ()
         env.dut_reset()
 
-        dut.io_toTempDS_dataWr_ready:set(0)
-        dut.io_toTempDS_dataId:set(10)
+        dut.io_toTempDS_write_ready:set(0)
 
         env.negedge()
             dut.io_rxdat_bits_dataID:set(("0b00"):number())
@@ -64,29 +56,6 @@ local test_wrdata_stall = env.register_test_case "test_wrdata_stall" {
     end
 }
 
-local test_keep_dataid = env.register_test_case "test_keep_dataid" {
-    function ()
-        env.dut_reset()
-
-        dut.io_toTempDS_dataWr_ready:set(1)
-        dut.io_toTempDS_dataId:set(10)
-
-        env.negedge()
-            dut.io_rxdat_bits_dataID:set(("0b00"):number())
-            dut.io_rxdat_bits_data:set_str("0xdead")
-            dut.io_rxdat_valid:set(1)
-        env.negedge()
-            dut.io_rxdat_bits_dataID:set(("0b10"):number())
-            dut.io_toTempDS_dataWr_ready:set(0)
-            dut.io_toTempDS_dataWr_bits_dataId:expect(10)
-        
-        env.negedge(10, function()
-            dut.io_toTempDS_dataWr_bits_dataId:expect(10)
-        end)
-        
-        env.posedge(100)
-    end
-}
 
 verilua "appendTasks" {
     function ()
@@ -94,7 +63,6 @@ verilua "appendTasks" {
 
         test_wrdata_no_stall()
         test_wrdata_stall()
-        test_keep_dataid()
 
         env.posedge(100)
         env.TEST_SUCCESS()
