@@ -1,6 +1,9 @@
 local env = require "env"
 local tl = require "TileLink"
+local utils = require "LuaUtils"
+
 local MixedState = tl.MixedState
+local assert = assert
 local expect = env.expect
 
 local dir = dut.u_Directory
@@ -11,6 +14,8 @@ local dirRead_s1 = ([[
     | ready
     | set
     | tag
+    | mshrId
+    | replTask
 ]]):bundle {hier = cfg.top, prefix = "io_dirRead_s1_", name = "dirRead_s1"}
 
 local dirResp_s3 = ([[
@@ -33,8 +38,61 @@ local dirWrite_s3 = ([[
     | meta_fromPrefetch
 ]]):bundle {hier = cfg.top, prefix = "io_dirWrite_s3_", name = "dirWrite_s3"}
 
+local replResp_s3 = ([[
+    | valid
+    | wayOH
+    | mshrId
+    | retry
+    | meta_state
+]]):bundle {hier = cfg.top, prefix = "io_replResp_s3_", name = "replResp_s3"}
 
-local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir" {
+local mshr_status = {}
+for i = 1, 16 do
+    mshr_status[i] = ([[
+        | valid
+        | set
+        | wayOH
+        | dirHit
+    ]]):bundle {hier = cfg.top, prefix = "io_mshrStatus_" .. (i - 1) .. "_", is_decoupled = false, name = "mshrStatus_" .. (i - 1)}
+end
+
+local function dir_write(set, tag, wayOH, state)
+    env.negedge()
+        dirWrite_s3.valid:set(1)
+        dirWrite_s3.bits.wayOH:set(wayOH)
+        dirWrite_s3.bits.set:set(set)
+        dirWrite_s3.bits.meta_tag:set(tag)
+        dirWrite_s3.bits.meta_state:set(state)
+    env.negedge()
+        dirWrite_s3.valid:set(0)
+end
+
+local function dir_read(set, tag, mshr, repl_task)
+    local mshr = mshr or 0
+    local repl_task = repl_task or 0
+
+    env.negedge()
+        dirRead_s1.valid:set(1)
+        dirRead_s1.bits.set:set(set)
+        dirRead_s1.bits.tag:set(tag)
+        dirRead_s1.bits.mshrId:set(mshr)
+        dirRead_s1.bits.replTask:set(repl_task)
+    env.negedge()
+        dirRead_s1.valid:set(0)
+end
+
+local function reset_mshr_status()
+    for i = 1, 16 do
+        mshr_status[i].valid:set(0)
+        mshr_status[i].set:set(0x00)
+        mshr_status[i].dirHit:set(0)
+    end
+end
+
+local nr_way = 4
+
+
+local test_basic_read_write = env.register_test_case "test_basic_read_write" {
     function ()
         env.dut_reset()
 
@@ -96,17 +154,147 @@ local test_write_and_read_dir = env.register_test_case "test_write_and_read_dir"
     end
 }
 
+local test_miss_use_inv_way = env.register_test_case "test_miss_use_inv_way" {
+   function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        for i = 1, nr_way do
+            local set = 0x00
+            local tag = 0x01 + i
+            local expect_wayOH = utils.uint_to_onehot(i - 1)
+
+            env.negedge(); dir_read(set, tag)
+            
+            env.expect_happen_until(10, function ()
+                return dirResp_s3:fire()
+            end)
+            dirResp_s3:dump()
+            dirResp_s3.bits.hit:expect(0)
+            -- dirResp_s3.bits.wayOH:expect(expect_wayOH)
+            dirResp_s3.bits.meta_state:expect(MixedState.I)
+
+            env.negedge(); dir_write(set, tag, expect_wayOH, MixedState.TC)
+            env.negedge(10)
+        end
+
+        env.posedge(100)
+   end 
+}
+
+local test_miss_filter_occupied_way = env.register_test_case "test_miss_filter_occupied_way" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        for i = 1, nr_way - 1 do
+            mshr_status[i].valid:set(1)
+            mshr_status[i].set:set(0x00)
+            mshr_status[i].dirHit:set(1)
+            mshr_status[i].wayOH:set(utils.uint_to_onehot(i - 1))
+
+            env.negedge(); dir_read(0x00, 0x01)
+
+            env.expect_happen_until(10, function ()
+                return dirResp_s3:fire()
+            end)
+            dirResp_s3:dump()
+            dirResp_s3.bits.hit:expect(0)
+            assert(dirResp_s3.bits.wayOH:is_not(utils.uint_to_onehot(i - 1)))
+            -- dirResp_s3.bits.wayOH:expect(utils.uint_to_onehot(i)) 
+            dirResp_s3.bits.meta_state:expect(MixedState.I)
+        end
+
+        reset_mshr_status()
+
+        env.dut_reset()
+        resetFinish:posedge()
+
+        print("")
+        print("")
+
+        for i = 1, 3 do
+            mshr_status[i].valid:set(1)
+            mshr_status[i].set:set(0x00)
+            mshr_status[i].dirHit:set(1)
+            mshr_status[i].wayOH:set(utils.uint_to_onehot(i - 1))
+        end
+
+        env.negedge(); dir_read(0x00, 0x01)
+
+        env.expect_happen_until(10, function ()
+            return dirResp_s3:fire()
+        end)
+        dirResp_s3:dump()
+        dirResp_s3.bits.hit:expect(0)
+        assert(dirResp_s3.bits.wayOH:is_not(utils.uint_to_onehot(3 - 1)))
+        -- dirResp_s3.bits.wayOH:expect(utils.uint_to_onehot(3)) 
+        dirResp_s3.bits.meta_state:expect(MixedState.I)
+
+        reset_mshr_status()
+
+        env.posedge(100)
+    end
+}
+
+local test_repl_resp = env.register_test_case "test_repl_resp" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        reset_mshr_status()
+
+        -- no retry
+        env.negedge(); dir_read(0x00, 0x01, 10, 1)
+        env.expect_happen_until(10, function ()
+            return dirResp_s3:fire()
+        end)
+        dirResp_s3:dump()
+        replResp_s3:dump()
+        replResp_s3.valid:expect(1)
+        replResp_s3.bits.mshrId:expect(10)
+        replResp_s3.bits.retry:expect(0)
+        replResp_s3.bits.wayOH:expect(utils.uint_to_onehot(0))
+
+        -- has retry
+        for i = 1, nr_way do
+            mshr_status[i].valid:set(1)
+            mshr_status[i].set:set(0x00)
+            mshr_status[i].dirHit:set(1)
+            mshr_status[i].wayOH:set(utils.uint_to_onehot(i - 1))
+        end
+        env.negedge(); dir_read(0x00, 0x01, 11, 1)
+        env.expect_happen_until(10, function ()
+            return dirResp_s3:fire()
+        end)
+        dirResp_s3:dump()
+        replResp_s3:dump()
+        replResp_s3.valid:expect(1)
+        replResp_s3.bits.mshrId:expect(11)
+        replResp_s3.bits.retry:expect(1)
+        -- replResp_s3.bits.wayOH:expect(utils.uint_to_onehot(0)) wayOH is not valid
+
+        reset_mshr_status()
+
+        env.posedge(100)
+    end
+}
+
+-- TODO: local test_repl_policy
+
 verilua "mainTask" {
     function ()
         sim.dump_wave()
         env.dut_reset()
-        env.posedge()
-        
-        test_write_and_read_dir()
 
-        env.posedge(100)
-
+        math.randomseed(os.time())
         
+        test_basic_read_write()
+        test_miss_use_inv_way()
+        test_miss_filter_occupied_way()
+        test_repl_resp()
+
+        env.posedge(100)        
         env.TEST_SUCCESS()
     end
 }

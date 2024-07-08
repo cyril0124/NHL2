@@ -9,12 +9,12 @@ local dsWrite_s2 = ([[
     | data
 ]]):bundle {hier = cfg.top, prefix = "io_dsWrite_s2_", name = "dsWrite_s2"}
 
-local refillWrite = ([[
+local refillWrite_s2 = ([[
     | valid
     | set
     | wayOH
     | data
-]]):bundle {hier = cfg.top, prefix = "io_refillWrite_", name = "refillWrite"}
+]]):bundle {hier = cfg.top, prefix = "io_refillWrite_s2_", name = "refillWrite_s2"}
 
 local dsRead_s3 = ([[
     | valid
@@ -45,19 +45,16 @@ local TXDAT = ("0b0001"):number()
 local SourceD = ("0b0010"):number()
 local TempDataStorage = ("0b0100"):number()
 
-local dsWrWayOH_s3 = dut.io_fromMainPipe_dsWrWayOH_s3
-local rd_crdv = dut.io_dsRead_s3_crdv
-local wr_crdv = dut.io_dsWrite_s2_crdv
 local ds = dut.u_DataStorage
 
 local function refill_data(set, wayOH, data_str)
     env.negedge()
-        refillWrite.valid:set(1)
-        refillWrite.bits.data:set_str(data_str)
-        refillWrite.bits.wayOH:set(wayOH)
-        refillWrite.bits.set:set(set)
+        refillWrite_s2.valid:set(1)
+        refillWrite_s2.bits.data:set_str(data_str)
+        refillWrite_s2.bits.wayOH:set(wayOH)
+        refillWrite_s2.bits.set:set(set)
     env.negedge()
-        refillWrite.valid:set(0)
+        refillWrite_s2.valid:set(0)
 end
 
 local test_basic_read_write = env.register_test_case "test_basic_read_write" {
@@ -91,17 +88,19 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
             dsWrite_s2.bits.data:set(0xdead, true)
         env.negedge()
             -- write way is provided in Stage 3
-            dsWrWayOH_s3:set(1)
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(1)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(1)
             dsWrite_s2.valid:set(0)        
         env.negedge()
-            dsWrWayOH_s3:set(0)
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(0)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(0)
         env.negedge()
-            -- read from set=0x01, wayOH=0x01, mshrIdx_s3=0x04
+            -- read from set=0x01, wayOH=0x01, mshrId_s3=0x04
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
             dsRead_s3.bits.wayOH:set(1)
             dsRead_s3.bits.dest:set(TempDataStorage)
-            dut.io_fromMainPipe_mshrIdx_s3:set(4)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
 
         env.negedge()
             dsRead_s3.valid:set(0)
@@ -124,18 +123,18 @@ local test_refill_write = env.register_test_case "test_refill_write" {
         }
 
         env.negedge()
-            refillWrite.valid:set(1)
-            refillWrite.bits.data:set_str("0xdead")
-            refillWrite.bits.wayOH:set(("0b0010"):number())
-            refillWrite.bits.set:set(0x02)
+            refillWrite_s2.valid:set(1)
+            refillWrite_s2.bits.data:set_str("0xdead")
+            refillWrite_s2.bits.wayOH:set(("0b0010"):number())
+            refillWrite_s2.bits.set:set(0x02)
         env.negedge()
-            refillWrite.valid:set(0)
+            refillWrite_s2.valid:set(0)
         env.negedge()
             dsRead_s3.valid:set(1) -- read back
             dsRead_s3.bits.set:set(0x02)
             dsRead_s3.bits.wayOH:set(("0b0010"):number())
             dsRead_s3.bits.dest:set(TempDataStorage)
-            dut.io_fromMainPipe_mshrIdx_s3:set(4)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
         env.negedge()
             dsRead_s3.valid:set(0)
             
@@ -159,17 +158,17 @@ local test_operate_diffrent_way = env.register_test_case "test_operate_diffrent_
         }
 
         env.negedge()
-            refillWrite.valid:set(1)
-            refillWrite.bits.data:set_str("0xdead")
-            refillWrite.bits.wayOH:set(("0b0010"):number())
-            refillWrite.bits.set:set(0x03)
+            refillWrite_s2.valid:set(1)
+            refillWrite_s2.bits.data:set_str("0xdead")
+            refillWrite_s2.bits.wayOH:set(("0b0010"):number())
+            refillWrite_s2.bits.set:set(0x03)
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(0x03)
             dsRead_s3.bits.wayOH:set(("0b0001"):number())
             dsRead_s3.bits.dest:set(TempDataStorage)
-            dut.io_fromMainPipe_mshrIdx_s3:set(4)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
         env.negedge()
-            refillWrite.valid:set(0)
+            refillWrite_s2.valid:set(0)
             dsRead_s3.valid:set(0)
 
         env.posedge(100)

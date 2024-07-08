@@ -61,7 +61,7 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val toDS = new Bundle {
-            val refillWrite = ValidIO(new DSWrite)
+            val refillWrite_s2 = ValidIO(new DSWrite)
         }
 
         val toSourceD = new Bundle {
@@ -143,10 +143,10 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val dsWrSet_ts2   = RegEnable(dsWrSet_ts1, ren_ts1)
     val finalData_ts2 = VecInit(rdData_ts2.map(_.data)).asUInt
 
-    io.toDS.refillWrite.valid      := ren_ts2 && (rDest_ts2 & DataDestination.DataStorage).orR
-    io.toDS.refillWrite.bits.data  := finalData_ts2
-    io.toDS.refillWrite.bits.wayOH := dsWrWayOH_ts2
-    io.toDS.refillWrite.bits.set   := dsWrSet_ts2
+    io.toDS.refillWrite_s2.valid      := ren_ts2 && (rDest_ts2 & DataDestination.DataStorage).orR
+    io.toDS.refillWrite_s2.bits.data  := finalData_ts2
+    io.toDS.refillWrite_s2.bits.wayOH := dsWrWayOH_ts2
+    io.toDS.refillWrite_s2.bits.set   := dsWrSet_ts2
 
     io.toSourceD.data_s2.valid := ren_ts2 && (rDest_ts2 & DataDestination.SourceD).orR
     io.toSourceD.data_s2.bits  := finalData_ts2

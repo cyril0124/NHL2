@@ -15,7 +15,7 @@ local to_ds_write = ([[
     | data
     | set
     | wayOH
-]]):bundle{hier = cfg.top, prefix = "io_toDS_refillWrite_", name = "to_ds_refillWrite"}
+]]):bundle{hier = cfg.top, prefix = "io_toDS_refillWrite_s2_", name = "to_ds_refillWrite_s2"}
 
 local rxdat_write = ([[
     | valid
@@ -51,10 +51,10 @@ local TempDataStorage = ("0b0100"):number()
 local DataStorage = ("0b1000"):number()
 local nrTempDataEntry = 16
 
-local function read_back_and_check(mshrIdx, data_str)
+local function read_back_and_check(mshrId, data_str)
     env.negedge()
         reqArb_read.valid:set(1)
-        reqArb_read.bits.idx:set(mshrIdx)
+        reqArb_read.bits.idx:set(mshrId)
         reqArb_read.bits.dest:set(SourceD)
     env.negedge()
         reqArb_read.valid:set(0)
@@ -71,48 +71,48 @@ local test_basic_write = env.register_test_case "test_rxdat_write" {
         env.dut_reset()
 
         for i = 0, 15 do
-            local mshrIdx = i
-            local data = ("0x%02d0000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrIdx)
-            print("write mshrIdx" .. mshrIdx)
+            local mshrId = i
+            local data = ("0x%02d0000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrId)
+            print("write mshrId" .. mshrId)
             env.negedge()
                 rxdat_write.ready:expect(1)
                 rxdat_write.valid:set(1)
-                rxdat_write.bits.idx:set(mshrIdx)
+                rxdat_write.bits.idx:set(mshrId)
                 rxdat_write.bits.data:set_str(data)
             env.negedge()
                 rxdat_write.valid:set(0)
             print "start read_back_and_check"
-            read_back_and_check(mshrIdx, data)
+            read_back_and_check(mshrId, data)
         end
 
         for i = 0, 15 do
-            local mshrIdx = i
-            local data = ("0x%02d1000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrIdx)
-            print("write mshrIdx" .. mshrIdx)
+            local mshrId = i
+            local data = ("0x%02d1000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrId)
+            print("write mshrId" .. mshrId)
             env.negedge()
                 sinkC_write.ready:expect(1)
                 sinkC_write.valid:set(1)
-                sinkC_write.bits.idx:set(mshrIdx)
+                sinkC_write.bits.idx:set(mshrId)
                 sinkC_write.bits.data:set_str(data)
             env.negedge()
                 sinkC_write.valid:set(0)
             print "start read_back_and_check"
-            read_back_and_check(mshrIdx, data)
+            read_back_and_check(mshrId, data)
         end
 
         for i = 0, 15 do
-            local mshrIdx = i
-            local data = ("0x%02d2000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrIdx)
-            print("write mshrIdx" .. mshrIdx)
+            local mshrId = i
+            local data = ("0x%02d2000000000000000000000000000000000000000000000000000000000beef000000000000000000000000000000000000000000000000000000000000dead"):format(mshrId)
+            print("write mshrId" .. mshrId)
             env.negedge()
                 -- ds_write.ready:expect(1)
                 ds_write.valid:set(1)
-                ds_write.bits.idx:set(mshrIdx)
+                ds_write.bits.idx:set(mshrId)
                 ds_write.bits.data:set_str(data)
             env.negedge()
             ds_write.valid:set(0)
             print "start read_back_and_check"
-            read_back_and_check(mshrIdx, data)
+            read_back_and_check(mshrId, data)
         end
 
 

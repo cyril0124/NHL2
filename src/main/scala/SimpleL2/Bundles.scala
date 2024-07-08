@@ -38,6 +38,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
     val isAliasTask = Bool()
     val isMshrTask  = Bool()
+    val isReplTask  = Bool()
 
     val readTempDs = Bool()
     val tempDsDest = UInt(DataDestination.width.W)
@@ -45,7 +46,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val updateDir    = Bool()
     val newMetaEntry = new DirectoryMetaEntryNoTag
 
-    def mshrIdx = sink
+    def mshrId = sink
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
     def isSnoop = channel === L2Channel.ChannelB && !isMshrTask

@@ -92,12 +92,14 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     fire_s1 := io.dirRead_s1.ready && (valid_s1 && Mux(task_s1.readTempDs, io.tempDsRead_s1.ready, true.B) || chosenTask_s1.fire)
 
-    io.dirRead_s1.valid    := fire_s1 && !task_s1.isMshrTask
-    io.dirRead_s1.bits.set := task_s1.set
-    io.dirRead_s1.bits.tag := task_s1.tag
+    io.dirRead_s1.valid         := fire_s1 && !task_s1.isMshrTask || fire_s1 && task_s1.isMshrTask && task_s1.isReplTask
+    io.dirRead_s1.bits.set      := task_s1.set
+    io.dirRead_s1.bits.tag      := task_s1.tag
+    io.dirRead_s1.bits.mshrId   := task_s1.mshrId
+    io.dirRead_s1.bits.replTask := task_s1.isMshrTask && task_s1.isReplTask
 
     io.tempDsRead_s1.valid     := isTaskMSHR_s1 && task_s1.readTempDs && valid_s1
-    io.tempDsRead_s1.bits.idx  := task_s1.mshrIdx
+    io.tempDsRead_s1.bits.idx  := task_s1.mshrId
     io.tempDsRead_s1.bits.dest := task_s1.tempDsDest
     io.dsWrSet_s1              := task_s1.set
     io.dsWrWayOH_s1            := task_s1.wayOH
@@ -109,7 +111,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2
     // -----------------------------------------------------------------------------------------
-    val task_s2  = Reg(new TaskBundle)
+    val task_s2  = RegInit(0.U.asTypeOf(new TaskBundle))
     val valid_s2 = RegInit(false.B)
     val fire_s2  = WireInit(false.B)
     val data_s2  = Reg(UInt((beatBytes * 8).W))

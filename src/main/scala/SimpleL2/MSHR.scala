@@ -28,9 +28,11 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_snpresp    = Bool() // resposne SnpResp downwards
     val s_evict      = Bool() // evict downwards(for clean state)
     val s_wb         = Bool() // writeback downwards(for dirty state)
+    val s_cbwrdata   = Bool()
     val s_compack    = Bool() // response CompAck downwards
     val s_makeunique = Bool()
     val s_accessack  = Bool()
+    val s_repl       = Bool() // send replTask to MainPipe
 
     // w: wait
     val w_grantack        = Bool()
@@ -43,6 +45,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val w_sprobeack_first = Bool()
     val w_dbidresp        = Bool()
     val w_comp            = Bool()
+    val w_replResp        = Bool()
 }
 
 class MshrInfo()(implicit p: Parameters) extends L2Bundle {
@@ -51,10 +54,14 @@ class MshrInfo()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrStatus()(implicit p: Parameters) extends L2Bundle {
-    val valid = Bool()
-    val set   = UInt(setBits.W)
-    val tag   = UInt(tagBits.W)
-    val wayOH = UInt(ways.W)
+    val valid     = Bool()
+    val set       = UInt(setBits.W)
+    val reqTag    = UInt(tagBits.W)
+    val metaTag   = UInt(tagBits.W)
+    val needsRepl = Bool()
+    val wayOH     = UInt(ways.W)
+    val dirHit    = Bool()
+    val lockWay   = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -73,8 +80,9 @@ class MshrResps()(implicit p: Parameters) extends L2Bundle {
 
 class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val alloc_s3 = Flipped(ValidIO(new MshrAllocBundle))
-        val status   = Output(new MshrStatus)
+        val alloc_s3    = Flipped(ValidIO(new MshrAllocBundle))
+        val replResp_s3 = Flipped(ValidIO(new DirReplResp)) // TODO:
+        val status      = Output(new MshrStatus)
 
         val tasks = new MshrTasks
         val resps = new MshrResps
@@ -109,7 +117,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
-    val probeClients    = ~reqClientOH & meta.clientsOH // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
+    val probeClients    = Mux(!state.w_rprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
     assert(
         !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) =/= 1.U),
         "probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b",
@@ -139,34 +147,49 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
 
     /**
-      * ------------------------------------------------------- 
-      * Send txreq task
-      * -------------------------------------------------------
-      */
-    io.tasks.txreq.valid := !state.s_read || !state.s_makeunique
-    io.tasks.txreq.bits.opcode := ParallelPriorityMux(
+     * ------------------------------------------------------- 
+     * Send [[TXREQ]] task
+     * -------------------------------------------------------
+     */
+    io.tasks.txreq.valid := !state.s_read ||
+        !state.s_makeunique ||
+        (!state.s_evict || !state.s_wb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
+    io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
-            (req.opcode === AcquirePerm && req.param === NtoT) -> MakeUnique,
-            reqNeedT                                           -> ReadUnique,
-            reqNeedB                                           -> ReadNotSharedDirty
+            (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
+                Seq(
+                    (req.opcode === AcquirePerm && req.param === NtoT) -> MakeUnique,
+                    reqNeedT                                           -> ReadUnique,
+                    reqNeedB                                           -> ReadNotSharedDirty
+                )
+            ),
+            !state.s_evict -> Evict,
+            !state.s_wb    -> WriteBackFull
         )
     )
-    io.tasks.txreq.bits.addr       := Cat(req.tag, req.set, 0.U(6.W)) // TODO: MultiBank
-    io.tasks.txreq.bits.allowRetry := true.B                          // TODO: Retry
-    io.tasks.txreq.bits.expCompAck := !state.s_read                   // TODO: only for Read not for EvictS
+    io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_evict || !state.s_wb, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
+    io.tasks.txreq.bits.allowRetry := true.B                                                                        // TODO: Retry
+    io.tasks.txreq.bits.expCompAck := !state.s_read                                                                 // TODO: only for Read not for EvictS
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
-    io.tasks.txreq.bits.order      := "b00".U                         // No ordering required
-    io.tasks.txreq.bits.srcID      := DontCare                        // This value will be assigned in output chi portr
+    io.tasks.txreq.bits.order      := Order.None                                                                    // No ordering required
+    io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B).asUInt
+    io.tasks.txreq.bits.snpAttr    := true.B
+    io.tasks.txreq.bits.srcID      := DontCare                                                                      // This value will be assigned in output chi portr
+    io.tasks.txreq.bits.txnID      := id.U
     when(io.tasks.txreq.fire) {
-        state.s_read       := true.B
-        state.s_makeunique := true.B
+        val opcode = io.tasks.txreq.bits.opcode
+        state.s_read       := state.s_read || (opcode === ReadUnique || opcode === ReadNotSharedDirty)
+        state.s_makeunique := state.s_makeunique || opcode === MakeUnique
+        state.s_evict      := state.s_evict || opcode === Evict
+        state.s_wb         := state.s_wb || opcode === WriteBackFull
     }
+    assert(!(!state.s_evict && !state.s_wb))
 
     /**
-      * ------------------------------------------------------- 
-      * Send txrsp task
-      * -------------------------------------------------------
-      */
+     * ------------------------------------------------------- 
+     * Send [[TXRSP]] task
+     * -------------------------------------------------------
+     */
     io.tasks.txrsp.valid         := !state.s_compack && state.w_compdat && state.w_comp
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.respErr  := RespErr.NormalOkay
@@ -180,19 +203,21 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
 
     /**
-      * ------------------------------------------------------- 
-      * Send sourceb task
-      * -------------------------------------------------------
-      */
-    io.tasks.sourceb.valid        := !state.s_aprobe /* TODO: acquire probe with MakeUnique */ || !state.s_sprobe || !state.s_rprobe
+     * ------------------------------------------------------- 
+     * Send [[SourceB]] task
+     * -------------------------------------------------------
+     */
+    io.tasks.sourceb.valid := !state.s_aprobe /* TODO: acquire probe with MakeUnique */ ||
+        !state.s_sprobe ||
+        !state.s_rprobe // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
     io.tasks.sourceb.bits.opcode  := Probe
-    io.tasks.sourceb.bits.param   := Mux(reqNeedT, toN, toB)         // TODO:
-    io.tasks.sourceb.bits.address := Cat(req.tag, req.set, 0.U(6.W)) // TODO: MultiBank
+    io.tasks.sourceb.bits.param   := Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB))              // TODO:
+    io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
     io.tasks.sourceb.bits.data    := DontCare
     io.tasks.sourceb.bits.mask    := DontCare
     io.tasks.sourceb.bits.corrupt := DontCare
-    io.tasks.sourceb.bits.source  := clientOHToSource(probeClients)  // TODO:
+    io.tasks.sourceb.bits.source  := clientOHToSource(probeClients)                                  // TODO:
     when(io.tasks.sourceb.fire) {
         state.s_aprobe := true.B
         state.s_sprobe := true.B
@@ -200,11 +225,22 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
 
     /**
-      * ------------------------------------------------------- 
-      * Send mainpipe task
-      * -------------------------------------------------------
-      */
-    // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
+     * ------------------------------------------------------- 
+     * Send [[MainPipe]] task
+     * -------------------------------------------------------
+     */
+    val mpTask_refill, mpTask_repl, mpTask_wbdata = WireInit(0.U.asTypeOf(Valid(new TaskBundle)))
+    Seq(mpTask_refill, mpTask_repl, mpTask_wbdata).foreach { task =>
+        /** Assignment signal values to common fields */
+        task.bits.isMshrTask := true.B
+        task.bits.sink       := id.U
+        task.bits.source     := req.source
+        task.bits.set        := req.set
+        task.bits.tag        := req.tag
+        task.bits.wayOH      := dirResp.wayOH // TODO:
+    }
+
+    /** Send the final refill response to the upper level */
     val needRefillData_hit  = dirResp.hit && needProbe
     val needRefillData_miss = !dirResp.hit
     val needRefillData      = (req.opcode === AcquireBlock || req.opcode === Get) && (needRefillData_hit || needRefillData_miss)
@@ -212,29 +248,39 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val needTempDsData      = needRefillData || needProbeAckData
     val mpGrant             = !state.s_grant && !state.w_grantack
     val mpAccessAck         = !state.s_accessack
-    io.tasks.mpTask.valid := valid &&
+
+    // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
+    mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck) &&
-        (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
+        state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && RegNext(RegNext(state.s_cbwrdata, true.B), true.B) /* delay two cycle to meet the DataStorage timing */ /* && state.s_evict && state.w_comp */ && // wait for all Evict/WriteBackFull(replacement operations) finish
+        (state.s_read && state.w_compdat && state.s_compack) &&                                                                                                                                                                      // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
-        (state.s_aprobe && state.w_aprobeack) // need to wait Probe finish (cause by Acquire)
-    io.tasks.mpTask.bits.isMshrTask   := true.B
-    io.tasks.mpTask.bits.opcode       := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
-    io.tasks.mpTask.bits.sink         := id.U
-    io.tasks.mpTask.bits.source       := req.source
-    io.tasks.mpTask.bits.set          := req.set
-    io.tasks.mpTask.bits.tag          := req.tag
-    io.tasks.mpTask.bits.wayOH        := dirResp.wayOH                                                                                                                                    // TODO:
-    io.tasks.mpTask.bits.updateDir    := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
-    io.tasks.mpTask.bits.newMetaEntry := newMetaEntry
-    io.tasks.mpTask.bits.readTempDs   := needTempDsData
-    io.tasks.mpTask.bits.tempDsDest := Mux(
+        (state.s_aprobe && state.w_aprobeack) // need to wait for aProbe to finish (cause by Acquire)
+    mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
+    mpTask_refill.bits.param := Mux(
+        reqIsGet || reqIsPrefetch,
+        0.U,       // Get -> AccessAckData
+        MuxLookup( // Acquire -> Grant
+            req.param,
+            req.param
+        )(
+            Seq(
+                NtoB -> Mux(reqPromoteT, toT, toB),
+                BtoT -> toT,
+                NtoT -> toT
+            )
+        )
+    )
+    mpTask_refill.bits.readTempDs := needTempDsData
+    mpTask_refill.bits.isReplTask := !dirResp.hit && !meta.isInvalid && !state.w_replResp
+    mpTask_refill.bits.updateDir  := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
+    mpTask_refill.bits.tempDsDest := Mux(
         !dirResp.hit || dirResp.hit && meta.isTrunk,
         /** For TRUNK state, dirty data will be written into [[DataStorage]] after receiving ProbeAckData */
         DataDestination.SourceD | DataDestination.DataStorage,
         DataDestination.SourceD
     )
-
-    newMetaEntry := DirectoryMetaEntryNoTag(
+    mpTask_refill.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = gotDirty, // TODO: Release ?
         state = Mux(
             reqIsGet,
@@ -262,16 +308,46 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         fromPrefetch = reqIsPrefetch // TODO:
     )
 
-    when(io.tasks.mpTask.fire) {
-        state.s_grant     := true.B
-        state.s_accessack := true.B
+    /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
+    mpTask_wbdata.valid            := !state.s_cbwrdata && state.w_dbidresp
+    mpTask_wbdata.bits.isCHIOpcode := true.B
+    mpTask_wbdata.bits.txnID       := dbid
+    mpTask_wbdata.bits.opcode      := CopyBackWrData // TODO: SnpRespData
+    mpTask_wbdata.bits.updateDir   := false.B
+    mpTask_wbdata.bits.readTempDs  := false.B        // true.B
+    mpTask_wbdata.bits.tempDsDest  := DataDestination.TXDAT
+
+    mpTask_repl.valid           := !state.s_repl && !state.w_replResp && state.s_read && state.s_makeunique && state.w_comp && state.w_compdat && state.s_compack
+    mpTask_repl.bits.isReplTask := true.B
+    mpTask_repl.bits.readTempDs := false.B
+    mpTask_repl.bits.updateDir  := false.B
+
+    /** Arbitration between multiple [[MainPipe]] tasks */
+    io.tasks.mpTask.valid := mpTask_refill.valid || mpTask_wbdata.valid || mpTask_repl.valid
+    io.tasks.mpTask.bits := PriorityMux(
+        Seq(
+            mpTask_refill.valid -> mpTask_refill.bits,
+            mpTask_wbdata.valid -> mpTask_wbdata.bits,
+            mpTask_repl.valid   -> mpTask_repl.bits
+        )
+    )
+
+    when(io.tasks.mpTask.ready) {
+        when(mpTask_refill.valid) {
+            state.s_grant     := true.B
+            state.s_accessack := true.B
+        }
+
+        when(mpTask_wbdata.valid) {
+            state.s_cbwrdata := true.B // TODO: Extra signals to indicate whether the cbwrdata is sent and leaves L2Cache.
+        }
+
+        when(mpTask_repl.valid) {
+            state.s_repl := true.B
+        }
     }
 
-    /**
-      * Receive RXDAT responses
-      * 1) CompData
-      * 2) Comp
-      */
+    /** Receive [[RXDAT]] responses, including: CompData */
     val rxdat = io.resps.rxdat
     when(rxdat.fire && rxdat.bits.last) {
         state.w_compdat := true.B
@@ -284,29 +360,33 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
     assert(!(rxdat.fire && state.w_compdat), s"mshr_${id} is not watting for rxdat")
 
-    /** Receive RXRSP response (Comp) */
+    /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
     when(rxrsp.fire && rxrsp.bits.last) {
-        state.w_comp := true.B
-        dbid         := rxrsp.bits.dbID
+        dbid := rxrsp.bits.dbID
+
+        val opcode = rxrsp.bits.chiOpcode
+        when(opcode === Comp) {
+            state.w_comp := true.B
+        }.elsewhen(opcode === CompDBIDResp) {
+            state.w_dbidresp := true.B
+        }
     }
-    assert(!(rxrsp.fire && state.w_comp), s"mshr_${id} is not watting for rxrsp")
+    assert(!(rxrsp.fire && state.w_comp && state.w_dbidresp), s"mshr_${id} is not watting for rxrsp")
 
     /**
-      * A MSHR will wait GrantAck for Acquire requests.
-      * If mshr not receive a GrantAck, it cannot be freed. 
-      * This allow external logic to check the mshr to determine whether the Grant/GrantData has been received by upstream cache.
-      * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
-      */
+     * A [[MSHR]] will wait GrantAck for Acquire requests.
+     * If mshr not receive a GrantAck, it cannot be freed. 
+     * This allow external logic to check the mshr to determine whether the Grant/GrantData has been received by upstream cache.
+     * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
+     */
     val sinke = io.resps.sinke
     when(sinke.fire) {
         state.w_grantack := true.B
     }
     assert(!(sinke.fire && state.w_grantack), s"mshr_${id} is not watting for sinke")
 
-    /**
-      * Receive ProbeAck/ProbeAckData
-      */
+    /** Receive ProbeAck/ProbeAckData response */
     val sinkc = io.resps.sinkc
     when(sinkc.fire) {
         val probeAckClient      = getClientBitOH(sinkc.bits.source)
@@ -325,26 +405,89 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         )
 
         when(sinkc.bits.opcode === ProbeAck) {
-            state.w_aprobeack := state.w_aprobeack | probeFinish | (nextProbeAckClients === probeClients)
+            state.w_aprobeack_first := true.B
+            state.w_aprobeack       := state.w_aprobeack | probeFinish | (nextProbeAckClients === probeClients)
+
+            state.w_rprobeack_first := true.B
+            state.w_rprobeack       := state.w_rprobeack | probeFinish | (nextProbeAckClients === probeClients)
         }.elsewhen(sinkc.bits.opcode === ProbeAckData) {
-            gotDirty := true.B
+            gotDirty := Mux(!state.w_rprobeack, gotDirty, true.B) // rprobeack is not the same cacheline as the request cacheline
 
             state.w_aprobeack_first := true.B
             state.w_aprobeack       := state.w_aprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
+
+            state.w_rprobeack_first := true.B
+            state.w_rprobeack       := state.w_rprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
+
+            when(!state.s_evict) {
+                state.s_evict := true.B
+                state.w_comp  := true.B
+
+                state.s_wb       := false.B
+                state.w_dbidresp := false.B
+                state.s_cbwrdata := false.B
+            }
         }.otherwise {
             // TODO:
             assert(false.B, "TODO:")
         }
     }
     probeFinish := probeClients === probeAckClients
-    assert(!(sinkc.fire && state.w_aprobeack && state.w_sprobeack && state.w_rprobeack), s"mshr_${id} is not watting for sinkc")
+    assert(!(sinkc.fire && state.w_aprobeack && state.w_sprobeack && state.w_rprobeack), s"MSHR is not watting for sinkc")
+    // assert(!(sinkc.fire && !state.w_rprobeack && !state.s_grant), "Should not receive ProbeAck until Grant/GrantData is sent!")
 
     // val rxrsp = io.resps.rxrsp
 
+    val replResp = io.replResp_s3
+    when(replResp.fire) {
+
+        when(!replResp.bits.retry) {
+            state.w_replResp := true.B
+
+            /** Update directory meta */
+            dirResp.meta  := replResp.bits.meta
+            dirResp.wayOH := replResp.bits.wayOH
+
+            when(replResp.bits.meta.state =/= MixedState.I) {
+
+                /** 
+                 * Select the replace operation according to the received response information.
+                 * The selected replace operation can also be changed based on the received ProbeAck response.
+                 * e.g. If replResp indicates that it is not a dirty way while the received ProbeAckData 
+                 *      indicates that it has dirty data from clients, hence the final replace operation 
+                 *      will be changed from Evict to WriteBackFull.
+                 */
+                when(replResp.bits.meta.isDirty) {
+                    state.s_wb       := false.B // Send WriteBackFull is it is a dirty way
+                    state.w_dbidresp := false.B // Wait CompDBIDResp
+                    state.s_cbwrdata := false.B // Send CopyBackWrData
+                }.otherwise {
+                    state.s_evict := false.B // Send Evict if it is not a dirty way
+                    state.w_comp  := false.B // Wait Comp
+                }
+
+                /** Send Probe if victim way has clients */
+                when(replResp.bits.meta.clientsOH.orR) {
+                    // rprobe: Probe trigged by replacement operation(Evict/WriteBackFull)
+                    state.s_rprobe          := false.B
+                    state.w_rprobeack       := false.B
+                    state.w_rprobeack_first := false.B
+                }
+            }
+        }.otherwise {
+            state.s_accessack := !reqIsGet
+            state.s_grant     := !reqIsAcquire
+            dirResp.wayOH     := replResp.bits.wayOH
+
+            assert(false.B, "TODO: retry")
+        }
+    }
+    assert(!(replResp.fire && state.w_replResp), s"mshr_${id} is not watting for replResp_s3")
+
     /**
-      * Check if there has any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
-      * If there is, then we cannot free the [[MSHR]].
-      */
+     * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
+     * If there is, then we cannot free the [[MSHR]].
+     */
     val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
     val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
     val willFree   = noWait && noSchedule
@@ -353,11 +496,16 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
 
     // TODO: deadlock check
-
-    io.status.valid := valid
-    io.status.set   := req.set
-    io.status.tag   := req.tag
-    io.status.wayOH := dirResp.wayOH
+    val evictNotSent = !state.s_evict
+    val wbNotSent    = !state.s_wb
+    io.status.valid     := valid
+    io.status.set       := req.set
+    io.status.reqTag    := req.tag
+    io.status.metaTag   := dirResp.meta.tag
+    io.status.needsRepl := evictNotSent || wbNotSent                                                          // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
+    io.status.wayOH     := dirResp.wayOH
+    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.dirHit    := dirResp.hit                                                                        // Used by Directory to occupy a particular way.
 
     dontTouch(io)
 }

@@ -17,7 +17,7 @@ case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UIn
 case object L2ParamKey extends Field[L2Param](L2Param())
 
 case class L2Param(
-    ways: Int = 8,
+    ways: Int = 4,
     sets: Int = 256,
     blockBytes: Int = 64,
     beatBytes: Int = 32,
@@ -115,19 +115,19 @@ trait HasL2Param {
         } else {
 
             /** 
-              * Now we suppose that we have 2 clients and each of them owns an unique id range(0~15(Core 0 DCache), 16~31(Core 1 DCache)).
-              * We also need 2 additional clients to send Get requests also called ICache with id range(32~47(Core 0 ICache), 48~63(Core 1 ICache))
-              * So we can use the sourceId to determine which client the request belongs to.
-              * The MSB<5:4> of sourceId is used to identify the clientBitOH because 0xF == 0b1111 = 15.
-              * TODO: Parameterize this
-              */
+             * Now we suppose that we have 2 clients and each of them owns an unique id range(0~15(Core 0 DCache), 16~31(Core 1 DCache)).
+             * We also need 2 additional clients to send Get requests also called ICache with id range(32~47(Core 0 ICache), 48~63(Core 1 ICache))
+             * So we can use the sourceId to determine which client the request belongs to.
+             * The MSB<5:4> of sourceId is used to identify the clientBitOH because 0xF == 0b1111 = 15.
+             * TODO: Parameterize this
+             */
             require(nrClients == 2)
             assert(sourceId <= 63.U)
 
             /** 
-              * "b01" => L1 DCache Core0
-              * "b10" => L1 DCache Core1
-              */
+             * "b01" => L1 DCache Core0
+             * "b10" => L1 DCache Core1
+             */
             MuxCase(
                 "b00".U,
                 Seq(

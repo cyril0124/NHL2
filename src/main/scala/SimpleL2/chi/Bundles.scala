@@ -53,8 +53,8 @@ class CHIBundleREQ(params: CHIBundleParameters) extends Bundle {
     val allowRetry   = Bool()
     val order        = UInt(2.W)
     val pCrdType     = UInt(4.W)
-    // val memAttr      = UInt(4.W)                 // TODO: not use?
-    // val snpAttr      = UInt(1.W)                 // TODO: not use?
+    val memAttr      = UInt(4.W)
+    val snpAttr      = UInt(1.W)
     // val cah          = Bool() // CHI Issue.B does not support this field
     // val excl         = cah
     // val snoopMe      = cah

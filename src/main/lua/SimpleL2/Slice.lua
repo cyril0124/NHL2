@@ -215,8 +215,20 @@ local chi_txreq = ([[
     | valid
     | ready
     | opcode
+    | txnID
     | addr
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "chi_txreq"}
+
+local chi_txdat = ([[
+    | valid
+    | ready
+    | opcode
+    | txnID
+    | dbID
+    | dataID
+    | data
+    | be
+]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txdat_", name = "chi_txdat"}
 
 local chi_txrsp = ([[
     | valid
@@ -237,6 +249,16 @@ chi_rxrsp.comp = function (this, txn_id, db_id)
     env.negedge()
         chi_rxrsp.bits.txnID:set(txn_id)
         chi_rxrsp.bits.opcode:set(OpcodeRSP.Comp)
+        chi_rxrsp.bits.dbID:set(db_id)
+        chi_rxrsp.valid:set(1)
+    env.negedge()
+        chi_rxrsp.valid:set(0)
+end
+
+chi_rxrsp.comp_dbidresp = function (this, txn_id, db_id)
+    env.negedge()
+        chi_rxrsp.bits.txnID:set(txn_id)
+        chi_rxrsp.bits.opcode:set(OpcodeRSP.CompDBIDResp)
         chi_rxrsp.bits.dbID:set(db_id)
         chi_rxrsp.valid:set(1)
     env.negedge()
@@ -302,7 +324,7 @@ end
 
 local function write_dir(set, wayOH, tag, state, clientsOH)
     assert(type(set) == "number")
-    assert(type(wayOH) == "number")
+    assert(type(wayOH) == "number" or type(wayOH) == "cdata")
     assert(type(tag) == "number")
     assert(type(state) == "number")
 
@@ -338,9 +360,11 @@ local function write_ds(set, wayOH, data_str)
     env.negedge()
         ds:release_all()
         ds:force_all()
-            ds.io_fromMainPipe_dsWrWayOH_s3:set(wayOH)
+            ds.io_fromMainPipe_dsWrWayOH_s3_valid:set(1)
+            ds.io_fromMainPipe_dsWrWayOH_s3_bits:set(wayOH)
     
     env.negedge()
+        ds.io_fromMainPipe_dsWrWayOH_s3_valid:set(0)
         ds:release_all()
     
     env.posedge()
@@ -544,7 +568,7 @@ local test_load_to_use_stall_simple = env.register_test_case "test_load_to_use_s
             end
         }
 
-        env.posedge(math.random(3, 20))
+        env.negedge(math.random(3, 20))
             tl_d.ready:set(1)
             
         env.posedge(100)
@@ -1143,7 +1167,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         chi_txreq:dump()
         mshrs[0].io_status_valid:expect(1)
         mshrs[0].io_status_set:expect(0x10)
-        mshrs[0].io_status_tag:expect(0x20)
+        mshrs[0].io_status_reqTag:expect(0x20)
         mshrs[0].state_w_compdat:expect(0)
         for i = 1, 15 do
             mshrs[i].io_status_valid:expect(0)
@@ -1921,7 +1945,451 @@ local test_get_hit = env.register_test_case "test_get_hit" {
     end
 }
 
--- TODO: miss need replace
+local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
+    function ()
+        -- TODO: Get?
+
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1)
+
+        local clientsOH = ("0b00"):number()
+        env.negedge()
+            write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return mp.io_replResp_s3_valid:is(1)
+                end)
+            end,
+            function ()
+                env.expect_happen_until(100, function ()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict)
+                end)
+            end
+        }
+
+        local source = 4
+        env.negedge()
+            tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+        env.posedge()
+            chi_txreq.valid:posedge(); env.negedge()
+            chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
+        env.posedge()
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        env.posedge()
+            chi_txrsp.valid:posedge(); env.negedge()
+            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(10, function()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(0)
+                end)
+                chi_txreq:dump()
+
+                env.negedge()
+                    chi_rxrsp:comp(0, 5)
+            end
+        }
+        
+        env.posedge()
+            tl_d.valid:posedge(); env.negedge()
+            tl_d:dump()
+            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+        env.negedge()
+            tl_d:dump()
+            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+
+        local sink = tl_d.bits.sink:get()
+        env.negedge()
+            tl_e:grantack(sink)
+
+        env.negedge(10)
+        mshrs[0].io_status_valid:expect(0)
+
+        tl_d.ready:set(0)
+
+        env.posedge(200)
+    end
+}
+
+local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_evict_and_probe" {
+    function (case)
+        -- TODO: Get?
+
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local clientsOH = ("0b01"):number()
+        env.negedge()
+            write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TTC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TTC, clientsOH)
+            write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TTC, clientsOH)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return mp.io_replResp_s3_valid:is(1)
+                end)
+            end
+        }
+
+        local source = 4
+        env.negedge()
+            tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+        env.posedge()
+            chi_txreq.valid:posedge(); env.negedge()
+            chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
+        env.posedge()
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        env.posedge()
+            chi_txrsp.valid:posedge(); env.negedge()
+            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+
+        env.expect_happen_until(10, function ()
+            return tl_b:fire()
+        end)
+        tl_b:dump()
+        local probe_address = tl_b.bits.address:get()
+
+        env.mux_case(case) {
+            probeack_data = function()
+                tl_c:probeack_data(probe_address, TLParam.TtoN, "0xabab", "0xefef", 0) -- core 0 sourceId = 0
+
+                env.expect_happen_until(10, function ()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull)
+                end)
+                chi_txreq:dump()
+
+                local txn_id = chi_txreq.bits.txnID:get()
+                local dbid = 5
+
+                env.negedge()
+                    chi_rxrsp:comp_dbidresp(txn_id, dbid)
+
+                verilua "appendTasks" {
+                    function ()
+                        env.posedge()
+                            tl_d.valid:posedge(); env.negedge()
+                            tl_d:dump()
+                            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+                        env.negedge()
+                            tl_d:dump()
+                            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                
+                        local sink = tl_d.bits.sink:get()
+                        env.negedge()
+                            tl_e:grantack(sink)
+                    end,
+
+                    check_wb_dir = function ()
+                        env.expect_happen_until(20, function ()
+                            return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC)
+                        end)
+                    end
+                }
+                
+                env.expect_happen_until(10, function ()
+                    return chi_txdat:fire()
+                end)
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0xabab)
+                    chi_txdat.bits.dataID:expect(0x00)
+                    chi_txdat.bits.txnID:expect(dbid)
+                env.negedge()
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0xefef)
+                    chi_txdat.bits.dataID:expect(0x02)
+                    chi_txdat.bits.txnID:expect(dbid)
+            end,
+
+            probeack = function ()
+                tl_c:probeack(probe_address, TLParam.TtoN, 0) -- core 0 sourceId = 0
+
+                verilua "appendTasks" {
+                    function ()
+                        env.posedge()
+                            tl_d.valid:posedge(); env.negedge()
+                            tl_d:dump()
+                            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+                        env.negedge()
+                            tl_d:dump()
+                            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                
+                        local sink = tl_d.bits.sink:get()
+                        env.negedge()
+                            tl_e:grantack(sink)
+                    end,
+
+                    check_wb_dir = function ()
+                        env.expect_happen_until(20, function ()
+                            return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC)
+                        end)
+                    end
+                }
+
+                env.expect_happen_until(100, function()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(0)
+                end)
+                    chi_txreq:dump()
+                env.negedge()
+                    chi_rxrsp:comp(0, 5)
+            end
+        }
+        
+        env.negedge(10)
+        mshrs[0].io_status_valid:expect(0)
+
+        env.posedge(200)
+    end
+}
+
+local test_miss_need_writebackfull = env.register_test_case "test_miss_need_writebackfull" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local clientsOH = ("0b00"):number()
+        env.negedge()
+            write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+
+        local source = 4
+        env.negedge()
+            tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+        env.posedge()
+            chi_txreq.valid:posedge(); env.negedge()
+            chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
+        env.posedge()
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        env.posedge()
+            chi_txrsp.valid:posedge(); env.negedge()
+            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(100, function ()
+                    return mp.io_replResp_s3_valid:is(1)
+                end)
+            end,
+            function ()
+                env.expect_happen_until(100, function ()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull)
+                end)
+                chi_txreq:dump()
+
+                local txn_id = chi_txreq.bits.txnID:get()
+                local dbid = 5
+
+                env.negedge()
+                    chi_rxrsp:comp_dbidresp(txn_id, dbid)
+
+                env.expect_happen_until(10, function ()
+                    return chi_txdat:fire()
+                end)
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0)
+                    chi_txdat.bits.dataID:expect(0x00)
+                    chi_txdat.bits.txnID:expect(dbid)
+                env.negedge()
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0)
+                    chi_txdat.bits.dataID:expect(0x02)
+                    chi_txdat.bits.txnID:expect(dbid)
+            end
+        }
+        
+        env.posedge()
+            tl_d.valid:posedge(); env.negedge()
+            tl_d:dump()
+            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+        env.negedge()
+            tl_d:dump()
+            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+        
+        local sink = tl_d.bits.sink:get()
+        env.negedge()
+            tl_e:grantack(sink)
+        
+        env.negedge(10)
+        mshrs[0].io_status_valid:expect(0)
+
+        env.posedge(200)
+    end
+}
+
+local test_miss_need_writebackfull_and_probe = env.register_test_case "test_miss_need_writebackfull_and_probe" {
+    function (case)
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local clientsOH = ("0b01"):number()
+        env.negedge()
+            write_dir(0x02, utils.uint_to_onehot(0), 0x01, MixedState.TTD, clientsOH)
+            write_dir(0x02, utils.uint_to_onehot(1), 0x02, MixedState.TTD, clientsOH)
+            write_dir(0x02, utils.uint_to_onehot(2), 0x03, MixedState.TTD, clientsOH)
+            write_dir(0x02, utils.uint_to_onehot(3), 0x04, MixedState.TTD, clientsOH)
+
+        local source = 4
+        env.negedge()
+            tl_a:acquire_block(to_address(0x02, 0x05), TLParam.NtoB, source)
+        env.posedge()
+            chi_txreq.valid:posedge(); env.negedge()
+            chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
+        env.posedge()
+            chi_rxdat:compdat(0, "0xabcd", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        env.posedge()
+            chi_txrsp.valid:posedge(); env.negedge()
+            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+
+        env.expect_happen_until(10, function ()
+            return tl_b:fire()
+        end)
+        tl_b:dump()
+        tl_b.bits.param:expect(TLParam.toN)
+        local probe_address = tl_b.bits.address:get()
+
+        env.mux_case(case) {
+            probeack_data = function()
+                tl_c:probeack_data(probe_address, TLParam.TtoN, "0xcdcd", "0xefef", 0) -- core 0 sourceId = 0
+
+                verilua "appendTasks" {
+                    function ()
+                        env.posedge()
+                            tl_d.valid:posedge(); env.negedge()
+                            tl_d:dump()
+                            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xabcd)
+                        env.negedge()
+                            tl_d:dump()
+                            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                
+                        local sink = tl_d.bits.sink:get()
+                        env.negedge()
+                            tl_e:grantack(sink)
+                    end,
+
+                    check_wb_dir = function ()
+                        env.expect_happen_until(20, function ()
+                            return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC)
+                        end)
+                    end
+                }
+
+                env.expect_happen_until(10, function ()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull)
+                end)
+                chi_txreq:dump()
+
+                local txn_id = chi_txreq.bits.txnID:get()
+                local dbid = 5
+
+                env.negedge()
+                    chi_rxrsp:comp_dbidresp(txn_id, dbid)
+
+                env.expect_happen_until(10, function ()
+                    return chi_txdat:fire()
+                end)
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0xcdcd)
+                    chi_txdat.bits.dataID:expect(0x00)
+                    chi_txdat.bits.txnID:expect(dbid)
+                env.negedge()
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0xefef)
+                    chi_txdat.bits.dataID:expect(0x02)
+                    chi_txdat.bits.txnID:expect(dbid)
+            end,
+
+            probeack = function()
+                tl_c:probeack(probe_address, TLParam.TtoN, 0) -- core 0 sourceId = 0
+
+                verilua "appendTasks" {
+                    function ()
+                        env.posedge()
+                            tl_d.valid:posedge(); env.negedge()
+                            tl_d:dump()
+                            tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xabcd)
+                        env.negedge()
+                            tl_d:dump()
+                            expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                
+                        local sink = tl_d.bits.sink:get()
+                        env.negedge()
+                            tl_e:grantack(sink)
+                    end,
+
+                    check_wb_dir = function ()
+                        env.expect_happen_until(20, function ()
+                            return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC)
+                        end)
+                    end
+                }
+
+                env.expect_happen_until(10, function ()
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull)
+                end)
+                chi_txreq:dump()
+
+                local txn_id = chi_txreq.bits.txnID:get()
+                local dbid = 5
+
+                env.negedge()
+                    chi_rxrsp:comp_dbidresp(txn_id, dbid)
+
+                env.expect_happen_until(10, function ()
+                    return chi_txdat:fire()
+                end)
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0)
+                    chi_txdat.bits.dataID:expect(0x00)
+                    chi_txdat.bits.txnID:expect(dbid)
+                env.negedge()
+                    chi_txdat:dump()
+                    expect.equal(chi_txdat.bits.data:get()[1], 0)
+                    chi_txdat.bits.dataID:expect(0x02)
+                    chi_txdat.bits.txnID:expect(dbid)
+            end
+        }
+
+        env.negedge(10)
+        mshrs[0].io_status_valid:expect(0)
+
+        env.posedge(100)
+    end
+}
+
+local test_snooop_shared = env.register_test_case "test_snooop_shared" {
+    function ()
+        env.dut_reset()
+
+        
+
+        env.posedge(100)
+    end
+}
+
+-- TODO: miss need write back dirty
+
+-- TODO: refill retry(sourceD is not ready)
+
+-- TODO: CHI retry
+
+-- TODO: replResp retry
 
 -- TODO: nest
 local test_release_nest_probe = env.register_test_case "test_release_and_probe" {
@@ -1954,13 +2422,7 @@ verilua "mainTask" { function ()
         test_release_continuous_write()
     mp.dirWen_s3:set_release()
 
-    end
 
-    -- 
-    -- coherency test cases
-    --
-    if test_all then
-    
     test_sinkA_hit()
     test_sinkA_miss()
     test_release_hit()
@@ -1972,8 +2434,20 @@ verilua "mainTask" { function ()
     test_get_miss() -- TODO: for now we suppose preferCache is true! 
     test_get_hit("probeack_data") -- TODO: for now we suppose preferCache is true! 
     test_get_hit("probeack") -- TODO: for now we suppose preferCache is true! 
-    end
+
+    test_miss_need_evict()
+    test_miss_need_evict_and_probe("probeack")
+    test_miss_need_evict_and_probe("probeack_data")
+    -- test_miss_need_evict_and_probe("probeack_data_multi_clients") -- TODO:
+
+    test_miss_need_writebackfull()
+    test_miss_need_writebackfull_and_probe("probeack")
+    test_miss_need_writebackfull_and_probe("probeack_data")
+    -- test_miss_need_writebackfull_and_probe("probeack_data_multi_clients") -- TODO:
     
+    end
+
+   
     env.posedge(200)
     env.TEST_SUCCESS()
 end }

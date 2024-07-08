@@ -127,6 +127,8 @@ verilua "appendTasks" {
     main_task = function()
         sim.dump_wave()
 
+        dut.io_mshrAlloc_s3_bits_fsmState_s_evict:set(1)
+
         test_basic_alloc()
         test_alloc_until_full_a()
         test_alloc_until_full_c()

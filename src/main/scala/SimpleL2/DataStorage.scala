@@ -39,13 +39,13 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         val dsWrite_s2 = Flipped(DecoupledIO(new DSWrite))
 
         /** Refilled data from [[TempDataStorage]] */
-        val refillWrite = Flipped(ValidIO(new DSWrite))
+        val refillWrite_s2 = Flipped(ValidIO(new DSWrite))
 
         /** Read interface for [[MainPipe]] */
         val fromMainPipe = new Bundle {
             val dsRead_s3    = Flipped(ValidIO(new DSRead))
-            val mshrIdx_s3   = Input(UInt(mshrBits.W))
-            val dsWrWayOH_s3 = Input(UInt(ways.W)) // Write wayOH can only be determined when directory result is read back
+            val mshrId_s3    = Input(UInt(mshrBits.W))
+            val dsWrWayOH_s3 = Flipped(ValidIO(UInt(ways.W))) // Write wayOH can only be determined when directory result is read back
         }
 
         val toTempDS = new Bundle {
@@ -53,9 +53,9 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         /** 
-          * The data being read will be passed into [[TXDAT]], where data will be further transfered into 
-          * next level cache.
-          */
+         * The data being read will be passed into [[TXDAT]], where data will be further transfered into 
+         * next level cache.
+         */
         val toTXDAT = new Bundle {
             val dsResp_s6s7 = DecoupledIO(new DSResp)
         }
@@ -91,9 +91,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
-    val wrSet_sinkC_s2  = io.dsWrite_s2.bits.set
-    val wrData_sinkC_s2 = io.dsWrite_s2.bits.data
-    val wen_sinkC_s2    = io.dsWrite_s2.valid
+    val wrSet_sinkC_s2   = io.dsWrite_s2.bits.set
+    val wrWayOH_sinkC_s2 = io.dsWrite_s2.bits.wayOH
+    val wrData_sinkC_s2  = io.dsWrite_s2.bits.data
+    val wen_sinkC_s2     = io.dsWrite_s2.valid
     // TODO: calculate ECC
 
     assert(!(RegNext(io.dsWrite_s2.valid, false.B) && io.dsWrite_s2.valid), "continuous write!")
@@ -105,17 +106,17 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdDest_s3    = io.fromMainPipe.dsRead_s3.bits.dest
     val rdWayOH_s3   = io.fromMainPipe.dsRead_s3.bits.wayOH
     val rdSet_s3     = io.fromMainPipe.dsRead_s3.bits.set
-    val rdMshrIdx_s3 = io.fromMainPipe.mshrIdx_s3
+    val rdMshrIdx_s3 = io.fromMainPipe.mshrId_s3
 
     val wen_sinkC_s3     = RegNext(wen_sinkC_s2, false.B)
     val wrData_sinkC_s3  = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
     val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
-    val wrWayOH_sinkC_s3 = io.fromMainPipe.dsWrWayOH_s3
+    val wrWayOH_sinkC_s3 = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
 
-    val wen_refill_s3     = io.refillWrite.valid
-    val wrData_refill_s3  = io.refillWrite.bits.data
-    val wrSet_refill_s3   = io.refillWrite.bits.set
-    val wrWayOH_refill_s3 = io.refillWrite.bits.wayOH
+    val wen_refill_s3     = io.refillWrite_s2.valid
+    val wrData_refill_s3  = io.refillWrite_s2.bits.data
+    val wrSet_refill_s3   = io.refillWrite_s2.bits.set
+    val wrWayOH_refill_s3 = io.refillWrite_s2.bits.wayOH
 
     val wrSet_s3   = Mux(wen_refill_s3, wrSet_refill_s3, wrSet_sinkC_s3)
     val wrWayOH_s3 = Mux(wen_refill_s3, wrWayOH_refill_s3, wrWayOH_sinkC_s3)
@@ -149,10 +150,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     io.dsWrite_s2.ready := !wen_s3
 
     /**
-      * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
-      * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
-      */
-    assert(!((wen_s3 || ren_s3) && !sramReady), "sram is not ready!")
+     * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
+     * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
+     */
+    assert(!((wen_s3 || ren_s3) && !sramReady), "sram is not ready! wen_s3:%d(wen_sinkC_s3:%d wen_refill_s3:%d), ren_s3:%d", wen_s3, wen_sinkC_s3, wen_refill_s3, ren_s3)
 
     // -----------------------------------------------------------------------------------------
     // Stage 4 (read accept)

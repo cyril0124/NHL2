@@ -57,14 +57,15 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io                 <> DontCare
     mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2
     mainPipe.io.dirResp_s3      <> dir.io.dirResp_s3
+    mainPipe.io.replResp_s3     <> dir.io.replResp_s3
     mainPipe.io.mshrFreeOH_s3   := missHandler.io.mshrFreeOH_s3
     mainPipe.io.replay_s4.ready := true.B // TODO:
 
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
-    ds.io.refillWrite                 <> tempDS.io.toDS.refillWrite
+    ds.io.refillWrite_s2              <> tempDS.io.toDS.refillWrite_s2
     ds.io.fromMainPipe.dsRead_s3      <> mainPipe.io.toDS.dsRead_s3
-    ds.io.fromMainPipe.dsWrWayOH_s3   := mainPipe.io.toDS.dsWrWayOH_s3
-    ds.io.fromMainPipe.mshrIdx_s3     := mainPipe.io.toDS.mshrIdx_s3
+    ds.io.fromMainPipe.dsWrWayOH_s3   <> mainPipe.io.toDS.dsWrWayOH_s3
+    ds.io.fromMainPipe.mshrId_s3      := mainPipe.io.toDS.mshrId_s3
     ds.io.toTXDAT.dsResp_s6s7.ready   := txdat.io.data_s6s7.ready
     ds.io.toSourceD.dsResp_s6s7.ready := sourceD.io.data_s6s7.ready
 
@@ -86,6 +87,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.resps.rxrsp  <> rxrsp.io.resp
     missHandler.io.resps.sinke  <> sinkE.io.resp
     missHandler.io.resps.sinkc  <> sinkC.io.resp
+    missHandler.io.mshrStatus   <> dir.io.mshrStatus
+    missHandler.io.replResp_s3  <> dir.io.replResp_s3
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
@@ -100,10 +103,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s3 := DontCare // TODO:
 
-    txdat.io         <> DontCare
-    txdat.io.task_s2 <> mainPipe.io.txdat_s2
-    txdat.io.data_s2 <> tempDS.io.toTXDAT.data_s2
-    // txdat.io.task_s6s7
+    txdat.io                 <> DontCare
+    txdat.io.task_s2         <> mainPipe.io.txdat_s2
+    txdat.io.data_s2         <> tempDS.io.toTXDAT.data_s2
+    txdat.io.task_s6s7       <> mainPipe.io.txdat_s6s7
     txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid     // TODO:
     txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data // TODO:
 
@@ -111,6 +114,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.tl.b      <> missHandler.io.tasks.sourceb
     io.chi.txreq <> txreq.io.out
     io.chi.txrsp <> txrsp.io.out
+    io.chi.txdat <> txdat.io.out
     io.chi.rxdat <> rxdat.io.rxdat
     io.chi.rxrsp <> rxrsp.io.rxrsp
 

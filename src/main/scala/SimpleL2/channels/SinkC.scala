@@ -14,6 +14,7 @@ class RespDataDestSinkC()(implicit p: Parameters) extends L2Bundle {
     val set      = UInt(setBits.W)
     val tag      = UInt(tagBits.W)
     val dataId   = UInt(dataIdBits.W)
+    val wayOH    = UInt(ways.W)
     val isTempDS = Bool()
     val isDS     = Bool()
 }
@@ -25,9 +26,9 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         val resp = ValidIO(new TLRespBundle(tlBundleParams))
 
         /** 
-          * Interact with [[MissHandler]], [[MissHandler]] will specify the ProbeAckData destination. 
-          * ProbeAckData cannot be received without the resp data destination info sent from [[MissHandler]].
-          */
+         * Interact with [[MissHandler]], [[MissHandler]] will specify the ProbeAckData destination. 
+         * ProbeAckData cannot be received without the resp data destination info sent from [[MissHandler]].
+         */
         val respDest_s4 = Flipped(ValidIO(new RespDataDestSinkC))
 
         /** Interact with [[DataStorage]] (for ReleaseData / ProbeAckData) */
@@ -60,13 +61,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     assert(!(io.c.fire && !hasData && beatCnt === 1.U))
 
     /**
-      * [[respDestMap]] is used to determine the destination of ProbeAckData, which can be chosen between [[TempDataStorage]] and [[DataStorage]].
-      * This infomation is sent from [[MissHandler]]. 
-      */
+     * [[respDestMap]] is used to determine the destination of ProbeAckData, which can be chosen between [[TempDataStorage]] and [[DataStorage]].
+     * This infomation is sent from [[MissHandler]]. 
+     */
     val respDestMap = RegInit(VecInit(Seq.fill(nrMSHR)(0.U.asTypeOf(new Bundle {
         val valid    = Bool()
         val set      = UInt(setBits.W)
         val tag      = UInt(tagBits.W)
+        val wayOH    = UInt(ways.W)
         val isTempDS = Bool()
         val isDS     = Bool()
     }))))
@@ -75,8 +77,9 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     val respValidOH      = VecInit(respDestMap.map(_.valid)).asUInt
     val respMatchOH      = respMatchSetOH & respMatchTagOH & respValidOH
     val respHasMatch     = respMatchOH.orR
-    val respDataToTempDS = Mux1H(respMatchOH, respDestMap).isTempDS // true.B
-    val respDataToDS     = Mux1H(respMatchOH, respDestMap).isDS     // false.B
+    val respMatchEntry   = Mux1H(respMatchOH, respDestMap)
+    val respDataToTempDS = respMatchEntry.isTempDS // true.B
+    val respDataToDS     = respMatchEntry.isDS     // false.B
     dontTouch(respDataToTempDS)
     dontTouch(respDataToDS)
     when(io.respDest_s4.fire) {
@@ -84,6 +87,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         entry.valid    := true.B
         entry.set      := io.respDest_s4.bits.set
         entry.tag      := io.respDest_s4.bits.tag
+        entry.wayOH    := io.respDest_s4.bits.wayOH
         entry.isTempDS := io.respDest_s4.bits.isTempDS
         entry.isDS     := io.respDest_s4.bits.isDS
         // assert(!entry.valid, "respDestMap[%d] is already valid!", io.respDest.bits.mshrId)
@@ -107,9 +111,9 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     }
 
     /**
-      * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
-      * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
-      */
+     * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
+     * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
+     */
     io.task.valid           := io.c.valid && first && isRelease
     io.task.bits.channel    := L2Channel.ChannelC
     io.task.bits.opcode     := io.c.bits.opcode
@@ -120,19 +124,19 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.task.bits.tag        := tag
 
     /**
-      * ReleaseData is allowed to write data into [[DataStorage]] directly since L2Cache is inclusive.
-      * ReleaseData is always hit.
-      * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
-      */
+     * ReleaseData is allowed to write data into [[DataStorage]] directly since L2Cache is inclusive.
+     * ReleaseData is always hit.
+     * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
+     */
     io.dsWrite_s2.valid      := io.c.fire && last && (isReleaseData || !isRelease && hasData && respDataToDS)
     io.dsWrite_s2.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.dsWrite_s2.bits.set   := set
-    io.dsWrite_s2.bits.wayOH := DontCare // wayOH is provided in MainPipe stage 3
+    io.dsWrite_s2.bits.wayOH := respMatchEntry.wayOH // For ReleaseData, wayOH is provided in MainPipe stage 3
 
     /**
-      * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
-      * Release/ReleaseData is request, not response.
-      */
+     * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
+     * Release/ReleaseData is request, not response.
+     */
     io.resp.valid       := io.c.fire && (first || last) && !isRelease
     io.resp.bits.opcode := io.c.bits.opcode
     io.resp.bits.param  := io.c.bits.param
@@ -143,13 +147,13 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.resp.bits.last   := hasData && last || !hasData
 
     /** 
-      * Write response data into [[TempDataStorage]].
-      * These data can be further written into [[DataStorage]] or bypass downstream to next level cache, which is dependt on how this Probe request is triggered.
-      * For example, if this Probe request is triggered by a [[SinkA]](AcquirePerm), then the data will be written into [[DataStorage]].
-      * If this Probe request is triggered by a [[RXSNP]], then the data will be bypassed to next level cache.
-      * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
-      * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
-      */
+     * Write response data into [[TempDataStorage]].
+     * These data can be further written into [[DataStorage]] or bypass downstream to next level cache, which is dependt on how this Probe request is triggered.
+     * For example, if this Probe request is triggered by a [[SinkA]](AcquirePerm), then the data will be written into [[DataStorage]].
+     * If this Probe request is triggered by a [[RXSNP]], then the data will be bypassed to next level cache.
+     * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
+     * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
+     */
     io.toTempDS.write.valid     := io.c.fire && last && hasData && !isRelease && respDataToTempDS
     io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
