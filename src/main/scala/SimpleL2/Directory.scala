@@ -12,26 +12,26 @@ import SimpleL2.Bundles._
 
 object TLState {
     val width   = 2
-    val INVALID = "b00".U
-    val BRANCH  = "b01".U
-    val TRUNK   = "b10".U
-    val TIP     = "b11".U
+    val INVALID = "b00".U(width.W)
+    val BRANCH  = "b01".U(width.W)
+    val TRUNK   = "b10".U(width.W)
+    val TIP     = "b11".U(width.W)
 }
 
 object MixedState {
     val width = 3
 
     /** [[MixedState]]: MSB <-- | Meta[1:0] | Dirty | --> LSB */
-    val I   = "b000".U // Invalid
-    val BC  = "b010".U // Branch Clean
-    val BD  = "b011".U // Branch Dirty
-    val TTC = "b100".U // Trunk Clean
-    val TTD = "b101".U // Trunk Dirty
-    val TC  = "b110".U // Tip Clean
-    val TD  = "b111".U // Tip Dirty
+    val I   = "b000".U(width.W) // Invalid
+    val BC  = "b010".U(width.W) // Branch Clean
+    val BD  = "b011".U(width.W) // Branch Dirty
+    val TTC = "b100".U(width.W) // Trunk Clean
+    val TTD = "b101".U(width.W) // Trunk Dirty
+    val TC  = "b110".U(width.W) // Tip Clean
+    val TD  = "b111".U(width.W) // Tip Dirty
 
     def apply(dirty: Bool, state: UInt) = {
-        require(state.getWidth == 2)
+        require(state.getWidth == 2, s"widht is ${state.getWidth}")
         val mixedState = WireInit(0.U(MixedState.width.W))
         mixedState := Cat(state, dirty)
         mixedState
@@ -46,6 +46,7 @@ class MixedState {
     def isTrunk = state(2, 1) === TLState.TRUNK
     def isTip = state(2, 1) === TLState.TIP
     def isInvalid = state(2, 1) === TLState.INVALID
+    def rawState = state(2, 1)
 }
 
 trait HasMixedState {
@@ -56,6 +57,7 @@ trait HasMixedState {
     def isTrunk = state(2, 1) === TLState.TRUNK
     def isTip = state(2, 1) === TLState.TIP
     def isInvalid = state(2, 1) === TLState.INVALID
+    def rawState = state(2, 1)
 }
 
 class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {

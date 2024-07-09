@@ -117,7 +117,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
-    val probeClients    = Mux(!state.w_rprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
+    val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
     assert(
         !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) =/= 1.U),
         "probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b",
@@ -141,7 +141,9 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
 
         needProbe := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
 
+        dbid            := 0.U
         gotT            := false.B
+        gotDirty        := false.B
         probeAckClients := 0.U
         probeAckParams.foreach(_ := 0.U)
     }
@@ -211,7 +213,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         !state.s_sprobe ||
         !state.s_rprobe // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
     io.tasks.sourceb.bits.opcode  := Probe
-    io.tasks.sourceb.bits.param   := Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB))              // TODO:
+    io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
     io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
     io.tasks.sourceb.bits.data    := DontCare
@@ -229,8 +231,8 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
      * Send [[MainPipe]] task
      * -------------------------------------------------------
      */
-    val mpTask_refill, mpTask_repl, mpTask_wbdata = WireInit(0.U.asTypeOf(Valid(new TaskBundle)))
-    Seq(mpTask_refill, mpTask_repl, mpTask_wbdata).foreach { task =>
+    val mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp = WireInit(0.U.asTypeOf(Valid(new TaskBundle)))
+    Seq(mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp).foreach { task =>
         /** Assignment signal values to common fields */
         task.bits.isMshrTask := true.B
         task.bits.sink       := id.U
@@ -281,7 +283,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         DataDestination.SourceD
     )
     mpTask_refill.bits.newMetaEntry := DirectoryMetaEntryNoTag(
-        dirty = gotDirty, // TODO: Release ?
+        dirty = gotDirty || dirResp.hit && meta.isDirty, // TODO: Release ?
         state = Mux(
             reqIsGet,
             Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
@@ -310,12 +312,58 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
     mpTask_wbdata.valid            := !state.s_cbwrdata && state.w_dbidresp
-    mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.txnID       := dbid
-    mpTask_wbdata.bits.opcode      := CopyBackWrData // TODO: SnpRespData
+    mpTask_wbdata.bits.isCHIOpcode := true.B
+    mpTask_wbdata.bits.opcode      := CopyBackWrData
+    mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
+    mpTask_wbdata.bits.readTempDs  := false.B
     mpTask_wbdata.bits.updateDir   := false.B
-    mpTask_wbdata.bits.readTempDs  := false.B        // true.B
-    mpTask_wbdata.bits.tempDsDest  := DataDestination.TXDAT
+
+    def stateToResp(rawState: UInt, dirty: Bool, passDirty: Bool) = {
+        val resp = Mux(
+            dirty,
+            MuxLookup(rawState, Resp.I)(
+                Seq(
+                    BRANCH -> Resp.SD,
+                    TIP    -> Resp.UD,
+                    TRUNK  -> Resp.UD
+                )
+            ),
+            MuxLookup(rawState, Resp.I)(
+                Seq(
+                    BRANCH -> Resp.SC,
+                    TIP    -> Resp.UC,
+                    TRUNK  -> Resp.UC
+                )
+            )
+        )
+
+        Resp.setPassDirty(resp, passDirty)
+    }
+
+    /** Send SnpRespData/SnpResp task to [[MainPipe]] */
+    val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(req.opcode)
+    val isSnpSharedX      = CHIOpcodeSNP.isSnpSharedX(req.opcode)
+    val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty)
+    val snprespFinalDirty = isSnpOnceX && meta.isDirty
+    val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpSharedX, BRANCH, INVALID))
+    mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
+    mpTask_snpresp.bits.txnID       := req.txnID
+    mpTask_snpresp.bits.isCHIOpcode := true.B
+    mpTask_snpresp.bits.opcode      := Mux(gotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
+    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)
+    mpTask_snpresp.bits.channel     := Mux(gotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
+    mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc
+    mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT
+    mpTask_snpresp.bits.updateDir   := true.B
+    mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
+        dirty = snprespFinalDirty,
+        state = snprespFinalState,
+        alias = req.aliasOpt.getOrElse(0.U),
+        clientsOH = Mux(isSnpSharedX || isSnpOnceX, meta.clientsOH, Fill(nrClients, false.B)),
+        fromPrefetch = false.B
+    )
+    assert(!(valid && snprespPassDirty && snprespFinalDirty))
 
     mpTask_repl.valid           := !state.s_repl && !state.w_replResp && state.s_read && state.s_makeunique && state.w_comp && state.w_compdat && state.s_compack
     mpTask_repl.bits.isReplTask := true.B
@@ -323,12 +371,13 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     mpTask_repl.bits.updateDir  := false.B
 
     /** Arbitration between multiple [[MainPipe]] tasks */
-    io.tasks.mpTask.valid := mpTask_refill.valid || mpTask_wbdata.valid || mpTask_repl.valid
+    io.tasks.mpTask.valid := mpTask_refill.valid || mpTask_wbdata.valid || mpTask_repl.valid || mpTask_snpresp.valid
     io.tasks.mpTask.bits := PriorityMux(
         Seq(
-            mpTask_refill.valid -> mpTask_refill.bits,
-            mpTask_wbdata.valid -> mpTask_wbdata.bits,
-            mpTask_repl.valid   -> mpTask_repl.bits
+            mpTask_refill.valid  -> mpTask_refill.bits,
+            mpTask_wbdata.valid  -> mpTask_wbdata.bits,
+            mpTask_snpresp.valid -> mpTask_snpresp.bits,
+            mpTask_repl.valid    -> mpTask_repl.bits
         )
     )
 
@@ -344,6 +393,10 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
 
         when(mpTask_repl.valid) {
             state.s_repl := true.B
+        }
+
+        when(mpTask_snpresp.valid) {
+            state.s_snpresp := true.B
         }
     }
 
@@ -410,14 +463,20 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
 
             state.w_rprobeack_first := true.B
             state.w_rprobeack       := state.w_rprobeack | probeFinish | (nextProbeAckClients === probeClients)
+
+            state.w_sprobeack_first := true.B
+            state.w_sprobeack       := state.w_sprobeack | probeFinish | (nextProbeAckClients === probeClients)
         }.elsewhen(sinkc.bits.opcode === ProbeAckData) {
-            gotDirty := Mux(!state.w_rprobeack, gotDirty, true.B) // rprobeack is not the same cacheline as the request cacheline
+            gotDirty := Mux(!state.w_rprobeack, gotDirty, true.B) // rprobeack is NOT the same cacheline as the request cacheline
 
             state.w_aprobeack_first := true.B
             state.w_aprobeack       := state.w_aprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
 
             state.w_rprobeack_first := true.B
             state.w_rprobeack       := state.w_rprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
+
+            state.w_sprobeack_first := true.B
+            state.w_sprobeack       := state.w_sprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
 
             when(!state.s_evict) {
                 state.s_evict := true.B

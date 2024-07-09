@@ -11,7 +11,7 @@ import SimpleL2.chi._
 
 class TXRSP()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val mpTask_s3 = Flipped(DecoupledIO(new CHIBundleRSP(chiBundleParams)))
+        val mpTask_s4 = Flipped(DecoupledIO(new CHIBundleRSP(chiBundleParams)))
         val mshrTask  = Flipped(DecoupledIO(new CHIBundleRSP(chiBundleParams)))
         val out       = DecoupledIO(new CHIBundleRSP(chiBundleParams))
     })
@@ -20,11 +20,11 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
 
     val nrEntry = 16
     val queue   = Module(new Queue(new CHIBundleRSP(chiBundleParams), nrEntry))
-    queue.io.enq.valid := io.mpTask_s3.valid || io.mshrTask.valid
-    queue.io.enq.bits  := Mux(io.mpTask_s3.valid, io.mpTask_s3.bits, io.mshrTask.bits)
+    queue.io.enq.valid := io.mpTask_s4.valid || io.mshrTask.valid
+    queue.io.enq.bits  := Mux(io.mpTask_s4.valid, io.mpTask_s4.bits, io.mshrTask.bits)
 
-    io.mpTask_s3.ready := queue.io.enq.ready
-    io.mshrTask.ready  := !io.mpTask_s3.valid && queue.io.enq.ready
+    io.mpTask_s4.ready := queue.io.enq.ready
+    io.mshrTask.ready  := !io.mpTask_s4.valid && queue.io.enq.ready
 
     io.out <> queue.io.deq
 

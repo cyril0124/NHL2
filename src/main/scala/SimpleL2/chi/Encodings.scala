@@ -26,6 +26,11 @@ object Resp {
     val UC_PD = "b110".U(width.W) // for Snoop responses
     val UD_PD = "b110".U(width.W)
     val SD_PD = "b111".U(width.W)
+
+    def setPassDirty(resp: UInt, passDirty: Bool) = {
+        require(resp.getWidth == width)
+        Cat(passDirty, resp(1, 0))
+    }
 }
 
 object Order {

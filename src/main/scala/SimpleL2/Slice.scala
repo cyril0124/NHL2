@@ -9,7 +9,6 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
-import os.temp
 
 class Slice()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
@@ -34,6 +33,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val txdat = Module(new TXDAT)
     val rxdat = Module(new RXDAT)
     val rxrsp = Module(new RXRSP)
+    val rxsnp = Module(new RXSNP)
 
     /** Other modules */
     val reqArb      = Module(new RequestArbiter)
@@ -51,6 +51,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.taskMSHR_s0  <> missHandler.io.tasks.mpTask
     reqArb.io.taskSinkA_s1 <> sinkA.io.task
     reqArb.io.taskSinkC_s1 <> sinkC.io.task
+    reqArb.io.taskSnoop_s1 <> rxsnp.io.task
     reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
     reqArb.io.resetFinish  <> dir.io.resetFinish
 
@@ -77,8 +78,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     tempDS.io.fromReqArb.read_s1      <> reqArb.io.tempDsRead_s1
     tempDS.io.fromReqArb.dsWrSet_s1   := reqArb.io.dsWrSet_s1
     tempDS.io.fromReqArb.dsWrWayOH_s1 := reqArb.io.dsWrWayOH_s1
-    // tempDS.io.toSourceD.dataOut // TODO:
-    // tempDS.io.toTXDAT.dataOut // TODO:
 
     sinkC.io.respDest_s4 := mainPipe.io.allocDestSinkC_s4 // TODO: connect to MissHandler
 
@@ -93,15 +92,19 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
 
+    // val sourceD_q = Module(new Queue(new TaskBundle, 4))
+    // sourceD_q.io.enq <> mainPipe.io.sourceD_s2
+    // TODO: extra queue for non-data SourceD
+
     sourceD.io                 <> DontCare
-    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
+    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2                // sourceD_q.io.deq
     sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
     sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
     sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid     // TODO:
     sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data // TODO:
 
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
-    txrsp.io.mpTask_s3 := DontCare // TODO:
+    txrsp.io.mpTask_s4 <> mainPipe.io.txrsp_s4
 
     txdat.io                 <> DontCare
     txdat.io.task_s2         <> mainPipe.io.txdat_s2
@@ -117,6 +120,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.chi.txdat <> txdat.io.out
     io.chi.rxdat <> rxdat.io.rxdat
     io.chi.rxrsp <> rxrsp.io.rxrsp
+    io.chi.rxsnp <> rxsnp.io.rxsnp
 
     dontTouch(reqArb.io)
     dontTouch(mainPipe.io)

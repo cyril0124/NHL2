@@ -198,6 +198,7 @@ verilua "mainTask" {
         sim.dump_wave()
         env.dut_reset()
 
+        dut.io_sourceD_s2_ready:set(1)
         dut.io_sourceD_s6s7_ready:set(1)
         dut.io_replay_s4_ready:set(1)
 

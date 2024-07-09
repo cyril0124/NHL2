@@ -174,7 +174,7 @@ class CHIBundleDecoupled(params: CHIBundleParameters) extends Bundle {
 
     val rxrsp = Flipped(Decoupled(new CHIBundleRSP(params)))
     val rxdat = Flipped(Decoupled(new CHIBundleDAT(params)))
-    val rxsnp = Flipped(Decoupled(new CHIBundleRSP(params)))
+    val rxsnp = Flipped(Decoupled(new CHIBundleSNP(params)))
 }
 
 object CHIBundleDownstream {
