@@ -7,7 +7,7 @@ import freechips.rocketchip.tilelink._
 import scala.collection.immutable.ListMap
 import SimpleL2._
 import SimpleL2.Configs._
-import scala.annotation.meta.param
+import SimpleL2.chi.Resp
 
 class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
     val owner   = UInt(RequestOwner.width.W)
@@ -26,15 +26,16 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val owner       = UInt(RequestOwner.width.W)
     val isCHIOpcode = Bool()
     val opcode      = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
-    val param       = UInt(3.W)
-    val channel     = L2Channel()
+    val param       = UInt(math.max(3, Resp.width).W)                 // if isCHIOpcode is true, param is equals to the resp field in CHI
+    val channel     = UInt(L2Channel.width.W)
     val set         = UInt(setBits.W)
     val tag         = UInt(tagBits.W)
-    val source      = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
+    val source      = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W, if isCHIOpcode is true, source is equals to the resp field in CHI
     val isPrefetch  = Bool()
     val corrupt     = Bool()
-    val sink        = UInt((tlBundleParams.sinkBits).W)
+    val sink        = UInt((tlBundleParams.sinkBits).W)               // also the alias name for mshrId
     val wayOH       = UInt(ways.W)
+    val retToSrc    = Bool()
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
     val isAliasTask = Bool()
     val isMshrTask  = Bool()
@@ -46,6 +47,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val updateDir    = Bool()
     val newMetaEntry = new DirectoryMetaEntryNoTag
 
+    def resp = param
     def mshrId = sink
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
@@ -75,6 +77,5 @@ class TLRespBundle(params: TLBundleParameters)(implicit p: Parameters) extends L
     val sink   = UInt(params.sinkBits.W)
     val set    = UInt(setBits.W)
     val tag    = UInt(tagBits.W)
-    val dataId = UInt(dataIdBits.W)
     val last   = Bool()
 }

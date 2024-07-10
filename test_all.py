@@ -2,6 +2,7 @@
 import subprocess
 import argparse
 import json
+import re
 
 json_file_path = 'module_info.json'
 default_simulator = "iverilog"
@@ -38,6 +39,7 @@ def test_all_summary(test_targets):
     GREEN = "\033[92m"
     RED = "\033[91m"
     RESET = "\033[0m"
+    test_count = 0
     print("\n---------------------- test_all summary ---------------------")
     for index, (package, target, cmd) in enumerate(test_targets):
         with open(f".verilua/{target}/run.log", 'r') as file:
@@ -46,7 +48,12 @@ def test_all_summary(test_targets):
                 print(f"[{index:2}] {f"{package}.{target}":40} test {GREEN}SUCCESS!{RESET} |")
             else:
                 print(f"[{index:2}] {f"{package}.{target}":40} test  {RED}FAILED!{RESET} |")
+            
+            if "total_test_cases" in content:
+                match = re.search(r'<(\d+)>', content)
+                test_count = test_count + int(match.group(1))
     print("--------------------------------------------------------------\n")
+    print(f"total_test_cases: {test_count}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')

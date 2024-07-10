@@ -8,13 +8,6 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.chi._
 
-object LinkState {
-    def STOP = "b00".U(2.W)
-    def ACTIVATE = "b10".U(2.W)
-    def RUN = "b11".U(2.W)
-    def DEACTIVATE = "b01".U(2.W)
-}
-
 class CHIBridgeInput(implicit p: Parameters) extends L2Bundle {
     val chi = CHIBundleDecoupled(chiBundleParams)
 }
@@ -26,11 +19,13 @@ class CHIBridgeOutput(implicit p: Parameters) extends L2Bundle {
 
 class CHIBridge()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        // val in  = new CHIBridgeInput
+        val in  = new CHIBridgeInput
         val out = new CHIBridgeOutput
         // TODO: val deactivateTxLink = Input(Bool())
         // TODO: ShutDown
     })
+
+    io.in <> DontCare
 
     io.out.chi         <> DontCare
     io.out.chiLinkCtrl <> DontCare

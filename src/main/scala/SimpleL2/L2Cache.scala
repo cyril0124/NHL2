@@ -17,6 +17,7 @@ class L2Cache()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val chi         = CHIBundleDownstream(chiBundleParams)
         val chiLinkCtrl = new CHILinkCtrlIO()
+        val nodeID      = Input(UInt(12.W))
     })
 
     val tl  = io_tl
@@ -25,20 +26,25 @@ class L2Cache()(implicit p: Parameters) extends L2Module {
     tl  <> DontCare
     chi <> DontCare
 
-    val chiBridge = Module(new CHIBridge)
-    chi            <> chiBridge.io.out.chi
-    io.chiLinkCtrl <> chiBridge.io.out.chiLinkCtrl
+    val slices      = Seq.fill(nrSlice)(Module(new Slice))
+    val linkMonitor = Module(new LinkMonitor)
 
-    // val slice = Module(new Slice)
-    // slice.io.tl <> tl
-    // slice.io.chi <> chi
+    if (nrSlice == 1) {
+        slices(0).io.tl                <> tl
+        linkMonitor.io.nodeID          := io.nodeID
+        linkMonitor.io.in.chi          <> slices(0).io.chi
+        linkMonitor.io.out.chi         <> chi
+        linkMonitor.io.out.chiLinkCtrl <> io.chiLinkCtrl
+    } else {
+        assert(false, "L2Cache without diplomacy only support up to 1 Slice!")
+    }
 
     dontTouch(io)
 }
 
 object L2Cache extends App {
     val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
+        case L2ParamKey      => L2Param(nrSlice = 1)
         case DebugOptionsKey => DebugOptions()
     })
 

@@ -14,9 +14,8 @@ class TXREQ()(implicit p: Parameters) extends L2Module {
         val mpTask_s3 = Flipped(DecoupledIO(new CHIBundleREQ(chiBundleParams)))
         val mshrTask  = Flipped(DecoupledIO(new CHIBundleREQ(chiBundleParams)))
         val out       = DecoupledIO(new CHIBundleREQ(chiBundleParams))
+        val sliceId   = Input(UInt(bankBits.W))
     })
-
-    io <> DontCare
 
     val nrEntry = 16
     val queue   = Module(new Queue(new CHIBundleREQ(chiBundleParams), nrEntry))
@@ -28,7 +27,10 @@ class TXREQ()(implicit p: Parameters) extends L2Module {
 
     io.out <> queue.io.deq
 
-    dontTouch(io)
+    if (nrSlice > 1) {
+        val addr = queue.io.deq.bits.addr
+        io.out.bits.addr := Cat(addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits - 1), addr(setBits + offsetBits - 1, offsetBits), io.sliceId, 0.U(offsetBits.W))
+    }
 }
 
 object TXREQ extends App {

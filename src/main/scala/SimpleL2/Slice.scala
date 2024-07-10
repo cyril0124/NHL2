@@ -12,12 +12,15 @@ import SimpleL2.chi._
 
 class Slice()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val tl  = Flipped(TLBundle(tlBundleParams))
-        val chi = CHIBundleDecoupled(chiBundleParams)
+        val tl          = Flipped(TLBundle(tlBundleParams))
+        val chi         = CHIBundleDecoupled(chiBundleParams)
+        val chiLinkCtrl = new CHILinkCtrlIO()
+        val sliceId     = Input(UInt(bankBits.W))
     })
 
-    io.tl  <> DontCare
-    io.chi <> DontCare
+    io.tl          <> DontCare
+    io.chi         <> DontCare
+    io.chiLinkCtrl <> DontCare
 
     io.tl.e.ready := true.B
 
@@ -91,6 +94,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
+    txreq.io.sliceId   := io.sliceId
 
     // val sourceD_q = Module(new Queue(new TaskBundle, 4))
     // sourceD_q.io.enq <> mainPipe.io.sourceD_s2

@@ -64,21 +64,6 @@ local function cycles()
 end
 
 
-local function TEST_SUCCESS()
-    print(">>>TEST_SUCCESS!<<<")
-    print(colors.green .. [[
-  _____         _____ _____ 
- |  __ \ /\    / ____/ ____|
- | |__) /  \  | (___| (___  
- |  ___/ /\ \  \___ \\___ \ 
- | |  / ____ \ ____) |___) |
- |_| /_/    \_\_____/_____/ 
-]] .. colors.reset)
-    io.flush()
-    end_simulation()
-end
-
-
 -- 
 -- Test case manage
 -- 
@@ -135,6 +120,23 @@ local function register_test_case(case_name)
         
     end
 end
+
+
+local function TEST_SUCCESS()
+    print("total_test_cases: <" .. test_count .. ">\n")
+    print(">>>TEST_SUCCESS!<<<")
+    print(colors.green .. [[
+  _____         _____ _____ 
+ |  __ \ /\    / ____/ ____|
+ | |__) /  \  | (___| (___  
+ |  ___/ /\ \  \___ \\___ \ 
+ | |  / ____ \ ____) |___) |
+ |_| /_/    \_\_____/_____/ 
+]] .. colors.reset)
+    io.flush()
+    end_simulation()
+end
+
 
 
 local function mux_case(input_key, mismatch_bypass)

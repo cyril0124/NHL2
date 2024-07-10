@@ -80,6 +80,11 @@
     },
     {
         "package": "SimpleL2",
+        "target": "RXSNP",
+        "unit_test": false
+    },
+    {
+        "package": "SimpleL2",
         "target": "MSHR",
         "unit_test": false
     },
@@ -87,6 +92,11 @@
         "package": "SimpleL2",
         "target": "SinkC",
         "unit_test": true
+    },
+    {
+        "package": "SimpleL2",
+        "target": "SimpleL2Cache",
+        "unit_test": false
     },
     {
         "package": "Utils",

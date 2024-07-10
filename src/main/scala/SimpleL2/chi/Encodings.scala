@@ -2,7 +2,14 @@ package SimpleL2.chi
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.regmapper.RegField.w
+
+object LinkState {
+    val width      = 2
+    val STOP       = "b00".U(width.W)
+    val ACTIVATE   = "b10".U(width.W)
+    val RUN        = "b11".U(width.W)
+    val DEACTIVATE = "b01".U(width.W)
+}
 
 object RespErr {
     val width = 2
