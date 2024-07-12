@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, SkidBuffer}
+import Utils.{GenerateVerilog, SkidBuffer, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -71,4 +71,6 @@ class TXDAT()(implicit p: Parameters) extends L2Module {
     io.out.bits        := deq.bits.txdat
     io.out.bits.data   := Mux(last, deqData(511, 256), deqData(255, 0))
     io.out.bits.dataID := Mux(last, "b10".U, "b00".U)
+
+    LeakChecker(io.out.valid, io.out.fire, Some("TXDAT_valid"), maxCount = deadlockThreshold)
 }

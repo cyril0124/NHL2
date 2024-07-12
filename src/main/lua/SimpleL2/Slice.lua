@@ -218,6 +218,7 @@ local mpReq_s2 = ([[
 local chi_txreq = ([[
     | valid
     | ready
+    | addr
     | opcode
     | txnID
     | addr
@@ -355,6 +356,7 @@ local dir = slice.dir
 local ds = slice.ds
 local tempDS = slice.tempDS
 local sourceD = slice.sourceD
+local txrsp = slice.txrsp
 local sinkC = slice.sinkC
 local reqArb = slice.reqArb
 local rxdat = slice.rxdat
@@ -370,7 +372,7 @@ local function write_dir(set, wayOH, tag, state, clientsOH)
     assert(type(tag) == "number")
     assert(type(state) == "number")
 
-    local clientsOH = clientsOH or ("0b01"):number()
+    local clientsOH = clientsOH or ("0b00"):number()
     
     env.negedge()
         dir:force_all()
@@ -832,7 +834,7 @@ local test_release_write = env.register_test_case "test_release_write" {
         }
 
         -- 0x10000
-        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, ("0b01"):number())
 
         env.negedge()
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
@@ -861,7 +863,7 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
         }
 
         -- 0x10000
-        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
+        write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC, ("0b01"):number())
         write_sinkC_respDestMap(0, 0x00, 0x04, 0x01, 1, 0)
 
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
@@ -3473,11 +3475,170 @@ local test_snoop_unique = env.register_test_case "test_snoop_unique" {
     end
 }
 
+local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        do
+            print "stage2 grant retry"
+            
+            tl_d.ready:set(0)
+            sourceD.io_task_s2_ready:set_force(0); sourceD.io_data_s2_ready:set_force(0) 
+            chi_txreq.ready:set(1); chi_txrsp.ready:set(1)
+
+            tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
+            env.expect_happen_until(10, function () return chi_txreq.valid:is(1) and chi_txreq.ready:is(1) end)
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", CHIResp.UC)
+            env.expect_happen_until(10, function () return chi_txrsp.valid:is(1) and chi_txrsp.ready:is(1) end)
+
+            for i = 1, 20 do
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+                print(env.cycles() .. " do grant_s2 retry " .. i)
+                env.posedge()
+            end
+
+            tl_d.ready:set(1)
+            sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release()
+            env.posedge()
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+            
+            env.posedge(100)
+            tl_e:grantack(0)
+            env.posedge(100)
+        end
+
+        do
+            print "stage2 accessack retry"
+            
+            tl_d.ready:set(0)
+            sourceD.io_task_s2_ready:set_force(0); sourceD.io_data_s2_ready:set_force(0) 
+            chi_txreq.ready:set(1); chi_txrsp.ready:set(1)
+
+            tl_a:get(to_address(0x11, 0x20), 3)
+            env.expect_happen_until(10, function () return chi_txreq.valid:is(1) and chi_txreq.ready:is(1) end)
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", CHIResp.UC)
+            env.expect_happen_until(10, function () return chi_txrsp.valid:is(1) and chi_txrsp.ready:is(1) end)
+
+            for i = 1, 20 do
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_accessack_s2:is(1) end)
+                print(env.cycles() .. " do accessack_s2 retry " .. i)
+                env.posedge()
+            end
+
+            tl_d.ready:set(1)
+            sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release()
+            env.posedge()
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+            
+            env.posedge(100)
+        end
+
+        env.posedge(100)
+    end
+}
+
+local test_stage4_mshr_retry = env.register_test_case "test_stage4_mshr_retry" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        do
+            tl_d.ready:set(0)
+            txrsp.io_mpTask_s4_ready:set_force(0)
+            tl_b.ready:set(1); chi_txreq.ready:set(1); chi_txrsp.ready:set(1)
+            
+            env.negedge()
+            write_dir(0x01, ("0b0001"):number(), 0x04, MixedState.TTC, ("0b01"):number())
+            env.negedge()
+            chi_rxsnp:snpunique(to_address(0x01, 0x04), 0, 0)
+
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+            tl_c:probeack(to_address(0x01, 0x04), TLParam.TtoN, 0)
+
+            for i = 1, 20 do
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) end)
+                print(env.cycles() .. " do snpresp_s4 retry " .. i)
+                env.posedge()
+            end
+
+            txrsp.io_mpTask_s4_ready:set_release()
+            env.posedge()
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) end)
+        end
+
+        env.posedge(100)
+    end
+}
+
+local test_replresp_retry = env.register_test_case "test_replresp_retry" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        local function set_mshr_wayOH()
+            for i = 1, 4 do
+                mshrs[i + 5].io_status_valid:set_force(1)
+                mshrs[i + 5].io_status_wayOH:set_force(utils.uint_to_onehot(i - 1))
+                mshrs[i + 5].io_status_set:set_force(0x01)
+            end
+        end
+
+        local function reset_mshr_wayOH()
+            for i = 1, 4 do
+                mshrs[i + 5].io_status_valid:set_release()
+                mshrs[i + 5].io_status_wayOH:set_release()
+                mshrs[i + 5].io_status_set:set_release()
+            end
+        end
+
+        set_mshr_wayOH()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1)
+
+        local clientsOH = ("0b00"):number()
+        env.negedge()
+            write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+            write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+
+        env.negedge()
+        tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoT, 0)
+        env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.addr:is(to_address(0x01, 0x05)) end)
+        env.negedge()
+        chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+
+        for i = 1, 20 do
+            env.expect_happen_until(10, function () return mp.io_replResp_s3_valid:is(1) and mp.io_replResp_s3_bits_retry:is(1) end)
+            print(env.cycles() .. " do replRetry " .. i)
+            env.posedge()
+        end
+        reset_mshr_wayOH()
+
+        env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+        env.negedge()
+        chi_rxrsp:comp(0, 5)
+
+        env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead end)
+        env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef end)
+
+        env.negedge()
+        tl_e:grantack(0)
+
+        env.negedge(10)
+        mshrs[0].io_status_valid:expect(0)
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: MainPipe block SinkA request due to same address conflict.
 -- TODO: Block SinkA reqeust when stage6 & stage7 is full.
 -- TODO: Block Snoop request(need data) when stage6 & stage7 is full.
--- TODO: stage2 TXDAT and SourceD not ready, mshr should retry
--- TODO: replResp retry
+-- TODO: replacement policy
+-- TODO: Get not preferCache
 
 -- TODO: nest: Release nest Probe, Snoop nest WriteBack/Evict
 local test_release_nest_probe = env.register_test_case "test_release_and_probe" {
@@ -3538,6 +3699,10 @@ verilua "mainTask" { function ()
     
     test_snoop_shared()
     test_snoop_unique()
+
+    test_stage2_mshr_retry()
+    test_stage4_mshr_retry()
+    test_replresp_retry()
     end
 
    

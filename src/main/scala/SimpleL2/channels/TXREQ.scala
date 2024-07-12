@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -31,6 +31,8 @@ class TXREQ()(implicit p: Parameters) extends L2Module {
         val addr = queue.io.deq.bits.addr
         io.out.bits.addr := Cat(addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits - 1), addr(setBits + offsetBits - 1, offsetBits), io.sliceId, 0.U(offsetBits.W))
     }
+
+    LeakChecker(io.out.valid, io.out.fire, Some("TXREQ_valid"), maxCount = deadlockThreshold)
 }
 
 object TXREQ extends App {

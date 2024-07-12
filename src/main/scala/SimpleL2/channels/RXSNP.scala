@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -63,6 +63,8 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
     val implOpcodes        = Seq(SnpShared, SnpUnique, SnpCleanInvalid)
     val implOpcodeMatchVec = VecInit(Seq.fill(implOpcodes.length)(opcode).zip(implOpcodes).map(x => x._1 === x._2)).asUInt
     assert(!(io.rxsnp.fire && !implOpcodeMatchVec.orR), "Snp opcode: 0x%x is not implemented", opcode)
+
+    LeakChecker(io.rxsnp.valid, io.rxsnp.fire, Some("RXSNP_valid"), maxCount = deadlockThreshold)
 }
 
 object RXSNP extends App {

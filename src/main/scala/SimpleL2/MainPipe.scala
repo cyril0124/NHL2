@@ -17,8 +17,16 @@ import SimpleL2.chi.CHIOpcodeRSP._
 
 // TODO: Replay
 
-class MainPipeStatus()(implicit p: Parameters) extends Bundle {
+class MpStatus()(implicit p: Parameters) extends L2Bundle {
     val mayReadDS_s2 = Bool()
+}
+
+class MpMshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
+    val mshrId_s2 = Output(UInt(mshrBits.W))
+    val stage2    = ValidIO(new MshrRetryStage2)
+
+    val mshrId_s4 = Output(UInt(mshrBits.W))
+    val stage4    = ValidIO(new MshrRetryStage4)
 }
 
 class MainPipe()(implicit p: Parameters) extends L2Module {
@@ -44,7 +52,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         /** Stage 4 */
         val replay_s4         = DecoupledIO(new TaskBundle)                    // TODO:
         val allocDestSinkC_s4 = ValidIO(new RespDataDestSinkC)                 // Alloc SinkC resps(ProbeAckData) data destination, ProbeAckData can be either saved into DataStorage or TempDataStorage
-        val txreq_s4          = DecoupledIO(new CHIBundleREQ(chiBundleParams))
         val txrsp_s4          = DecoupledIO(new CHIBundleRSP(chiBundleParams)) // Snp* hit and does not require data will be sent to txrsp_s4
 
         /** Stage 6 & Stage 7*/
@@ -52,7 +59,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val txdat_s6s7   = DecoupledIO(new CHIBundleDAT(chiBundleParams))
 
         /** Other status signals */
-        val status = Output(new MainPipeStatus)
+        val status     = Output(new MpStatus)
+        val retryTasks = new MpMshrRetryTasks
     })
 
     io <> DontCare
@@ -85,7 +93,14 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s2.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s2.bits.opcode := task_s2.opcode
 
-    assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "sourceD_s2 should always be ready! needData:%d", needData(io.sourceD_s2.bits.opcode))
+    val sourcedStall_s2 = io.sourceD_s2.valid && !io.sourceD_s2.ready
+    val txdatStall_s2   = io.txdat_s2.valid && !io.txdat_s2.ready
+    io.retryTasks.mshrId_s2                := task_s2.mshrId
+    io.retryTasks.stage2.valid             := (sourcedStall_s2 || txdatStall_s2) && task_s2.isMshrTask
+    io.retryTasks.stage2.bits.grant_s2     := task_s2.opcode === Grant || task_s2.opcode === GrantData
+    io.retryTasks.stage2.bits.accessack_s2 := task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData
+    io.retryTasks.stage2.bits.snpresp_s2   := task_s2.opcode === SnpRespData
+    io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.opcode === CopyBackWrData // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
 
     val mayReadDS_s2 = valid_s2 && ((task_s2.isChannelA && task_s2.opcode === AcquireBlock || task_s2.opcode === Get) || task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */ )
     io.status.mayReadDS_s2 := mayReadDS_s2
@@ -217,9 +232,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     /** coherency check */
     when(valid_s3) {
-        assert(!(dirResp_s3.hit && state_s3 === MixedState.I), "Hit on INVALID state!")
-        assert(!(meta_s3.isTrunk && !dirResp_s3.meta.clientsOH.orR), "Trunk should have clientsOH!")
-        assert(!(meta_s3.isTrunk && PopCount(dirResp_s3.meta.clientsOH) > 1.U), "Trunk should have only one client!")
+        assert(!(io.dirResp_s3.fire && dirResp_s3.hit && state_s3 === MixedState.I), "Hit on INVALID state!")
+        assert(!(io.dirResp_s3.fire && meta_s3.isTrunk && !dirResp_s3.meta.clientsOH.orR), "Trunk should have clientsOH!")
+        assert(!(io.dirResp_s3.fire && meta_s3.isTrunk && PopCount(dirResp_s3.meta.clientsOH) > 1.U), "Trunk should have only one client!")
 
         assert(!(task_s3.isChannelA && task_s3.param === BtoT && isAcquire_s3 && !hit_s3), "Acquire.BtoT should always hit!")
         assert(!(task_s3.isChannelA && task_s3.param === BtoT && hit_s3 && !isReqClient_s3), "Acquire.BtoT should have clientsOH!")
@@ -422,6 +437,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         }
     }
 
+    // TODO: replay for txrsp_s4 stall
     io.replay_s4.valid := valid_replay_s4
     io.replay_s4.bits  := task_s4
 
@@ -446,6 +462,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txrsp_s4.bits.respErr := RespErr.NormalOkay
 
     assert(!(io.replay_s4.valid && !io.replay_s4.ready), "replay_s4 should always ready!")
+
+    val txrspStall_s4 = io.txrsp_s4.valid && !io.txrsp_s4.ready
+    io.retryTasks.mshrId_s4              := task_s4.mshrId
+    io.retryTasks.stage4.valid           := txrspStall_s4 && task_s4.isMshrTask
+    io.retryTasks.stage4.bits.snpresp_s4 := valid_snpresp_mp_s4
 
     // -----------------------------------------------------------------------------------------
     // Stage 5

@@ -37,7 +37,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         /** Send task to [[MainPipe]] */
         val mpReq_s2 = ValidIO(new TaskBundle)
 
-        val mpStatus = Input(new MainPipeStatus)
+        val mpStatus = Input(new MpStatus)
 
         val resetFinish = Input(Bool())
     })

@@ -23,14 +23,14 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val mshrFreeOH_s3 = Output(UInt(nrMSHR.W))
         val replResp_s3   = Flipped(ValidIO(new DirReplResp))
         val mshrStatus    = Vec(nrMSHR, Output(new MshrStatus))
-
-        val tasks = new MshrTasks
-        val resps = new MshrResps
+        val tasks         = new MshrTasks
+        val resps         = new MshrResps
+        val retryTasks    = Flipped(new MpMshrRetryTasks)
     })
 
     io <> DontCare
 
-    val mshrs        = (0 until nrMSHR).map(i => Module(new MSHR(i)))
+    val mshrs        = (0 until nrMSHR).map(i => Module(new MSHR))
     val mshrValidVec = VecInit(mshrs.map(_.io.status.valid)).asUInt
     io.mshrFreeOH_s3 := PriorityEncoderOH(~mshrValidVec)
     assert(PopCount(io.mshrFreeOH_s3) <= 1.U)
@@ -39,14 +39,14 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     val rxrsp           = io.resps.rxrsp
     val sinke           = io.resps.sinke
     val sinkc           = io.resps.sinkc
-    val rxdatMatchOH    = UIntToOH(rxdat.bits.txnID)
-    val rxrspMatchOH    = UIntToOH(rxrsp.bits.txnID)
-    val sinkeMatchOH    = UIntToOH(sinke.bits.sink)
-    val sinkcSetMatchOH = VecInit(mshrs.map(_.io.status.set === sinkc.bits.set)).asUInt
+    val rxdatMatchOH    = UIntToOH(rxdat.bits.txnID)(nrMSHR - 1, 0)
+    val rxrspMatchOH    = UIntToOH(rxrsp.bits.txnID)(nrMSHR - 1, 0)
+    val sinkeMatchOH    = UIntToOH(sinke.bits.sink)(nrMSHR - 1, 0)
+    val sinkcSetMatchOH = VecInit(mshrs.map(_.io.status.set === sinkc.bits.set)).asUInt(nrMSHR - 1, 0)
     val sinkcTagMatchOH = VecInit(mshrs.map { mshr =>
         val matchTag = Mux(mshr.io.status.needsRepl, mshr.io.status.metaTag, mshr.io.status.reqTag)
         matchTag === sinkc.bits.tag
-    }).asUInt
+    }).asUInt(nrMSHR - 1, 0)
     val sinkcMatchOH = mshrValidVec & sinkcSetMatchOH & sinkcTagMatchOH
     assert(!(rxdat.fire && !rxdatMatchOH.orR), "rxdat does not match any mshr! txnID => %d/0x%x", rxdat.bits.txnID, rxdat.bits.txnID)
     assert(!(rxrsp.fire && !rxrspMatchOH.orR), "rxrsp does not match any mshr! txnID => %d/0x%x", rxrsp.bits.txnID, rxrsp.bits.txnID)
@@ -61,8 +61,12 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         Cat(sinkc.bits.tag, sinkc.bits.set, 0.U(6.W))
     )
 
+    val retryTasksMatchOH_s2 = UIntToOH(io.retryTasks.mshrId_s2)
+    val retryTasksMatchOH_s4 = UIntToOH(io.retryTasks.mshrId_s4)
+
     mshrs.zip(io.mshrFreeOH_s3.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io <> DontCare
+        mshr.io    <> DontCare
+        mshr.io.id := i.U
 
         mshr.io.alloc_s3.valid := io.mshrAlloc_s3.valid && en
         mshr.io.alloc_s3.bits  := io.mshrAlloc_s3.bits
@@ -85,6 +89,15 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.resps.sinkc.valid := sinkc.valid && sinkcMatchOH(i)
         mshr.io.resps.sinkc.bits  := sinkc.bits
         assert(!(mshr.io.resps.sinkc.valid && !mshr.io.status.valid), s"sinkc valid but mshr_${i} invalid")
+
+        val retry_s2 = io.retryTasks.stage2
+        mshr.io.retryTasks.stage2.accessack_s2 := retry_s2.fire && retry_s2.bits.accessack_s2 && retryTasksMatchOH_s2(i)
+        mshr.io.retryTasks.stage2.cbwrdata_s2  := retry_s2.fire && retry_s2.bits.cbwrdata_s2 && retryTasksMatchOH_s2(i)
+        mshr.io.retryTasks.stage2.snpresp_s2   := retry_s2.fire && retry_s2.bits.snpresp_s2 && retryTasksMatchOH_s2(i)
+        mshr.io.retryTasks.stage2.grant_s2     := retry_s2.fire && retry_s2.bits.grant_s2 && retryTasksMatchOH_s2(i)
+
+        val retry_s4 = io.retryTasks.stage4
+        mshr.io.retryTasks.stage4.snpresp_s4 := retry_s4.fire && retry_s4.bits.snpresp_s4 && retryTasksMatchOH_s4(i)
 
         io.mshrStatus(i) := mshr.io.status
     }

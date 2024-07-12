@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -34,6 +34,8 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
     io.toTempDS.write.valid     := io.rxdat.valid && last
     io.toTempDS.write.bits.data := Cat(io.rxdat.bits.data, RegEnable(io.rxdat.bits.data, io.rxdat.fire))
     io.toTempDS.write.bits.idx  := io.rxdat.bits.txnID
+
+    LeakChecker(io.rxdat.valid, io.rxdat.fire, Some("RXDAT_valid"), maxCount = deadlockThreshold)
 }
 
 object RXDAT extends App {

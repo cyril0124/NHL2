@@ -79,21 +79,36 @@ class MshrResps()(implicit p: Parameters) extends L2Bundle {
     val sinkc = Flipped(ValidIO(new TLRespBundle(tlBundleParams)))
 }
 
-class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
+class MshrRetryStage2()(implicit p: Parameters) extends L2Bundle {
+    val grant_s2     = Bool() // GrantData
+    val accessack_s2 = Bool() // AccessAckData
+    val cbwrdata_s2  = Bool() // CopyBackWrData
+    val snpresp_s2   = Bool() // SnpRespData
+}
+
+class MshrRetryStage4()(implicit p: Parameters) extends L2Bundle {
+    val snpresp_s4 = Bool() // SnpResp
+}
+
+class MshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
+    val stage2 = new MshrRetryStage2
+    val stage4 = new MshrRetryStage4
+}
+
+class MSHR()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val alloc_s3    = Flipped(ValidIO(new MshrAllocBundle))
-        val replResp_s3 = Flipped(ValidIO(new DirReplResp)) // TODO:
+        val replResp_s3 = Flipped(ValidIO(new DirReplResp))
         val status      = Output(new MshrStatus)
-
-        val tasks = new MshrTasks
-        val resps = new MshrResps
+        val tasks       = new MshrTasks
+        val resps       = new MshrResps
+        val retryTasks  = Input(new MshrRetryTasks)
+        val id          = Input(UInt(mshrBits.W))
     })
 
-    io <> DontCare
-
     val valid   = RegInit(false.B)
-    val req     = Reg(new TaskBundle)
-    val dirResp = Reg(new DirResp)
+    val req     = RegInit(0.U.asTypeOf(new TaskBundle))
+    val dirResp = RegInit(0.U.asTypeOf(new DirResp))
 
     val initState = Wire(new MshrFsmState())
     initState.elements.foreach(_._2 := true.B)
@@ -156,6 +171,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
      * Send [[TXREQ]] task
      * -------------------------------------------------------
      */
+    io.tasks.txreq <> DontCare
     io.tasks.txreq.valid := !state.s_read ||
         !state.s_makeunique ||
         (!state.s_evict || !state.s_wb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
@@ -180,7 +196,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
     io.tasks.txreq.bits.snpAttr    := true.B
     io.tasks.txreq.bits.srcID      := DontCare                                                                      // This value will be assigned in output chi portr
-    io.tasks.txreq.bits.txnID      := id.U
+    io.tasks.txreq.bits.txnID      := io.id
     when(io.tasks.txreq.fire) {
         val opcode = io.tasks.txreq.bits.opcode
         state.s_read       := state.s_read || (opcode === ReadUnique || opcode === ReadNotSharedDirty)
@@ -195,6 +211,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
      * Send [[TXRSP]] task
      * -------------------------------------------------------
      */
+    io.tasks.txrsp               <> DontCare
     io.tasks.txrsp.valid         := !state.s_compack && state.w_compdat && state.w_comp
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.respErr  := RespErr.NormalOkay
@@ -238,7 +255,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     Seq(mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp).foreach { task =>
         /** Assignment signal values to common fields */
         task.bits.isMshrTask := true.B
-        task.bits.sink       := id.U
+        task.bits.sink       := io.id
         task.bits.source     := req.source
         task.bits.set        := req.set
         task.bits.tag        := req.tag
@@ -384,6 +401,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         )
     )
 
+    /** When the mpTask fires, reset the corresponding state flag */
     when(io.tasks.mpTask.ready) {
         when(mpTask_refill.valid) {
             state.s_grant     := true.B
@@ -403,6 +421,33 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         }
     }
 
+    /** mpTask needs to be retried due to insufficent resources  */
+    when(io.retryTasks.stage2.accessack_s2) {
+        state.s_accessack := false.B
+        assert(state.s_accessack, "try to retry an already activated task!")
+        assert(valid, "retry on an invalid mshr!")
+    }
+    when(io.retryTasks.stage2.grant_s2) {
+        state.s_grant := false.B
+        assert(state.s_grant, "try to retry an already activated task!")
+        assert(valid, "retry on an invalid mshr!")
+    }
+    when(io.retryTasks.stage2.cbwrdata_s2) {
+        state.s_cbwrdata := false.B
+        assert(state.s_cbwrdata, "try to retry an already activated task!")
+        assert(valid, "retry on an invalid mshr!")
+    }
+    when(io.retryTasks.stage2.snpresp_s2) {
+        state.s_snpresp := false.B
+        assert(state.s_snpresp, "try to retry an already activated task!")
+        assert(valid, "retry on an invalid mshr!")
+    }
+    when(io.retryTasks.stage4.snpresp_s4) {
+        state.s_snpresp := false.B
+        assert(state.s_snpresp, "try to retry an already activated task!")
+        assert(valid, "retry on an invalid mshr!")
+    }
+
     /** Receive [[RXDAT]] responses, including: CompData */
     val rxdat = io.resps.rxdat
     when(rxdat.fire && rxdat.bits.last) {
@@ -414,7 +459,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
             dbid     := rxdat.bits.dbID
         }
     }
-    assert(!(rxdat.fire && state.w_compdat), s"mshr_${id} is not watting for rxdat")
+    assert(!(rxdat.fire && state.w_compdat), s"mshr is not watting for rxdat")
 
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
@@ -428,7 +473,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
             state.w_dbidresp := true.B
         }
     }
-    assert(!(rxrsp.fire && state.w_comp && state.w_dbidresp), s"mshr_${id} is not watting for rxrsp")
+    assert(!(rxrsp.fire && state.w_comp && state.w_dbidresp), s"mshr is not watting for rxrsp")
 
     /**
      * A [[MSHR]] will wait GrantAck for Acquire requests.
@@ -440,7 +485,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     when(sinke.fire) {
         state.w_grantack := true.B
     }
-    assert(!(sinke.fire && state.w_grantack), s"mshr_${id} is not watting for sinke")
+    assert(!(sinke.fire && state.w_grantack), s"mshr is not watting for sinke")
 
     /** Receive ProbeAck/ProbeAckData response */
     val sinkc = io.resps.sinkc
@@ -537,22 +582,35 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
                 }
             }
         }.otherwise {
+            state.s_repl      := false.B
             state.s_accessack := !reqIsGet
             state.s_grant     := !reqIsAcquire
             dirResp.wayOH     := replResp.bits.wayOH
-
-            assert(false.B, "TODO: retry")
         }
     }
-    assert(!(replResp.fire && state.w_replResp), s"mshr_${id} is not watting for replResp_s3")
+    assert(!(replResp.fire && state.w_replResp), s"mshr is not watting for replResp_s3")
 
     /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
      * If there is, then we cannot free the [[MSHR]].
      */
-    val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
-    val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
-    val willFree   = noWait && noSchedule
+    val noWait                   = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
+    val noSchedule               = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
+    val waitForSent_grant_s0     = state.s_grant
+    val waitForSent_grant_s1     = RegNext(state.s_grant, true.B)
+    val waitForSent_grant_s2     = RegNext(waitForSent_grant_s1, true.B)
+    val waitForSent_grant        = waitForSent_grant_s0 && waitForSent_grant_s1 && waitForSent_grant_s2
+    val waitForSent_accessack_s0 = state.s_accessack
+    val waitForSent_accessack_s1 = RegNext(state.s_accessack, true.B)
+    val waitForSent_accessack_s2 = RegNext(waitForSent_accessack_s1, true.B)
+    val waitForSent_accessack    = waitForSent_accessack_s0 && waitForSent_accessack_s1 && waitForSent_accessack_s2
+    val waitForSent_snpresp_s0   = state.s_snpresp
+    val waitForSent_snpresp_s1   = RegNext(state.s_snpresp, true.B)
+    val waitForSent_snpresp_s2   = RegNext(waitForSent_snpresp_s1, true.B)
+    val waitForSent_snpresp_s3   = RegNext(waitForSent_snpresp_s2, true.B) // TODO: optimize? some snpresp will not reach stage 4
+    val waitForSent_snpresp_s4   = RegNext(waitForSent_snpresp_s3, true.B)
+    val waitForSent_snpresp      = waitForSent_snpresp_s0 && waitForSent_snpresp_s1 && waitForSent_snpresp_s2 && waitForSent_snpresp_s3 && waitForSent_snpresp_s4
+    val willFree                 = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp
     when(valid && willFree) {
         valid := false.B
     }
@@ -569,9 +627,8 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
     io.status.dirHit    := dirResp.hit                                                                        // Used by Directory to occupy a particular way.
 
-    LeakChecker(io.status.valid, !io.status.valid, Some(s"mshr_${id}_valid"), maxCount = 10000)
-
-    dontTouch(io)
+    LeakChecker(io.status.valid, !io.status.valid, Some(s"mshr_valid"), maxCount = deadlockThreshold)
+    // TODO: LeakChecker(io.retryTasks.stage2.accessack_s2, io.alloc_s3.fire, Some("mshr_accessack_retry"), maxCount = deadlockThreshold - 100)
 }
 
 object MSHR extends App {
@@ -580,5 +637,5 @@ object MSHR extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
-    GenerateVerilog(args, () => new MSHR(id = 0)(config), name = "MSHR", split = false)
+    GenerateVerilog(args, () => new MSHR()(config), name = "MSHR", split = false)
 }

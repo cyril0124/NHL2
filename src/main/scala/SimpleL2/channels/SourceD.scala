@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, SkidBuffer}
+import Utils.{GenerateVerilog, SkidBuffer, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import freechips.rocketchip.tilelink._
@@ -70,6 +70,8 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.d.bits.sink    := deq.bits.task.sink
     io.d.bits.data    := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
     deq.ready         := !deqNeedData && io.d.ready || deqNeedData && io.d.ready && last
+
+    LeakChecker(io.d.valid, io.d.fire, Some("SourceD_io_d_valid"), maxCount = deadlockThreshold)
 }
 
 object SourceD extends App {

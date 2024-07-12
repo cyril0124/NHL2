@@ -85,6 +85,8 @@ trait HasL2Param {
 
     val replacementPolicy = l2param.replacementPolicy
 
+    val deadlockThreshold = 10000
+
     val aliasBitsOpt = Some(2)
 
     lazy val edgeIn = p(EdgeInKey)

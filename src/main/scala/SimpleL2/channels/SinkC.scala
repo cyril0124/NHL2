@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
@@ -162,6 +162,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
 
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
     assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid), "SinkC data is not written into TempDataStorage or DataStorage")
+    LeakChecker(io.c.valid, io.c.fire, Some("SinkC_io_c_valid"), maxCount = deadlockThreshold)
 
     when(io.dsWrite_s2.fire || io.toTempDS.write.fire) {
         assert(

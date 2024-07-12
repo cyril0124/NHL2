@@ -66,8 +66,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io.mshrFreeOH_s3   := missHandler.io.mshrFreeOH_s3
     mainPipe.io.replay_s4.ready := true.B // TODO:
 
+    val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
-    ds.io.refillWrite_s2              <> tempDS.io.toDS.refillWrite_s2
+    ds.io.refillWrite_s2.valid        := tempDS.io.toDS.refillWrite_s2.valid && !cancelRefillWrite_s2
+    ds.io.refillWrite_s2.bits         := tempDS.io.toDS.refillWrite_s2.bits
     ds.io.fromMainPipe.dsRead_s3      <> mainPipe.io.toDS.dsRead_s3
     ds.io.fromMainPipe.dsWrWayOH_s3   <> mainPipe.io.toDS.dsWrWayOH_s3
     ds.io.fromMainPipe.mshrId_s3      := mainPipe.io.toDS.mshrId_s3
@@ -92,6 +94,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.resps.sinkc  <> sinkC.io.resp
     missHandler.io.mshrStatus   <> dir.io.mshrStatus
     missHandler.io.replResp_s3  <> dir.io.replResp_s3
+    missHandler.io.retryTasks   <> mainPipe.io.retryTasks
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe

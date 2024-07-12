@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -16,9 +16,7 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
         val out       = DecoupledIO(new CHIBundleRSP(chiBundleParams))
     })
 
-    io <> DontCare
-
-    val nrEntry = 16
+    val nrEntry = nrMSHR // TODO: parameterize it
     val queue   = Module(new Queue(new CHIBundleRSP(chiBundleParams), nrEntry))
     queue.io.enq.valid := io.mpTask_s4.valid || io.mshrTask.valid
     queue.io.enq.bits  := Mux(io.mpTask_s4.valid, io.mpTask_s4.bits, io.mshrTask.bits)
@@ -28,7 +26,7 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
 
     io.out <> queue.io.deq
 
-    dontTouch(io)
+    LeakChecker(io.out.valid, io.out.fire, Some("TXRSP_valid"), maxCount = deadlockThreshold)
 }
 
 object TXRSP extends App {
