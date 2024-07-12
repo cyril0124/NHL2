@@ -39,75 +39,77 @@ object CHIBundleParameters {
 class CHIBundleREQ(params: CHIBundleParameters) extends Bundle {
     val channelName = "'REQ' channel"
 
-    // val qos          = UInt(4.W)                 // TODO: not use?
-    // val tgtID        = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID = UInt(params.nodeIdBits.W)
-    val txnID = UInt(12.W)
-    // val returnNID    = UInt(params.nodeIdBits.W) // TODO: not use?
-    val opcode = UInt(7.W)
-    val size   = UInt(3.W)
-    val addr   = UInt(params.addressBits.W)
-    // val ns           = Bool()                    // TODO: not use?
-    // val nse          = Bool()                    // TODO: not use?
-    val likelyShared = Bool()
-    val allowRetry   = Bool()
-    val order        = UInt(2.W)
-    val pCrdType     = UInt(4.W)
-    val memAttr      = UInt(4.W)
-    val snpAttr      = UInt(1.W)
-    // val cah          = Bool() // CHI Issue.B does not support this field
-    // val excl         = cah
-    // val snoopMe      = cah
-    val expCompAck = Bool()
+    val qos           = UInt(4.W)                 // TODO: not use?
+    val tgtID         = UInt(params.nodeIdBits.W) // TODO: not use?
+    val srcID         = UInt(params.nodeIdBits.W)
+    val txnID         = UInt(12.W)
+    val returnNID     = UInt(params.nodeIdBits.W) // TODO: not use?
+    val stashNIDValid = Bool()
+    val returnTxnID   = UInt(8.W)
+    val opcode        = UInt(7.W)
+    val size          = UInt(3.W)
+    val addr          = UInt(params.addressBits.W)
+    val ns            = Bool()                    // TODO: not use?
+    val likelyshared  = Bool()
+    val allowRetry    = Bool()
+    val order         = UInt(2.W)
+    val pCrdType      = UInt(4.W)
+    val memAttr       = new MemAttr
+    val snpAttr       = UInt(1.W)
+    val lpID          = UInt(4.W)
+    val snoopMe       = Bool()
+    val expCompAck    = Bool()
+    val traceTag      = Bool()
+    val rsvdc         = UInt(4.W)
 }
 
 class CHIBundleRSP(params: CHIBundleParameters) extends Bundle {
     val channelName = "'RSP' channel"
 
-    // val qos      = UInt(4.W)                 // TODO: not use?
-    // val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID   = UInt(params.nodeIdBits.W)
-    val txnID   = UInt(12.W)
-    val opcode  = UInt(5.W)
-    val respErr = UInt(2.W)
-    val resp    = UInt(3.W)
-    // val cBusy    = UInt(3.W)                 // CHI Issue.B does not support this field
+    val qos      = UInt(4.W)                 // TODO: not use?
+    val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
+    val srcID    = UInt(params.nodeIdBits.W)
+    val txnID    = UInt(12.W)
+    val opcode   = UInt(5.W)
+    val respErr  = UInt(2.W)
+    val resp     = UInt(3.W)
+    val fwdState = UInt(3.W)
     val dbID     = UInt(12.W)
     val pCrdType = UInt(4.W)
+    val traceTag = Bool()
 }
 
 class CHIBundleSNP(params: CHIBundleParameters) extends Bundle {
     val channelName = "'SNP' channel"
 
-    // val qos         = UInt(4.W)                 // TODO: not use?
-    val srcID = UInt(params.nodeIdBits.W)
-    val txnID = UInt(12.W)
-    // val fwdNID      = UInt(params.nodeIdBits.W) // TODO: not use?
-    // val fwdTxnID    = UInt(12.W)                // TODO: not use?
-    val opcode = UInt(5.W)
-    val addr   = UInt((params.addressBits - 3).W)
-    // val ns          = Bool()                    // TODO: not use?
-    // val nse         = Bool()                    // CHI Issue.B does not support this field
-    // val doNotGoToSD = Bool()                    // TODO: not use?
-    val retToSrc = Bool()
+    val qos         = UInt(4.W)                 // TODO: not use?
+    val srcID       = UInt(params.nodeIdBits.W)
+    val txnID       = UInt(12.W)
+    val fwdNID      = UInt(params.nodeIdBits.W) // TODO: not use?
+    val fwdTxnID    = UInt(12.W)                // TODO: not use?
+    val opcode      = UInt(5.W)
+    val addr        = UInt((params.addressBits - 3).W)
+    val doNotGoToSD = Bool()
+    val retToSrc    = Bool()
 }
 
 class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
     val channelName = "'DAT' channel"
 
-    // val qos       = UInt(4.W)                 // TODO: not use?
-    // val tgtID     = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID = UInt(params.nodeIdBits.W)
-    val txnID = UInt(12.W)
-    // val homeNID   = UInt(params.nodeIdBits.W) // TODO: not use?
-    val opcode  = UInt(4.W)
-    val respErr = UInt(2.W)
-    val resp    = UInt(3.W)
-    // val cBusy     = UInt(3.W)                 // CHI Issue.B does not support this field
-    val dbID = UInt(12.W)
-    // val ccID      = UInt(2.W)                 // TODO: not use?
+    val qos       = UInt(4.W)                 // TODO: not use?
+    val tgtID     = UInt(params.nodeIdBits.W) // TODO: not use?
+    val srcID     = UInt(params.nodeIdBits.W)
+    val txnID     = UInt(12.W)
+    val homeNID   = UInt(params.nodeIdBits.W) // TODO: not use?
+    val opcode    = UInt(4.W)
+    val respErr   = UInt(2.W)
+    val resp      = UInt(3.W)
+    val fwdState  = UInt(3.W)
+    val dbID      = UInt(12.W)
+    val ccID      = UInt(2.W)                 // TODO: not use?
     val dataID    = UInt(2.W)
-    val cah       = Bool() // CHI Issue.B does not support this field
+    val traceTag  = Bool()
+    val rsvdc     = UInt(4.W)
     val be        = UInt((params.dataBits / 8).W)
     val data      = UInt(params.dataBits.W)
     val dataCheck = if (params.dataCheck) Some(UInt((params.dataBits / 8).W)) else None

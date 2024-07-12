@@ -3,6 +3,7 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
+import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
@@ -35,6 +36,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
         /** Send task to [[MainPipe]] */
         val mpReq_s2 = ValidIO(new TaskBundle)
+
+        val mpStatus = Input(new MainPipeStatus)
 
         val resetFinish = Input(Bool())
     })
@@ -81,6 +84,11 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.taskSinkC_s1  <> arb.io.in(3) // TODO: Store Miss Release / PutPartial?
     io.taskSinkA_s1  <> arb.io.in(4)
     arb.io.out       <> chosenTask_s1
+
+    val mayReadDS_a_s1 = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get
+    val choseSinkA_s1  = arb.io.chosen === 4.U
+    io.taskSinkA_s1.ready := arb.io.in(4).ready && (mayReadDS_a_s1 && !io.mpStatus.mayReadDS_s2 || !mayReadDS_a_s1)
+    chosenTask_s1.valid   := arb.io.out.valid && (!(choseSinkA_s1 && mayReadDS_a_s1 && io.mpStatus.mayReadDS_s2) || !choseSinkA_s1)
 
     chosenTask_s1.ready := io.resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1
     task_s1 := Mux(

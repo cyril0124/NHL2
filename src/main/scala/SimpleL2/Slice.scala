@@ -57,6 +57,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.taskSnoop_s1 <> rxsnp.io.task
     reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
     reqArb.io.resetFinish  <> dir.io.resetFinish
+    reqArb.io.mpStatus     <> mainPipe.io.status
 
     mainPipe.io                 <> DontCare
     mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2

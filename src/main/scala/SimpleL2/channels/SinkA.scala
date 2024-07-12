@@ -34,7 +34,7 @@ class SinkA()(implicit p: Parameters) extends L2Module {
 
     io.a.ready := io.task.ready
 
-    assert(!(io.a.fire && io.a.bits.size =/= log2Ceil(beatBytes).U))
+    assert(!(io.a.fire && io.a.bits.size =/= log2Ceil(blockBytes).U), "size:%d", io.a.bits.size)
 
     dontTouch(io)
 }

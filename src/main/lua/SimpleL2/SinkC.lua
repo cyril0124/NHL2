@@ -69,18 +69,20 @@ local respDest = ([[
     | mshrId
     | set 
     | tag
+    | wayOH
     | isTempDS
     | isDS
 ]]):bundle{hier = cfg.top, prefix = "io_respDest_s4_", name = "respDest"}
 
 local sinkC = dut.u_SinkC
 
-local function send_respDest(set, tag, mshrId, isTempDS, isDS)
+local function send_respDest(set, tag, mshrId, wayOH, isTempDS, isDS)
     env.negedge()
         respDest.valid:set(1)
         respDest.bits.mshrId:set(mshrId)
         respDest.bits.set:set(set)
         respDest.bits.tag:set(tag)
+        respDest.bits.wayOH:set(wayOH)
         respDest.bits.isTempDS:set(isTempDS)
         respDest.bits.isDS:set(isDS)
     env.negedge()
@@ -192,7 +194,7 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
     function ()
        env.dut_reset()
     
-       send_respDest(0x10, 0x20, 0, 1, 0) -- send to TempDS
+       send_respDest(0x10, 0x20, 0, 0x01, 1, 0) -- send to TempDS
 
        dut.io_dsWrite_s2_ready:set(1)
        dut.io_task_ready:set(1)
@@ -246,8 +248,7 @@ local test_simple_probeackdata = env.register_test_case "test_simple_probeackdat
 
         env.posedge(200)
 
-        send_respDest(0x10, 0x20, 0, 0, 1) -- send to DS
-        -- send_crd()
+        send_respDest(0x10, 0x20, 0, 0x01, 0, 1) -- send to DS
 
         verilua "appendTasks" {
             function ()

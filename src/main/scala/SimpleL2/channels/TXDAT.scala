@@ -50,6 +50,8 @@ class TXDAT()(implicit p: Parameters) extends L2Module {
     assert(!(io.data_s2.fire && !io.task_s2.fire), "task_s2 should arrive with data_s2!")
     assert(!(io.task_s6s7.fire && !io.data_s6s7.fire), "data_s6s7 should arrive with task_s6s7!")
     assert(!(io.data_s6s7.fire && !io.task_s6s7.fire), "task_s6s7 should arrive with data_s6s7!")
+    assert(!(io.task_s2.valid ^ io.data_s2.valid), "task_s2 should be valid with data_s2 valid!")
+    assert(!(io.task_s6s7.valid ^ io.data_s6s7.valid), "task_s6s7 should be valid with task_s6s7 valid!")
 
     val deq     = skidBuffer.io.deq
     val deqData = skidBuffer.io.deq.bits.data

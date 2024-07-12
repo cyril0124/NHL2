@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import dataclass.data
@@ -195,15 +195,15 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdData_s6        = RegEnable(rdData_s5, ren_s5)
     val rdDest_s6        = RegEnable(rdDest_s5, ren_s5)
     val rdMshrIdx_s6     = RegEnable(rdMshrIdx_s5, ren_s5)
-    val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT && ren_s6
-    val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD && ren_s6
-    val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage
+    val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT
+    val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD
+    val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
 
-    when(ren_s5 && !fire_s6) {
-        ren_s6 := true.B
-    }.elsewhen(!ren_s5 && fire_s6) {
+    when(!ren_s5 && ren_s6 && rdDest_s6 === DataDestination.TempDataStorage) {
         ren_s6 := false.B
-    }.elsewhen(rdDest_s6 === DataDestination.TempDataStorage) {
+    }.elsewhen(ren_s5 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
+        ren_s6 := true.B
+    }.elsewhen(!ren_s5 && ready_s7) {
         ren_s6 := false.B
     }
 
@@ -211,33 +211,36 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     io.toTempDS.write_s6.bits.data := rdData_s6
     io.toTempDS.write_s6.bits.idx  := rdMshrIdx_s6
 
-    assert(!(readToSourceD_s6 && readToTXDAT_s6))
+    assert(!(ren_s5 && ren_s6), "stage 6 is full!")
+    assert(!(ren_s6 && readToSourceD_s6 && readToTXDAT_s6))
+    LeakChecker(ren_s6, !ren_s6, Some("ren_s6"), maxCount = 2000)
 
     // -----------------------------------------------------------------------------------------
     // Stage 7 (data output)
     // -----------------------------------------------------------------------------------------
-    val full_s7          = RegInit(false.B)
+    val ren_s7           = RegInit(false.B)
     val rdData_s7        = RegEnable(rdData_s6, fire_s6)
     val rdDest_s7        = RegEnable(rdDest_s6, fire_s6)
-    val readToTXDAT_s7   = rdDest_s7 === DataDestination.TXDAT && full_s7
-    val readToSourceD_s7 = rdDest_s7 === DataDestination.SourceD && full_s7
+    val readToTXDAT_s7   = rdDest_s7 === DataDestination.TXDAT
+    val readToSourceD_s7 = rdDest_s7 === DataDestination.SourceD
     val fire_s7          = io.toTXDAT.dsResp_s6s7.fire || io.toSourceD.dsResp_s6s7.fire
 
-    ready_s7 := !full_s7 || io.toTXDAT.dsResp_s6s7.fire || io.toSourceD.dsResp_s6s7.fire // TODO: timing?
+    ready_s7 := !ren_s7
 
-    when(fire_s6 && !fire_s7) {
-        full_s7 := true.B
-    }.elsewhen(!fire_s6 && fire_s7) {
-        full_s7 := false.B
+    when(fire_s6 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
+        ren_s7 := true.B
+    }.elsewhen(!fire_s6 && fire_s7 && ren_s7) {
+        ren_s7 := false.B
     }
 
-    assert(!(readToSourceD_s7 && readToTXDAT_s7))
+    assert(!(ren_s7 && readToSourceD_s7 && readToTXDAT_s7))
+    LeakChecker(ren_s7, !ren_s7, Some("ren_s7"), maxCount = 2000)
 
-    io.toTXDAT.dsResp_s6s7.valid     := readToTXDAT_s6 || readToTXDAT_s7
-    io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToSourceD_s7, rdData_s7, rdData_s6)
+    io.toTXDAT.dsResp_s6s7.valid     := ren_s6 && readToTXDAT_s6 || ren_s7 && readToTXDAT_s7
+    io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToSourceD_s7 && ren_s7, rdData_s7, rdData_s6)
 
-    io.toSourceD.dsResp_s6s7.valid     := readToSourceD_s6 || readToSourceD_s7
-    io.toSourceD.dsResp_s6s7.bits.data := Mux(readToSourceD_s7, rdData_s7, rdData_s6)
+    io.toSourceD.dsResp_s6s7.valid     := ren_s6 && readToSourceD_s6 || ren_s7 && readToSourceD_s7
+    io.toSourceD.dsResp_s6s7.bits.data := Mux(readToSourceD_s7 && ren_s7, rdData_s7, rdData_s6)
 
     dontTouch(io)
 }

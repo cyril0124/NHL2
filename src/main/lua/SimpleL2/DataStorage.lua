@@ -57,6 +57,16 @@ local function refill_data(set, wayOH, data_str)
         refillWrite_s2.valid:set(0)
 end
 
+local function read(set, wayOH, dest)
+    env.negedge()
+        dsRead_s3.valid:set(1)
+        dsRead_s3.bits.set:set(set)
+        dsRead_s3.bits.wayOH:set(wayOH)
+        dsRead_s3.bits.dest:set(dest)
+    env.negedge()
+        dsRead_s3.valid:set(0)
+end
+
 local test_basic_read_write = env.register_test_case "test_basic_read_write" {
     function ()
         env.dut_reset()
@@ -275,6 +285,104 @@ local test_read_to_sourceD = env.register_test_case "test_read_to_sourceD" {
     end
 }
 
+local test_read_stall = env.register_test_case "test_read_stall" {
+    function ()
+        env.dut_reset()
+    
+        sourceD_data.ready:set(0)
+
+        refill_data(0x00, ("0b0001"):number(), "0xabcd")
+        refill_data(0x00, ("0b0010"):number(), "0xbeef")
+
+        -- one read request
+        read(0x00, ("0b0001"):number(), SourceD)
+        env.negedge()
+            ds.ren_s5:expect(1)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(0)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(0)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge(math.random(1, 10))
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.ready:set(1)
+        env.posedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s7:expect(0)
+            sourceD_data.valid:expect(0)
+        
+        env.negedge(10)
+
+        sourceD_data.ready:set(0)
+
+        -- two read request
+        read(0x00, ("0b0001"):number(), SourceD)
+        read(0x00, ("0b0010"):number(), SourceD)
+        env.negedge()
+            ds.ren_s5:expect(1)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge(math.random(1, 10))
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            sourceD_data.ready:set(1)
+        env.posedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(0)
+            sourceD_data.valid:expect(1)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xbeef)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(0)
+            sourceD_data.valid:expect(0)
+
+        
+        env.posedge(100)
+    end
+}
+
 verilua "mainTask" {
     function ()
         sim.dump_wave()
@@ -283,6 +391,7 @@ verilua "mainTask" {
         test_refill_write()
         test_operate_diffrent_way()
         test_read_to_sourceD()
+        test_read_stall()
 
         env.posedge(100)
         env.TEST_SUCCESS()

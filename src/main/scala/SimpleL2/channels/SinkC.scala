@@ -13,7 +13,6 @@ class RespDataDestSinkC()(implicit p: Parameters) extends L2Bundle {
     val mshrId   = UInt(log2Ceil(nrMSHR).W)
     val set      = UInt(setBits.W)
     val tag      = UInt(tagBits.W)
-    val dataId   = UInt(dataIdBits.W)
     val wayOH    = UInt(ways.W)
     val isTempDS = Bool()
     val isDS     = Bool()
@@ -90,7 +89,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         entry.wayOH    := io.respDest_s4.bits.wayOH
         entry.isTempDS := io.respDest_s4.bits.isTempDS
         entry.isDS     := io.respDest_s4.bits.isDS
-        // assert(!entry.valid, "respDestMap[%d] is already valid!", io.respDest.bits.mshrId)
+        assert(!entry.valid, "respDestMap[%d] is already valid!", io.respDest_s4.bits.mshrId)
     }
     respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
         when(io.c.fire && !isRelease && hasData && last && en) {
@@ -132,6 +131,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.dsWrite_s2.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.dsWrite_s2.bits.set   := set
     io.dsWrite_s2.bits.wayOH := respMatchEntry.wayOH // For ReleaseData, wayOH is provided in MainPipe stage 3
+    assert(!(io.dsWrite_s2.valid && !isRelease && hasData && respDataToDS && !respMatchEntry.wayOH.orR), "wayOH is not valid! wayOH:0b%b", respMatchEntry.wayOH)
 
     /**
      * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
@@ -162,6 +162,16 @@ class SinkC()(implicit p: Parameters) extends L2Module {
 
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
     assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid), "SinkC data is not written into TempDataStorage or DataStorage")
+
+    when(io.dsWrite_s2.fire || io.toTempDS.write.fire) {
+        assert(
+            !(!isRelease && !respMatchEntry.valid),
+            "write data does not match any valid entry! address:0x%x opcode:%d param:%d",
+            io.c.bits.address,
+            io.c.bits.opcode,
+            io.c.bits.param
+        )
+    }
 
     dontTouch(io)
 }

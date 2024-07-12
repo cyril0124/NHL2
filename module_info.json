@@ -1,11 +1,6 @@
 [
     {
         "package": "SimpleL2",
-        "target": "L2Cache",
-        "unit_test": false
-    },
-    {
-        "package": "SimpleL2",
         "target": "CHIBridge",
         "unit_test": true
     },

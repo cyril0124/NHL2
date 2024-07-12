@@ -74,12 +74,13 @@ tl_a.acquire_block_1 = function (this, addr, param, source)
     assert(addr ~= nil)
     assert(param ~= nil)
 
+    this.ready:expect(1)
     this.valid:set(1)
     this.bits.opcode:set(TLOpcodeA.AcquireBlock)
     this.bits.address:set(addr, true)
     this.bits.param:set(param)
     this.bits.source:set(source or 0)
-    this.bits.size:set(5) -- 2^5 == 32
+    this.bits.size:set(6) -- 2^6 == 64
 end
 
 tl_a.acquire_block = function (this, addr, param, source)
@@ -92,7 +93,7 @@ tl_a.acquire_block = function (this, addr, param, source)
         this.bits.address:set(addr, true)
         this.bits.param:set(param)
         this.bits.source:set(source or 0)
-        this.bits.size:set(5) -- 2^5 == 32
+        this.bits.size:set(6) -- 2^6 == 64
     env.negedge()
         this.valid:set(0)
     env.negedge()
@@ -107,7 +108,7 @@ tl_a.acquire_perm_1 = function (this, addr, param, source)
     this.bits.address:set(addr, true)
     this.bits.param:set(param)
     this.bits.source:set(source or 0)
-    this.bits.size:set(5) -- 2^5 == 32
+    this.bits.size:set(6) -- 2^6 == 64
 end
 
 tl_a.acquire_perm = function (this, addr, param, source)
@@ -120,7 +121,7 @@ tl_a.acquire_perm = function (this, addr, param, source)
         this.bits.address:set(addr, true)
         this.bits.param:set(param)
         this.bits.source:set(source or 0)
-        this.bits.size:set(5) -- 2^5 == 32
+        this.bits.size:set(6) -- 2^6 == 64
     env.negedge()
         this.valid:set(0)
 end
@@ -133,7 +134,7 @@ tl_a.get_1 = function (this, addr, source)
     this.bits.address:set(addr, true)
     this.bits.param:set(0)
     this.bits.source:set(source or 0)
-    this.bits.size:set(5) -- 2^5 == 32
+    this.bits.size:set(6) -- 2^6 == 64
 end
 
 tl_a.get = function (this, addr, source)
@@ -145,7 +146,7 @@ tl_a.get = function (this, addr, source)
         this.bits.address:set(addr, true)
         this.bits.param:set(0)
         this.bits.source:set(source or 0)
-        this.bits.size:set(5) -- 2^5 == 32
+        this.bits.size:set(6) -- 2^6 == 64
     env.negedge()
         this.valid:set(0)
     env.negedge()
@@ -411,13 +412,14 @@ local function write_ds(set, wayOH, data_str)
     env.posedge()
 end
 
-local function write_sinkC_respDestMap(mshrId, set, tag, isTempDS, isDS)
+local function write_sinkC_respDestMap(mshrId, set, tag, wayOH, isTempDS, isDS)
     env.negedge()
         dut:force_all()
         sinkC.io_respDest_s4_valid:set(1)
         sinkC.io_respDest_s4_bits_mshrId:set(mshrId)
         sinkC.io_respDest_s4_bits_set:set(set)
         sinkC.io_respDest_s4_bits_tag:set(tag)
+        sinkC.io_respDest_s4_bits_wayOH:set(wayOH)
         sinkC.io_respDest_s4_bits_isTempDS:set(isTempDS)
         sinkC.io_respDest_s4_bits_isDS:set(isDS)
     env.negedge()
@@ -470,7 +472,7 @@ local test_replay_valid = env.register_test_case "test_replay_valid" {
             expect.equal(mp.io_mshrAlloc_s3_ready:get(), 0)
 
         env.posedge()
-            expect.equal(mp.valid_s4:get(), 1) -- replay valid
+            expect.equal(mp.valid_replay_s4:get(), 1) -- replay valid
 
         ms.io_mshrAlloc_s3_ready:set_release()
         env.posedge(100)
@@ -518,12 +520,14 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
             sourceD.io_d_ready:expect(1)
             sourceD.io_d_valid:expect(1)
             sourceD.io_d_bits_data:dump()
+            sourceD.io_d_bits_opcode:expect(TLOpcodeD.GrantData)
             sourceD.io_d_bits_data:expect(0xdead)
 
         env.posedge()
             sourceD.io_d_ready:expect(1)
             sourceD.io_d_valid:expect(1)
             sourceD.io_d_bits_data:dump()
+            sourceD.io_d_bits_opcode:expect(TLOpcodeD.GrantData)
             sourceD.io_d_bits_data:expect(0xbeef)
 
         env.posedge()
@@ -637,7 +641,7 @@ local test_load_to_use_stall_complex = env.register_test_case "test_load_to_use_
 
         env.negedge()
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
-        env.negedge()
+        env.negedge(2)
             tl_a:acquire_block_1(0x14000, TLParam.NtoT, 8)
         env.negedge()
             tl_a.valid:set(0)
@@ -727,13 +731,10 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
         }
 
         env.negedge()
-            tl_a.ready:expect(1)
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 1)
-        env.negedge()
-            tl_a.ready:expect(1)
+        env.negedge(2)
             tl_a:acquire_block_1(0x20000, TLParam.NtoT, 2)
-        env.negedge()
-            tl_a.ready:expect(1)
+        env.negedge(2)
             tl_a:acquire_block_1(0x30000, TLParam.NtoT, 3)
         env.negedge()
             tl_a.valid:set(0)
@@ -779,25 +780,21 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
 
         verilua "appendTasks" {
             check_task = function()
-                env.expect_happen_until(100, function (c)
-                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == 0xdead
-                end)
-
-                env.expect_happen_until(100, function (c)
-                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == 0xbeef
-                end)
+                local function check_grantdata(data) 
+                    env.expect_happen_until(100, function (c)
+                        return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == data
+                    end)
+                end
+                
+                check_grantdata(0xdead)
+                check_grantdata(0xbeef)
 
                 env.expect_happen_until(100, function (c)
                     return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.Grant
                 end)
 
-                env.expect_happen_until(100, function (c)
-                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == 0xdead2
-                end)
-
-                env.expect_happen_until(100, function (c)
-                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == 0xbeef2
-                end)
+                check_grantdata(0xdead2)
+                check_grantdata(0xbeef2)
             end,
         }
 
@@ -836,8 +833,8 @@ local test_release_write = env.register_test_case "test_release_write" {
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
-        write_sinkC_respDestMap(0, 0x00, 0x04, 1, 0)
 
+        env.negedge()
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
 
         env.posedge(200)
@@ -865,7 +862,7 @@ local test_release_continuous_write = env.register_test_case "test_release_conti
 
         -- 0x10000
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TTC)
-        write_sinkC_respDestMap(0, 0x00, 0x04, 1, 0)
+        write_sinkC_respDestMap(0, 0x00, 0x04, 0x01, 1, 0)
 
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x100", "0x200")
         tl_c:release_data(to_address(0x00, 0x04), TLParam.TtoN, 0, "0x400", "0x500")
@@ -1305,12 +1302,11 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
             ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_write_valid:set(0)
+            sourceD.io_data_s6s7_valid:set_force(0)
         env.negedge(10)
-            dut:release_all()
+            sourceD.io_data_s6s7_valid:set_release()
 
-        env.posedge(200)
+        env.dut_reset()
     end
 }
 
@@ -1388,10 +1384,11 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
             ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_write_valid:set(0)
+            sourceD.io_data_s6s7_valid:set_force(0)
+            ds.ren_s6:set_force(0)
         env.negedge(10)
-            dut:release_all()
+            sourceD.io_data_s6s7_valid:set_release()
+            ds.ren_s6:set_release()
 
 
         -- 
@@ -1434,10 +1431,11 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
             ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
         env.negedge()
             dut:release_all()
-            dut:force_all()
-            tempDS.io_fromDS_write_valid:set(0)
+            sourceD.io_data_s6s7_valid:set_force(0)
+            ds.ren_s6:set_force(0)
         env.negedge(10)
-            dut:release_all()
+            sourceD.io_data_s6s7_valid:set_release()
+            ds.ren_s6:set_release()
 
         env.posedge(200)
     end
@@ -1588,12 +1586,12 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
             
             -- wait txreq
             env.expect_happen_until(20, function ()
-                return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique)
+                return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique)
             end)
             chi_txreq:dump()
 
             env.negedge(5)
-            chi_rxrsp:comp(0, 5) -- dbID = 5
+            chi_rxdat:compdat(0, "0x1234", "0x4567", 5, CHIResp.UC) -- dbID = 5
 
             env.expect_happen_until(20, function ()
                 return chi_txrsp:fire()
@@ -3475,11 +3473,13 @@ local test_snoop_unique = env.register_test_case "test_snoop_unique" {
     end
 }
 
--- TODO: refill retry(sourceD is not ready)
-
+-- TODO: MainPipe block SinkA request due to same address conflict.
+-- TODO: Block SinkA reqeust when stage6 & stage7 is full.
+-- TODO: Block Snoop request(need data) when stage6 & stage7 is full.
+-- TODO: stage2 TXDAT and SourceD not ready, mshr should retry
 -- TODO: replResp retry
 
--- TODO: nest
+-- TODO: nest: Release nest Probe, Snoop nest WriteBack/Evict
 local test_release_nest_probe = env.register_test_case "test_release_and_probe" {
     function ()
 

@@ -17,6 +17,7 @@ import SimpleL2.chi.CHIOpcodeSNP._
 import SimpleL2.TLState._
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
+import Utils.LeakChecker
 
 class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     // s: send
@@ -114,6 +115,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     val gotDirty        = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val needProbe       = RegInit(false.B)
+    val needPromote     = RegInit(false.B)
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
@@ -139,7 +141,8 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         dirResp := io.alloc_s3.bits.dirResp
         state   := allocState
 
-        needProbe := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
+        needProbe   := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
+        needPromote := !allocState.s_makeunique
 
         dbid            := 0.U
         gotT            := false.B
@@ -160,9 +163,9 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (req.opcode === AcquirePerm && req.param === NtoT) -> MakeUnique,
-                    reqNeedT                                           -> ReadUnique,
-                    reqNeedB                                           -> ReadNotSharedDirty
+                    (req.param === BtoT) -> MakeUnique,
+                    reqNeedT             -> ReadUnique,
+                    reqNeedB             -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,
@@ -174,7 +177,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     io.tasks.txreq.bits.expCompAck := !state.s_read                                                                 // TODO: only for Read not for EvictS
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
     io.tasks.txreq.bits.order      := Order.None                                                                    // No ordering required
-    io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B).asUInt
+    io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
     io.tasks.txreq.bits.snpAttr    := true.B
     io.tasks.txreq.bits.srcID      := DontCare                                                                      // This value will be assigned in output chi portr
     io.tasks.txreq.bits.txnID      := id.U
@@ -243,7 +246,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     }
 
     /** Send the final refill response to the upper level */
-    val needRefillData_hit  = dirResp.hit && needProbe
+    val needRefillData_hit  = dirResp.hit && (needProbe || needPromote)
     val needRefillData_miss = !dirResp.hit
     val needRefillData      = (req.opcode === AcquireBlock || req.opcode === Get) && (needRefillData_hit || needRefillData_miss)
     val needProbeAckData    = false.B // TODO:
@@ -354,7 +357,7 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)
     mpTask_snpresp.bits.channel     := Mux(gotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc
-    mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT
+    mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT // | DataDestination.DataStorage
     mpTask_snpresp.bits.updateDir   := true.B
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = snprespFinalDirty,
@@ -565,6 +568,8 @@ class MSHR(id: Int)(implicit p: Parameters) extends L2Module {
     io.status.wayOH     := dirResp.wayOH
     io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
     io.status.dirHit    := dirResp.hit                                                                        // Used by Directory to occupy a particular way.
+
+    LeakChecker(io.status.valid, !io.status.valid, Some(s"mshr_${id}_valid"), maxCount = 10000)
 
     dontTouch(io)
 }
