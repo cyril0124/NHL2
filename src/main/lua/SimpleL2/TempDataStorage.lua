@@ -8,7 +8,7 @@ local ds_write = ([[
     | valid
     | idx
     | data
-]]):bundle{hier = cfg.top, prefix = "io_fromDS_write_", name = "ds_write"}
+]]):bundle{hier = cfg.top, prefix = "io_fromDS_write_s5_", name = "ds_write"}
 
 local to_ds_write = ([[
     | valid

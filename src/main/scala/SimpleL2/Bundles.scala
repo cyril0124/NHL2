@@ -23,7 +23,6 @@ class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
 }
 
 class TaskBundle(implicit p: Parameters) extends L2Bundle {
-    val owner       = UInt(RequestOwner.width.W)
     val isCHIOpcode = Bool()
     val opcode      = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
     val param       = UInt(math.max(3, Resp.width).W)                 // if isCHIOpcode is true, param is equals to the resp field in CHI
@@ -39,7 +38,6 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
     val isAliasTask = Bool()
     val isMshrTask  = Bool()
-    val isReplTask  = Bool()
 
     val readTempDs = Bool()
     val tempDsDest = UInt(DataDestination.width.W)
@@ -47,10 +45,12 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val updateDir    = Bool()
     val newMetaEntry = new DirectoryMetaEntryNoTag
 
-    def resp = param
-    def mshrId = sink
-    def txnID = source     // alias to source
-    def chiOpcode = opcode // alias to opcode
+    def resp = param             // alias to opcode, if isCHIOpcode is true
+    def txnID = source           // alias to source, if isCHIOpcode is true
+    def chiOpcode = opcode       // alias to opcode, if isCHIOpcode is true
+    def mshrId = sink            // alias to sink, if isMshrTask is true
+    def isReplTask = isAliasTask // alias to isAliasTask, if isMshrTask is true
+
     def isSnoop = channel === L2Channel.ChannelB && !isMshrTask
     def isChannelA = channel.asUInt(0) && !isMshrTask
     def isChannelB = channel.asUInt(1) && !isMshrTask

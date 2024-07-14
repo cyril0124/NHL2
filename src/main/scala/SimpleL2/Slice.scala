@@ -78,7 +78,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 
-    tempDS.io.fromDS.write            <> ds.io.toTempDS.write_s6
+    tempDS.io.fromDS.write_s5         <> ds.io.toTempDS.write_s5
     tempDS.io.fromRXDAT.write         <> rxdat.io.toTempDS.write
     tempDS.io.fromSinkC.write         <> sinkC.io.toTempDS.write
     tempDS.io.fromReqArb.read_s1      <> reqArb.io.tempDsRead_s1
@@ -100,12 +100,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
     txreq.io.sliceId   := io.sliceId
 
-    // val sourceD_q = Module(new Queue(new TaskBundle, 4))
-    // sourceD_q.io.enq <> mainPipe.io.sourceD_s2
-    // TODO: extra queue for non-data SourceD
-
     sourceD.io                 <> DontCare
-    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2                // sourceD_q.io.deq
+    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
     sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
     sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid     // TODO:

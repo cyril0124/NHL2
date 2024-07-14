@@ -168,6 +168,19 @@ local test_use_skidbuffer = env.register_test_case "test_use_skidbuffer" {
     end
 }
 
+local test_nondata_resp = env.register_test_case "test_nondata_resp" {
+    function ()
+        env.negedge()
+        send_task_s2(11, TLOpcodeD.ReleaseAck)
+        env.expect_happen_until(3, function ()
+            return tl_d.valid:is(1)
+        end)
+        tl_d:dump()
+    end
+}
+
+-- TODO: mixed resp
+
 local test_continuious_grant = env.register_test_case "test_continuious_grant" {
     function ()
         -- TODO:
@@ -198,7 +211,8 @@ verilua "appendTasks" {
             function () env.posedge(200) end,
             {
                 test_basic_no_stall,
-                test_use_skidbuffer
+                test_use_skidbuffer,
+                test_nondata_resp,
             }
         )
 

@@ -23,11 +23,11 @@ local dsRead_s3 = ([[
     | dest
 ]]):bundle {hier = cfg.top, prefix = "io_fromMainPipe_dsRead_s3_", name = "dsRead_s3"}
 
-local tempDS_write_s6 = ([[
+local tempDS_write = ([[
     | valid
     | data
     | idx
-]]):bundle {hier = cfg.top, prefix = "io_toTempDS_write_s6_", name = "tempDS_write_s6"}
+]]):bundle {hier = cfg.top, prefix = "io_toTempDS_write_s5_", name = "tempDS_write_s5"}
 
 local sourceD_data = ([[
     | valid
@@ -76,16 +76,16 @@ local test_basic_read_write = env.register_test_case "test_basic_read_write" {
                 local read_data = 0xff
 
                 env.expect_happen_until(100, function (c)
-                    return tempDS_write_s6:fire()
+                    return tempDS_write:fire()
                 end)
-                tempDS_write_s6:dump()
-                read_data = tempDS_write_s6.bits.data:get()[1]
+                tempDS_write:dump()
+                read_data = tempDS_write.bits.data:get()[1]
                 expect.equal(read_data, 0xdead)
-                tempDS_write_s6.bits.idx:expect(4)
+                tempDS_write.bits.idx:expect(4)
 
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
-                    return tempDS_write_s6:fire()
+                    return tempDS_write:fire()
                 end)
             end
         }
@@ -126,9 +126,9 @@ local test_refill_write = env.register_test_case "test_refill_write" {
         verilua "appendTasks" {
             check_data_resp = function ()
                 env.expect_happen_until(100, function()
-                    return  tempDS_write_s6.valid:get() == 1 and tempDS_write_s6.bits.data:get()[1] == 0xdead
+                    return  tempDS_write.valid:get() == 1 and tempDS_write.bits.data:get()[1] == 0xdead
                 end)
-                tempDS_write_s6:dump()
+                tempDS_write:dump()
             end
         }
 
@@ -159,11 +159,11 @@ local test_operate_diffrent_way = env.register_test_case "test_operate_diffrent_
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return tempDS_write_s6:fire()
+                    return tempDS_write:fire()
                 end)
-                tempDS_write_s6:dump()
-                expect.equal(tempDS_write_s6.bits.data:get()[1], 0)
-                expect.equal(tempDS_write_s6.bits.idx:get(), 4)
+                tempDS_write:dump()
+                expect.equal(tempDS_write.bits.data:get()[1], 0)
+                expect.equal(tempDS_write.bits.idx:get(), 4)
             end
         }
 
@@ -378,7 +378,57 @@ local test_read_stall = env.register_test_case "test_read_stall" {
             ds.ren_s7:expect(0)
             sourceD_data.valid:expect(0)
 
-        
+        env.posedge(100)
+    end
+}
+
+local test_drop_overflow_data = env.register_test_case "test_drop_overflow_data" {
+    function ()
+        env.dut_reset()
+
+        sourceD_data.ready:set(0)
+
+        refill_data(0x00, ("0b0001"):number(), "0xabcd")
+        refill_data(0x00, ("0b0010"):number(), "0xbeef")
+        refill_data(0x00, ("0b0100"):number(), "0xabab")
+
+        read(0x00, ("0b0001"):number(), SourceD)
+        read(0x00, ("0b0010"):number(), SourceD)
+        env.negedge()
+            ds.ren_s5:expect(1)
+            ds.ren_s6:expect(0)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(ds.rdData_s7:get(), 0xabcd)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge()
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(ds.rdData_s6:get(), 0xbeef)
+            expect.equal(ds.rdData_s7:get(), 0xabcd)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+        env.negedge(math.random(5, 10))
+            ds.ren_s5:expect(0)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(ds.rdData_s6:get(), 0xbeef)
+            expect.equal(ds.rdData_s7:get(), 0xabcd)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+
+        read(0x00, ("0b0100"):number(), SourceD)
+        env.negedge()
+            ds.ren_s5:expect(1)
+            ds.ren_s6:expect(1)
+            ds.ren_s7:expect(1)
+            sourceD_data.valid:expect(1)
+            expect.equal(ds.rdData_s6:get(), 0xbeef)
+            expect.equal(ds.rdData_s7:get(), 0xabcd)
+            expect.equal(sourceD_data.bits.data:get()[1], 0xabcd)
+
+
         env.posedge(100)
     end
 }
@@ -392,6 +442,7 @@ verilua "mainTask" {
         test_operate_diffrent_way()
         test_read_to_sourceD()
         test_read_stall()
+        -- test_drop_overflow_data()
 
         env.posedge(100)
         env.TEST_SUCCESS()

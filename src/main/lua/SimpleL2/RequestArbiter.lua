@@ -4,16 +4,14 @@ local tl = require "TileLink"
 
 local assert = assert
 local expect = env.expect
+local TLOpcodeA = tl.TLOpcodeA
 local TLOpcodeC = tl.TLOpcodeC
 
-local RequestOwner = utils.enum_define {
-    Level1     = tonumber("0b001"),
-    CMO        = tonumber("0b010"),
-    Prefetcher = tonumber("0b011"),
-    Snoop      = tonumber("0b100"),
-    MSHR       = tonumber("0b101"),
+local L2Channel = utils.enum_define {
+    ChannelA = tonumber("0b001"),
+    ChannelB = tonumber("0b010"),
+    ChannelC = tonumber("0b100"),
 }
-
 
 local taskMSHR_s0 = ([[
     | ready
@@ -50,6 +48,10 @@ local taskSinkC_s1 = ([[
 local taskSinkA_s1 = ([[
     | ready
     | valid
+    | set
+    | tag
+    | opcode
+    | channel
 ]]):bundle {hier = cfg.top, prefix = "io_taskSinkA_s1_", is_decoupled = true, name = "taskSinkA_s1"}
 
 local dirRead_s1 = ([[
@@ -236,6 +238,111 @@ local test_basic_release = env.register_test_case "test_basic_release" {
     end
 }
 
+local test_block_sinkA_for_same_addr = env.register_test_case "test_block_sinkA_for_same_addr" {
+    function ()
+        env.dut_reset()
+        set_ready()
+
+        reqArb.mayReadDS_s2:set_force(0)
+
+        -- same address
+        env.negedge()
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x01)
+            taskSinkA_s1.bits.tag:set(0x02)
+            taskSinkA_s1.bits.opcode:set(TLOpcodeA.AcquireBlock)
+            taskSinkA_s1.bits.channel:set(L2Channel.ChannelA)
+            env.posedge()
+                taskSinkA_s1.ready:expect(1)
+        env.negedge()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(0)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x01)
+            taskSinkA_s1.bits.tag:set(0x02)
+            env.posedge()
+                taskSinkA_s1.ready:expect(0)
+        env.negedge()
+            reqArb.valid_s2:expect(0)
+            reqArb.valid_s3:expect(1)
+            taskSinkA_s1.ready:expect(0)
+        env.negedge()
+            reqArb.valid_s2:expect(0)
+            reqArb.valid_s3:expect(0)
+            taskSinkA_s1.ready:expect(1)
+        env.negedge()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(0)
+            taskSinkA_s1.valid:set(0)
+        env.negedge()
+            reqArb.valid_s2:expect(0)
+            reqArb.valid_s3:expect(1)
+        env.negedge()
+            reqArb.valid_s2:expect(0)
+            reqArb.valid_s3:expect(0)
+
+        env.posedge(10)
+        
+        -- different address
+        env.negedge()
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x01)
+            taskSinkA_s1.bits.tag:set(0x02)
+            taskSinkA_s1.bits.opcode:set(TLOpcodeA.AcquireBlock)
+            taskSinkA_s1.bits.channel:set(L2Channel.ChannelA)
+            env.posedge()
+                taskSinkA_s1.ready:expect(1)
+        env.negedge()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(0)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x02)
+            taskSinkA_s1.bits.tag:set(0x02)
+            env.posedge()
+                taskSinkA_s1.ready:expect(1)
+        env.negedge()
+            taskSinkA_s1.valid:set(0)
+        
+        env.posedge(10)
+        reset_ready()
+        reqArb.mayReadDS_s2:set_release()
+    end
+}
+
+local test_ds_block_sinkA = env.register_test_case "test_ds_block_sinkA" {
+    function ()
+        env.dut_reset()
+        set_ready()
+
+        env.negedge()
+            reqArb.mayReadDS_s2:expect(0)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x01)
+            taskSinkA_s1.bits.tag:set(0x02)
+            taskSinkA_s1.bits.opcode:set(TLOpcodeA.AcquireBlock)
+            taskSinkA_s1.bits.channel:set(L2Channel.ChannelA)
+            env.posedge()
+                taskSinkA_s1.ready:expect(1)
+        env.negedge()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(0)
+            reqArb.mayReadDS_s2:expect(1)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.set:set(0x02)
+            taskSinkA_s1.bits.tag:set(0x02)
+            env.posedge()
+                reqArb.mayReadDS_s2:expect(1)
+                reqArb.blockA_addrConflict:expect(0)
+                taskSinkA_s1.ready:expect(0)
+        env.negedge()
+            taskSinkA_s1.ready:expect(1)
+            taskSinkA_s1.valid:set(0)
+
+        env.posedge(10)
+        reset_ready()
+    end
+}
+
 verilua "mainTask" {
     function ()
         sim.dump_wave()
@@ -247,9 +354,9 @@ verilua "mainTask" {
         test_basic_sink_req()
         test_mshr_block_sink_req()
         test_sinkC_block_sinkA()
-
-        -- test_basic_release_data() -- this test is moved into Slice.lua / SinkC.lua
         test_basic_release()
+        test_block_sinkA_for_same_addr()
+        test_ds_block_sinkA()
 
         env.TEST_SUCCESS()
     end

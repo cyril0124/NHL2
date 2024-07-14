@@ -49,7 +49,7 @@ object TempDataEntry {
 class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val fromDS = new Bundle {
-            val write = Flipped(ValidIO(new TempDataWrite))
+            val write_s5 = Flipped(ValidIO(new TempDataWrite))
         }
 
         val fromRXDAT = new Bundle {
@@ -102,12 +102,12 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 1
     // -----------------------------------------------------------------------------------------
-    val wen_ds_ts1    = io.fromDS.write.valid
+    val wen_ds_ts1    = io.fromDS.write_s5.valid
     val wen_rxdat_ts1 = io.fromRXDAT.write.fire
     val wen_sinkc_ts1 = io.fromSinkC.write.fire
     val wen_ts1       = wen_ds_ts1 || wen_rxdat_ts1 || wen_sinkc_ts1
-    val wIdx_ts1      = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write.bits.idx, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.idx, wen_sinkc_ts1 -> io.fromSinkC.write.bits.idx))
-    val wData_ts1     = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write.bits.data, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.data, wen_sinkc_ts1 -> io.fromSinkC.write.bits.data))
+    val wIdx_ts1      = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.idx, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.idx, wen_sinkc_ts1 -> io.fromSinkC.write.bits.idx))
+    val wData_ts1     = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.data, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.data, wen_sinkc_ts1 -> io.fromSinkC.write.bits.data))
 
     val ren_ts1       = io.fromReqArb.read_s1.fire
     val rDest_ts1     = io.fromReqArb.read_s1.bits.dest

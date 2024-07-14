@@ -49,7 +49,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val toTempDS = new Bundle {
-            val write_s6 = ValidIO(new TempDataWrite)
+            val write_s5 = ValidIO(new TempDataWrite)
         }
 
         /** 
@@ -179,6 +179,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdData_s5    = WireInit(0.U(dataBits.W))
     val rdDest_s5    = RegEnable(rdDest_s4, ren_s4)
     val rdMshrIdx_s5 = RegEnable(rdMshrIdx_s4, ren_s4)
+    val fire_s5      = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
     val rdDataVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) =>
         VecInit(srams.map(_.io.r.resp.data(0).data)).asUInt
     })
@@ -186,32 +187,37 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     rdData_s5 := Mux1H(rdWayOH_s5, rdDataVec_s5)
 
+    io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
+    io.toTempDS.write_s5.bits.data := rdData_s5
+    io.toTempDS.write_s5.bits.idx  := rdMshrIdx_s5
+
     // TODO: ECC Check
 
     // -----------------------------------------------------------------------------------------
     // Stage 6 (data output)
     // -----------------------------------------------------------------------------------------
-    val ren_s6           = RegInit(false.B)
-    val rdData_s6        = RegEnable(rdData_s5, ren_s5)
-    val rdDest_s6        = RegEnable(rdDest_s5, ren_s5)
-    val rdMshrIdx_s6     = RegEnable(rdMshrIdx_s5, ren_s5)
+    val ren_s6    = RegInit(false.B)
+    val rdData_s6 = RegEnable(rdData_s5, fire_s5)
+    val rdDest_s6 = RegEnable(rdDest_s5, fire_s5)
+    // val rdMshrIdx_s6     = RegEnable(rdMshrIdx_s5, fire_s5)
     val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT
     val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD
-    val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
+    val fire_s6          = ren_s6 && ready_s7 && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
+    // val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
 
-    when(!ren_s5 && ren_s6 && rdDest_s6 === DataDestination.TempDataStorage) {
+    when(!fire_s5 && ren_s6 && rdDest_s6 === DataDestination.TempDataStorage) {
         ren_s6 := false.B
-    }.elsewhen(ren_s5 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
+    }.elsewhen(fire_s5 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
         ren_s6 := true.B
-    }.elsewhen(!ren_s5 && ready_s7) {
+    }.elsewhen(!fire_s5 && ready_s7) {
         ren_s6 := false.B
     }
 
-    io.toTempDS.write_s6.valid     := rdDest_s6 === DataDestination.TempDataStorage && ren_s6
-    io.toTempDS.write_s6.bits.data := rdData_s6
-    io.toTempDS.write_s6.bits.idx  := rdMshrIdx_s6
+    // io.toTempDS.write_s6.valid     := rdDest_s6 === DataDestination.TempDataStorage && ren_s6
+    // io.toTempDS.write_s6.bits.data := rdData_s6
+    // io.toTempDS.write_s6.bits.idx  := rdMshrIdx_s6
 
-    assert(!(ren_s5 && ren_s6), "stage 6 is full!")
+    assert(!(fire_s5 && ren_s6), "stage 6 is full!")
     assert(!(ren_s6 && readToSourceD_s6 && readToTXDAT_s6))
     LeakChecker(ren_s6, !ren_s6, Some("ren_s6"), maxCount = 2000)
 

@@ -30,7 +30,7 @@ class SinkA()(implicit p: Parameters) extends L2Module {
     io.task.bits.isPrefetch := false.B
     io.task.bits.set        := set
     io.task.bits.tag        := tag
-    io.task.bits.aliasOpt.map(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
+    io.task.bits.aliasOpt.foreach(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
 
     io.a.ready := io.task.ready
 

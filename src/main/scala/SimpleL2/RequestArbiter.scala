@@ -44,11 +44,13 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     io <> DontCare
 
-    val fire_s1  = WireInit(false.B)
-    val ready_s1 = WireInit(false.B)
-    val valid_s1 = WireInit(false.B)
-
-    // TODO: stage 2 may need read/write DataStorage
+    val fire_s1   = WireInit(false.B)
+    val ready_s1  = WireInit(false.B)
+    val valid_s1  = WireInit(false.B)
+    val blockA_s1 = WireInit(false.B)
+    val valid_s3  = RegInit(false.B)
+    val set_s3    = RegInit(0.U(setBits.W))
+    val tag_s3    = RegInit(0.U(tagBits.W))
 
     // -----------------------------------------------------------------------------------------
     // Stage 0
@@ -86,11 +88,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arb.io.out       <> chosenTask_s1
 
     val mayReadDS_a_s1 = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get
-    val choseSinkA_s1  = arb.io.chosen === 4.U
-    io.taskSinkA_s1.ready := arb.io.in(4).ready && (mayReadDS_a_s1 && !io.mpStatus.mayReadDS_s2 || !mayReadDS_a_s1)
-    chosenTask_s1.valid   := arb.io.out.valid && (!(choseSinkA_s1 && mayReadDS_a_s1 && io.mpStatus.mayReadDS_s2) || !choseSinkA_s1)
 
-    chosenTask_s1.ready := io.resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1
+    chosenTask_s1.ready := io.resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1 && !blockA_s1
     task_s1 := Mux(
         isTaskMSHR_s1,
         taskMSHR_s1,
@@ -119,10 +118,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2
     // -----------------------------------------------------------------------------------------
-    val task_s2  = RegInit(0.U.asTypeOf(new TaskBundle))
-    val valid_s2 = RegInit(false.B)
-    val fire_s2  = WireInit(false.B)
-    val data_s2  = Reg(UInt((beatBytes * 8).W))
+    val task_s2      = RegInit(0.U.asTypeOf(new TaskBundle))
+    val valid_s2     = RegInit(false.B)
+    val fire_s2      = WireInit(false.B)
+    val mayReadDS_s2 = valid_s2 && ((task_s2.isChannelA && task_s2.opcode === AcquireBlock || task_s2.opcode === Get) || task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */ )
 
     when(fire_s1) {
         valid_s2 := true.B
@@ -134,6 +133,19 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     fire_s2           := io.mpReq_s2.fire
     io.mpReq_s2.valid := valid_s2
     io.mpReq_s2.bits  := task_s2
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 3
+    // -----------------------------------------------------------------------------------------
+    valid_s3 := fire_s2
+    when(fire_s2) {
+        set_s3 := task_s2.set
+        tag_s3 := task_s2.tag
+    }
+
+    val blockA_addrConflict = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3
+    val blockA_mayReadDS    = mayReadDS_a_s1 && mayReadDS_s2
+    blockA_s1 := task_s1.isChannelA && (blockA_addrConflict || blockA_mayReadDS)
 
     dontTouch(io)
 }

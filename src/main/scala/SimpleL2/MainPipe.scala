@@ -18,7 +18,7 @@ import SimpleL2.chi.CHIOpcodeRSP._
 // TODO: Replay
 
 class MpStatus()(implicit p: Parameters) extends L2Bundle {
-    val mayReadDS_s2 = Bool()
+    // val mayReadDS_s2 = Bool() // Used by ReqArb to control the multi cycle read path of DataStorage
 }
 
 class MpMshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
@@ -65,7 +65,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     io <> DontCare
 
-    val ready_s7 = WireInit(false.B)
+    val ready_s7        = WireInit(false.B)
+    val hasValidDataBuf = WireInit(false.B)
 
     // -----------------------------------------------------------------------------------------
     // Stage 2
@@ -102,8 +103,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.retryTasks.stage2.bits.snpresp_s2   := task_s2.opcode === SnpRespData
     io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.opcode === CopyBackWrData // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
 
-    val mayReadDS_s2 = valid_s2 && ((task_s2.isChannelA && task_s2.opcode === AcquireBlock || task_s2.opcode === Get) || task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */ )
-    io.status.mayReadDS_s2 := mayReadDS_s2
+    // val mayReadDS_s2 = valid_s2 && ((task_s2.isChannelA && task_s2.opcode === AcquireBlock || task_s2.opcode === Get) || task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */ )
+    // io.status.mayReadDS_s2 := mayReadDS_s2
 
     // -----------------------------------------------------------------------------------------
     // Stage 3
@@ -477,6 +478,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_wb_s5         = RegNext(valid_wb_s4, false.B)
     val valid_refill_s5     = RegNext(valid_refill_s4, false.B)
     val valid_s5            = valid_refill_s5 || valid_wb_s5 || valid_snpdata_s5 || valid_snpdata_mp_s5
+    // TODO: replay ?
 
     // -----------------------------------------------------------------------------------------
     // Stage 6
@@ -510,6 +512,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         valid_s7 := false.B
     }
 
+    // TODO: extra queue for non-data SourceD
     io.sourceD_s6s7.valid := valid_s6 && isSourceD_s6 || valid_s7 && isSourceD_s7
     io.sourceD_s6s7.bits  := Mux(valid_s7, task_s7, task_s6)
 
@@ -520,6 +523,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s6s7.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s6s7.bits.opcode := Mux(valid_s7, task_s7.opcode, task_s6.opcode)
     io.txdat_s6s7.bits.resp   := Mux(valid_s7, task_s7.resp, task_s6.resp)
+
+    // hasValidDataBuf :=
 
     dontTouch(io)
 }

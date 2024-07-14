@@ -74,7 +74,6 @@ tl_a.acquire_block_1 = function (this, addr, param, source)
     assert(addr ~= nil)
     assert(param ~= nil)
 
-    this.ready:expect(1)
     this.valid:set(1)
     this.bits.opcode:set(TLOpcodeA.AcquireBlock)
     this.bits.address:set(addr, true)
@@ -458,6 +457,8 @@ local test_replay_valid = env.register_test_case "test_replay_valid" {
 
         env.negedge()
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8) -- set = 0x00, tag = 0x04
+        env.posedge()
+            tl_a.ready:expect(1)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -645,6 +646,8 @@ local test_load_to_use_stall_complex = env.register_test_case "test_load_to_use_
             tl_a:acquire_block_1(0x10000, TLParam.NtoT, 8)
         env.negedge(2)
             tl_a:acquire_block_1(0x14000, TLParam.NtoT, 8)
+        env.posedge()
+            tl_a.ready:expect(1)
         env.negedge()
             tl_a.valid:set(0)
         
@@ -781,7 +784,7 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
         tl_d.ready:set(0)
 
         verilua "appendTasks" {
-            check_task = function()
+            check_grantdata = function()
                 local function check_grantdata(data) 
                     env.expect_happen_until(100, function (c)
                         return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.GrantData and tl_d.bits.data:get()[1] == data
@@ -791,13 +794,15 @@ local test_grantdata_mix_grant = env.register_test_case "test_grantdata_mix_gran
                 check_grantdata(0xdead)
                 check_grantdata(0xbeef)
 
-                env.expect_happen_until(100, function (c)
-                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.Grant
-                end)
-
                 check_grantdata(0xdead2)
                 check_grantdata(0xbeef2)
             end,
+
+            check_grant = function ()
+                env.expect_happen_until(100, function (c)
+                    return tl_d:fire() and tl_d.bits.opcode:get() == TLOpcodeD.Grant
+                end)
+            end
         }
 
         env.negedge()
@@ -1373,7 +1378,7 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return ds.io_toTempDS_write_s6_bits_data:get() == 0xdead
+                    return ds.io_toTempDS_write_s5_bits_data:get() == 0xdead
                 end)
             end
         }
@@ -1419,9 +1424,9 @@ local test_acquire_and_release = env.register_test_case "test_acquire_and_releas
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(100, function ()
-                    return ds.io_toTempDS_write_s6_bits_data:get() == 0x100
+                    return ds.io_toTempDS_write_s5_bits_data:get() == 0x100
                 end)
-                ds.io_toTempDS_write_s6_bits_data:dump()
+                ds.io_toTempDS_write_s5_bits_data:dump()
             end
         }
 
@@ -3634,8 +3639,21 @@ local test_replresp_retry = env.register_test_case "test_replresp_retry" {
     end
 }
 
--- TODO: MainPipe block SinkA request due to same address conflict.
--- TODO: Block SinkA reqeust when stage6 & stage7 is full.
+-- TODO: Block SinkA reqeust when stage6 & stage7 is full. (or retry ?)
+local test_sinkA_replay = env.register_test_case "test_sinkA_replay" {
+    function ()
+        
+    end
+}
+
+-- TODO: MainPipe block SinkA request due to same address conflict.(also test in RequestArbiter)
+local test_block_sinkA_for_same_addr = env.register_test_case "test_block_sinkA_for_same_addr" {
+    function ()
+        
+    end
+}
+
+
 -- TODO: Block Snoop request(need data) when stage6 & stage7 is full.
 -- TODO: replacement policy
 -- TODO: Get not preferCache
