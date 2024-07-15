@@ -9,8 +9,6 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
-// TODO: Replay, stall on noSpaceForReplay
-
 class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
 
@@ -89,6 +87,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val mayReadDS_a_s1 = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get
 
+    // TODO: block when no space for Replay
     chosenTask_s1.ready := io.resetFinish && io.dirRead_s1.ready && !isTaskMSHR_s1 && !blockA_s1
     task_s1 := Mux(
         isTaskMSHR_s1,

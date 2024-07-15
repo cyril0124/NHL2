@@ -200,7 +200,6 @@ verilua "mainTask" {
 
         dut.io_sourceD_s2_ready:set(1)
         dut.io_sourceD_s6s7_ready:set(1)
-        dut.io_replay_s4_ready:set(1)
 
         test_basic_acquire("hit")
         test_basic_acquire("miss")

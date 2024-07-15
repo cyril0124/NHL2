@@ -16,7 +16,6 @@ local L2Channel = utils.enum_define {
 local taskMSHR_s0 = ([[
     | ready
     | valid
-    | owner
     | opcode
     | set
     | tag

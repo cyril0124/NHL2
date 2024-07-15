@@ -39,32 +39,35 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val rxsnp = Module(new RXSNP)
 
     /** Other modules */
-    val reqArb      = Module(new RequestArbiter)
-    val dir         = Module(new Directory)
-    val ds          = Module(new DataStorage)
-    val mainPipe    = Module(new MainPipe)
-    val tempDS      = Module(new TempDataStorage)
-    val missHandler = Module(new MissHandler)
+    val reqArb        = Module(new RequestArbiter)
+    val dir           = Module(new Directory)
+    val ds            = Module(new DataStorage)
+    val mainPipe      = Module(new MainPipe)
+    val tempDS        = Module(new TempDataStorage)
+    val missHandler   = Module(new MissHandler)
+    val replayStation = Module(new ReplayStation)
 
     sinkA.io.a <> io.tl.a
     sinkC.io.c <> io.tl.c
     sinkE.io.e <> io.tl.e
 
-    reqArb.io              <> DontCare
-    reqArb.io.taskMSHR_s0  <> missHandler.io.tasks.mpTask
-    reqArb.io.taskSinkA_s1 <> sinkA.io.task
-    reqArb.io.taskSinkC_s1 <> sinkC.io.task
-    reqArb.io.taskSnoop_s1 <> rxsnp.io.task
-    reqArb.io.dirRead_s1   <> dir.io.dirRead_s1
-    reqArb.io.resetFinish  <> dir.io.resetFinish
-    reqArb.io.mpStatus     <> mainPipe.io.status
+    reqArb.io               <> DontCare
+    reqArb.io.taskMSHR_s0   <> missHandler.io.tasks.mpTask
+    reqArb.io.taskReplay_s1 <> replayStation.io.req_s1
+    reqArb.io.taskSinkA_s1  <> sinkA.io.task
+    reqArb.io.taskSinkC_s1  <> sinkC.io.task
+    reqArb.io.taskSnoop_s1  <> rxsnp.io.task
+    reqArb.io.dirRead_s1    <> dir.io.dirRead_s1
+    reqArb.io.resetFinish   <> dir.io.resetFinish
+    reqArb.io.mpStatus      <> mainPipe.io.status
 
-    mainPipe.io                 <> DontCare
-    mainPipe.io.mpReq_s2        <> reqArb.io.mpReq_s2
-    mainPipe.io.dirResp_s3      <> dir.io.dirResp_s3
-    mainPipe.io.replResp_s3     <> dir.io.replResp_s3
-    mainPipe.io.mshrFreeOH_s3   := missHandler.io.mshrFreeOH_s3
-    mainPipe.io.replay_s4.ready := true.B // TODO:
+    mainPipe.io                <> DontCare
+    mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
+    mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
+    mainPipe.io.replResp_s3    <> dir.io.replResp_s3
+    mainPipe.io.mshrFreeOH_s3  := missHandler.io.mshrFreeOH_s3
+    mainPipe.io.replay_s4      <> replayStation.io.replay_s4
+    mainPipe.io.willFull_txrsp := txrsp.io.willFull
 
     val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
@@ -85,7 +88,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     tempDS.io.fromReqArb.dsWrSet_s1   := reqArb.io.dsWrSet_s1
     tempDS.io.fromReqArb.dsWrWayOH_s1 := reqArb.io.dsWrWayOH_s1
 
-    sinkC.io.respDest_s4 := mainPipe.io.allocDestSinkC_s4 // TODO: connect to MissHandler
+    sinkC.io.respDest_s4 := mainPipe.io.allocDestSinkC_s4
 
     missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
     missHandler.io.resps.rxdat  <> rxdat.io.resp
@@ -97,15 +100,15 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.retryTasks   <> mainPipe.io.retryTasks
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
-    txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe
+    txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
     sourceD.io                 <> DontCare
     sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
     sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
-    sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid     // TODO:
-    sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data // TODO:
+    sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid
+    sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data
 
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s4 <> mainPipe.io.txrsp_s4
@@ -114,8 +117,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txdat.io.task_s2         <> mainPipe.io.txdat_s2
     txdat.io.data_s2         <> tempDS.io.toTXDAT.data_s2
     txdat.io.task_s6s7       <> mainPipe.io.txdat_s6s7
-    txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid     // TODO:
-    txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data // TODO:
+    txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid
+    txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data
 
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> missHandler.io.tasks.sourceb

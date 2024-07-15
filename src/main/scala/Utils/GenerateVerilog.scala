@@ -18,7 +18,6 @@ object GenerateVerilog {
             Seq(
                 // FirtoolOption("-O=release"),
                 FirtoolOption("-O=debug"),
-                // FirtoolOption("-preserve-values=all"),
                 FirtoolOption("--disable-all-randomization"),
                 FirtoolOption("--disable-annotation-unknown"),
                 FirtoolOption("--strip-debug-info"),

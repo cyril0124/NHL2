@@ -14,6 +14,7 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
         val mpTask_s4 = Flipped(DecoupledIO(new CHIBundleRSP(chiBundleParams)))
         val mshrTask  = Flipped(DecoupledIO(new CHIBundleRSP(chiBundleParams)))
         val out       = DecoupledIO(new CHIBundleRSP(chiBundleParams))
+        val willFull  = Output(Bool())
     })
 
     val nrEntry = nrMSHR // TODO: parameterize it
@@ -24,7 +25,8 @@ class TXRSP()(implicit p: Parameters) extends L2Module {
     io.mpTask_s4.ready := queue.io.enq.ready
     io.mshrTask.ready  := !io.mpTask_s4.valid && queue.io.enq.ready
 
-    io.out <> queue.io.deq
+    io.out      <> queue.io.deq
+    io.willFull := queue.io.count === (nrEntry - 1).U
 
     LeakChecker(io.out.valid, io.out.fire, Some("TXRSP_valid"), maxCount = deadlockThreshold)
 }

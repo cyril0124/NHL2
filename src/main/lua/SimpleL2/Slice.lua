@@ -3639,7 +3639,46 @@ local test_replresp_retry = env.register_test_case "test_replresp_retry" {
     end
 }
 
--- TODO: Block SinkA reqeust when stage6 & stage7 is full. (or retry ?)
+local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        chi_txrsp.ready:set(0)
+        mp.io_txrsp_s4_ready:set_force(0)
+        mp.io_willFull_txrsp:set_force(1)
+
+        env.negedge()
+        write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, 0x00)
+        
+        env.negedge()
+            chi_rxsnp:snpunique(to_address(0x01, 0x01), 3, 0)
+
+        for i = 1, 10 do
+            env.expect_happen_until(10, function ()
+                return mp.io_replay_s4_valid:is(1)
+            end)
+            env.expect_not_happen_until(10, function ()
+                return mp.io_dirWrite_s3_valid:is(1)
+            end)
+            env.negedge()
+            print(env.cycles() .. " do replay_s4 " .. i)
+        end
+
+        mp.io_txrsp_s4_ready:set_release()
+        mp.io_willFull_txrsp:set_release()
+
+        env.expect_happen_until(10, function ()
+            return chi_txrsp.valid:is(1) and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp)
+        end)
+        chi_txrsp:dump()
+        chi_txrsp.bits.resp:expect(CHIResp.I)
+       
+        env.posedge(100)
+    end
+}
+
+-- TODO: Block SinkA reqeust when stage6 & stage7 is full. (or replay ?)
 local test_sinkA_replay = env.register_test_case "test_sinkA_replay" {
     function ()
         
@@ -3672,8 +3711,10 @@ jit.off()
 verilua "mainTask" { function ()
     sim.dump_wave()
 
-    -- local test_all = false
-    local test_all = true
+    local test_all = false
+    -- local test_all = true
+
+    test_txrsp_mp_replay()
 
     -- 
     -- normal test cases
