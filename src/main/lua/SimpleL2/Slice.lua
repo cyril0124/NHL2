@@ -883,6 +883,7 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         env.dut_reset()
         resetFinish:posedge()
 
+        reqArb.blockA_s1:set_force(0)
         dut.io_tl_d_ready = 1
 
         local sync = ("sync"):ehdl()
@@ -1044,6 +1045,7 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
             tl_a.valid:set(0)
         sync:send()
 
+        reqArb.blockA_s1:set_release()
         env.posedge(100)
     end
 }
@@ -2746,7 +2748,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
     
         do
             -- ret2src == true, probeack
-            env.negedge()
+            env.negedge(10)
             chi_rxsnp:snpshared(to_address(0x06, 0x01), 3, 1) -- ret2src == true(need resp data)
             env.expect_happen_until(10, function ()
                 return tl_b:fire()
@@ -2779,7 +2781,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
 
         do
             -- ret2src == true, probeack_data
-            env.negedge()
+            env.negedge(10)
             chi_rxsnp:snpshared(to_address(0x06, 0x03), 3, 1) -- ret2src == true(need resp data)
             env.expect_happen_until(10, function ()
                 return tl_b:fire()
@@ -2820,7 +2822,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
             -- ret2src == false
             local address = to_address(0x07, 0x00)
 
-            env.negedge()
+            env.negedge(10)
             chi_rxsnp:snpshared(address, 3, 0) -- ret2src == false
             env.expect_happen_until(10, function ()
                 return tl_b:fire()
@@ -3678,10 +3680,52 @@ local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
     end
 }
 
--- TODO: Block SinkA reqeust when stage6 & stage7 is full. (or replay ?)
 local test_sinkA_replay = env.register_test_case "test_sinkA_replay" {
     function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_d.ready:set(1)
+
+        mp.hasValidDataBuf_s6s7:set_force(0)
+
+        env.negedge()
+            write_dir(0x11, utils.uint_to_onehot(0), 0x01, MixedState.TC, 0x00)
         
+        env.negedge()
+            write_ds(0x11, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                {s = 0,   e = 63, v = 0xdead},
+                {s = 256, e = 256 + 63, v = 0xbeef}
+            }, 512))
+        
+        env.negedge()
+            tl_a:acquire_block(to_address(0x11, 0x01), TLParam.NtoT, 4)
+
+        
+        for i = 1, 10 do
+            env.expect_happen_until(10, function ()
+                return mp.io_replay_s4_valid:is(1)
+            end)
+            env.expect_not_happen_until(10, function ()
+                return mp.io_dirWrite_s3_valid:is(1)
+            end)
+            env.negedge()
+            print(env.cycles() .. " do replay_s4 " .. i)
+        end
+
+        mp.hasValidDataBuf_s6s7:set_release()
+
+        env.expect_happen_until(10, function ()
+            return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead
+        end)
+        tl_d:dump()
+
+        env.expect_happen_until(10, function ()
+            return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef
+        end)
+        tl_d:dump()
+
+        env.posedge(100)
     end
 }
 
@@ -3711,11 +3755,9 @@ jit.off()
 verilua "mainTask" { function ()
     sim.dump_wave()
 
-    local test_all = false
-    -- local test_all = true
-
-    test_txrsp_mp_replay()
-
+    -- local test_all = false
+    local test_all = true
+  
     -- 
     -- normal test cases
     -- 
@@ -3762,6 +3804,8 @@ verilua "mainTask" { function ()
     test_stage2_mshr_retry()
     test_stage4_mshr_retry()
     test_replresp_retry()
+    test_txrsp_mp_replay()
+    test_sinkA_replay()
     end
 
    

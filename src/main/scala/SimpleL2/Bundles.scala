@@ -39,6 +39,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val isAliasTask = Bool()
     val isMshrTask  = Bool()
 
+    val isReplayTask = Bool() // TODO: this signal is only for debugging, should be removed in the final version
+
     val readTempDs = Bool()
     val tempDsDest = UInt(DataDestination.width.W)
 

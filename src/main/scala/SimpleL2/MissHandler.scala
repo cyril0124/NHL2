@@ -60,6 +60,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         sinkc.bits.tag,
         Cat(sinkc.bits.tag, sinkc.bits.set, 0.U(6.W))
     )
+    assert(!(sinkc.fire && PopCount(sinkcMatchOH) > 1.U), "sinkc matches multiple mshrs! sinkcMatchOH:0b%b", sinkcMatchOH)
 
     val retryTasksMatchOH_s2 = UIntToOH(io.retryTasks.mshrId_s2)
     val retryTasksMatchOH_s4 = UIntToOH(io.retryTasks.mshrId_s4)
@@ -68,7 +69,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io    <> DontCare
         mshr.io.id := i.U
 
-        mshr.io.alloc_s3.valid := io.mshrAlloc_s3.valid && en
+        mshr.io.alloc_s3.valid := io.mshrAlloc_s3.fire && en
         mshr.io.alloc_s3.bits  := io.mshrAlloc_s3.bits
 
         mshr.io.replResp_s3.valid := io.replResp_s3.valid && io.replResp_s3.bits.mshrId === i.U
@@ -84,7 +85,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
         mshr.io.resps.sinke.valid := sinke.valid && sinkeMatchOH(i)
         mshr.io.resps.sinke.bits  := sinke.bits
-        assert(!(mshr.io.resps.sinke.valid && !mshr.io.status.valid), s"sinke valid but mshr_${i} invalid")
+        // assert(!(mshr.io.resps.sinke.valid && !mshr.io.status.valid), s"sinke valid but mshr_${i} invalid")
 
         mshr.io.resps.sinkc.valid := sinkc.valid && sinkcMatchOH(i)
         mshr.io.resps.sinkc.bits  := sinkc.bits

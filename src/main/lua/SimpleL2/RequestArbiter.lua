@@ -40,6 +40,7 @@ local taskSinkC_s1 = ([[
     | ready
     | valid
     | opcode
+    | channel
     | set
     | tag
 ]]):bundle {hier = cfg.top, prefix = "io_taskSinkC_s1_", is_decoupled = true, name = "taskSinkC_s1"}
@@ -342,11 +343,64 @@ local test_ds_block_sinkA = env.register_test_case "test_ds_block_sinkA" {
     end
 }
 
+local test_noSpaceForReplay_block = env.register_test_case "test_noSpaceForReplay_block" {
+    function ()
+        env.dut_reset()
+        set_ready()
+
+        reqArb.blockA_s1:set_force(0)
+        dut.io_replayFreeCnt:set(3)
+
+        env.negedge()
+            taskSinkA_s1.ready:expect(1)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.channel:set(L2Channel.ChannelA)
+        env.negedge()
+            reqArb.mayReplay_s1:dump()
+            reqArb.mayReplay_s2:dump()
+            reqArb.mayReplay_s3:dump()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(0)
+        env.negedge()
+            reqArb.mayReplay_s1:dump()
+            reqArb.mayReplay_s2:dump()
+            reqArb.mayReplay_s3:dump()
+            reqArb.mayReplayCnt:dump()
+            reqArb.valid_s2:expect(1)
+            reqArb.valid_s3:expect(1)
+            taskSinkA_s1.ready:expect(0)
+        env.negedge()
+            taskSinkA_s1.ready:expect(1)
+            taskSinkA_s1.valid:set(0)
+
+        env.posedge(10)
+
+        env.negedge()
+            reqArb.mayReplayCnt:expect(0)
+            taskSinkA_s1.valid:set(1)
+            taskSinkA_s1.bits.channel:set(L2Channel.ChannelA)
+        env.negedge()
+            taskSinkA_s1.valid:set(0)
+            taskSinkC_s1.valid:set(1) -- sinkC is not count in mayReplayCnt
+            taskSinkC_s1.bits.channel:set(L2Channel.ChannelC)
+            env.posedge()
+                reqArb.mayReplayCnt:expect(1)
+        env.negedge()
+            reqArb.valid_s3:expect(1)
+            reqArb.mayReplayCnt:expect(1)
+
+        env.posedge(10)
+        reqArb.blockA_s1:set_release()
+        reset_ready()
+    end
+}
+
 verilua "mainTask" {
     function ()
         sim.dump_wave()
         env.dut_reset()
         
+        dut.io_replayFreeCnt:set(4)
         dut.io_resetFinish:set(1)
 
         test_basic_mshr_req()
@@ -356,6 +410,8 @@ verilua "mainTask" {
         test_basic_release()
         test_block_sinkA_for_same_addr()
         test_ds_block_sinkA()
+
+        test_noSpaceForReplay_block()
 
         env.TEST_SUCCESS()
     end

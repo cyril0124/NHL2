@@ -1,5 +1,5 @@
 
-module = NHL2
+project = NHL2Project
 package ?= SimpleL2
 target ?= L2Cache
 simulator ?= vcs
@@ -16,20 +16,20 @@ init:
 	git submodule update --init --recursive 
 
 reformat:
-	mill -i NHL2.reformat
+	mill -i $(project).reformat
 
 compile:
-	mill -i $(module).compile
-	mill -i $(module).test.compile
+	mill -i $(project).compile
+	mill -i $(project).test.compile
 
 simple-test-top:
-	mill -i $(module).test.runMain $(module).SimpleTestTop -td build
+	mill -i $(project).test.runMain NHL2.SimpleTestTop -td build
 
 l2cache:
-	mill -i $(module).runMain $(package).L2Cache -td build
+	mill -i $(project).runMain $(package).L2Cache -td build
 
 rtl:
-	mill -i --jobs 16 $(module).runMain $(package).$(target) -td build
+	mill -i --jobs 16 $(project).runMain $(package).$(target) -td build
 
 unit-test:
 	verilua_run -f ./build/$(target).v --prjdir . --top $(target) --lua-main ./src/main/lua/$(package)/$(target).lua --lua-file ./lua_file.f --sim $(simulator) --top-file ./build/$(target).v --shutdown 10000

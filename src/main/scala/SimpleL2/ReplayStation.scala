@@ -128,23 +128,26 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
         val subEntry = Mux1H(deqOH, entry.bits.subEntries)
         // val subEntry = entry.bits.subEntries(entry.bits.deqIdx.value)
-        in.valid            := entry.valid && subEntry.valid
-        in.bits             := DontCare
-        in.bits.set         := entry.bits.set
-        in.bits.tag         := entry.bits.tag
-        in.bits.isCHIOpcode := subEntry.bits.isCHIOpcode
-        in.bits.opcode      := subEntry.bits.opcode
-        in.bits.param       := subEntry.bits.param
-        in.bits.channel     := subEntry.bits.channel
-        in.bits.source      := subEntry.bits.source
-        in.bits.retToSrc    := subEntry.bits.retToSrc
-        in.bits.isAliasTask := subEntry.bits.isAliasTask
+        in.valid             := entry.valid && subEntry.valid
+        in.bits              := DontCare
+        in.bits.set          := entry.bits.set
+        in.bits.tag          := entry.bits.tag
+        in.bits.isCHIOpcode  := subEntry.bits.isCHIOpcode
+        in.bits.opcode       := subEntry.bits.opcode
+        in.bits.param        := subEntry.bits.param
+        in.bits.channel      := subEntry.bits.channel
+        in.bits.source       := subEntry.bits.source
+        in.bits.retToSrc     := subEntry.bits.retToSrc
+        in.bits.isAliasTask  := subEntry.bits.isAliasTask
+        in.bits.isReplayTask := true.B
         in.bits.aliasOpt.foreach(_ := subEntry.bits.aliasOpt.get)
         when(in.fire) {
             entry.bits.deqIdx.inc()
             when(PopCount(entry.bits.subValidVec) === 1.U) {
                 entry.valid := false.B
             }
+
+            assert(!(in.fire && in.bits.channel === TLChannel.ChannelC), "ChannelC should not be replayed")
         }
     }
 

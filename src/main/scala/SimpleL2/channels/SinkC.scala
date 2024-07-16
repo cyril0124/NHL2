@@ -154,11 +154,12 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
      * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
      */
-    io.toTempDS.write.valid     := io.c.fire && last && hasData && !isRelease && respDataToTempDS
+    io.toTempDS.write.valid     := io.c.valid && last && hasData && !isRelease && respDataToTempDS
     io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
-    io.c.ready := Mux(isRelease, Mux(hasData, io.dsWrite_s2.ready && io.task.ready, io.task.ready) || !first, hasData && io.toTempDS.write.ready || !hasData)
+    // TODO: ReleaseData does not need to Replay, so it is necessary to make sure that when Release is fired and the SourceD is prepared to receive the ReleaseAck.
+    io.c.ready := Mux(isRelease, Mux(hasData, io.dsWrite_s2.ready && io.task.ready, io.task.ready) || !first, hasData && Mux(respDataToTempDS, io.toTempDS.write.ready, io.dsWrite_s2.ready) || !hasData)
 
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
     assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid), "SinkC data is not written into TempDataStorage or DataStorage")

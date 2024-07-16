@@ -39,7 +39,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         val dsWrite_s2 = Flipped(DecoupledIO(new DSWrite))
 
         /** Refilled data from [[TempDataStorage]] */
-        val refillWrite_s2 = Flipped(ValidIO(new DSWrite))
+        val willRefillWrite_s1 = Input(Bool())
+        val refillWrite_s2     = Flipped(ValidIO(new DSWrite))
 
         /** Read interface for [[MainPipe]] */
         val fromMainPipe = new Bundle {
@@ -91,10 +92,11 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
-    val wrSet_sinkC_s2   = io.dsWrite_s2.bits.set
-    val wrWayOH_sinkC_s2 = io.dsWrite_s2.bits.wayOH
-    val wrData_sinkC_s2  = io.dsWrite_s2.bits.data
-    val wen_sinkC_s2     = io.dsWrite_s2.valid
+    val willRefillWrite_s2 = RegNext(io.willRefillWrite_s1, false.B)
+    val wrSet_sinkC_s2     = io.dsWrite_s2.bits.set
+    val wrWayOH_sinkC_s2   = io.dsWrite_s2.bits.wayOH
+    val wrData_sinkC_s2    = io.dsWrite_s2.bits.data
+    val wen_sinkC_s2       = io.dsWrite_s2.fire
     // TODO: calculate ECC
 
     assert(!(RegNext(io.dsWrite_s2.valid, false.B) && io.dsWrite_s2.valid), "continuous write!")
@@ -147,7 +149,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.dsWrite_s2.ready := !wen_s3
+    io.dsWrite_s2.ready := !wen_s3 && !willRefillWrite_s2 && !io.willRefillWrite_s1
 
     /**
      * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.

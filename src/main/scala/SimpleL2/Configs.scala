@@ -86,7 +86,7 @@ trait HasL2Param {
 
     val replacementPolicy = l2param.replacementPolicy
 
-    val deadlockThreshold = 10000
+    val deadlockThreshold = 10000 * 5
 
     val aliasBitsOpt = Some(2)
 

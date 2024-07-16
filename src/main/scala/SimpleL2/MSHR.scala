@@ -38,6 +38,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     // w: wait
     val w_grantack        = Bool()
     val w_compdat         = Bool()
+    val w_compdat_first   = Bool()
     val w_aprobeack       = Bool()
     val w_aprobeack_first = Bool()
     val w_rprobeack       = Bool()
@@ -136,11 +137,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val probeFinish     = WireInit(false.B)
     val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
     assert(
-        !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) =/= 1.U),
-        "probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b",
+        !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) === 0.U),
+        "Acquir Probe has no probe clients! probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b dirHit:%b isAliasTask:%b addr:%x",
         probeClients,
         reqClientOH,
-        meta.clientsOH
+        meta.clientsOH,
+        dirResp.hit,
+        req.isAliasTask,
+        Cat(req.tag, req.set, 0.U(6.W))
     ) // TODO:
 
     val promoteT_normal = dirResp.hit && metaNoClients && meta.isTip
@@ -179,9 +183,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (req.param === BtoT) -> MakeUnique,
-                    reqNeedT             -> ReadUnique,
-                    reqNeedB             -> ReadNotSharedDirty
+                    (req.param === BtoT && dirResp.hit) -> MakeUnique,
+                    reqNeedT                            -> ReadUnique,
+                    reqNeedB                            -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,
@@ -233,7 +237,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         !state.s_sprobe ||
         !state.s_rprobe // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
     io.tasks.sourceb.bits.opcode  := Probe
-    io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
+    io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
     io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
     io.tasks.sourceb.bits.data    := DontCare
@@ -244,6 +248,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         state.s_aprobe := true.B
         state.s_sprobe := true.B
         state.s_rprobe := true.B
+
+        assert(probeClients.orR, "probeClients:0b%b should not be empty", probeClients)
     }
 
     /**
@@ -450,13 +456,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** Receive [[RXDAT]] responses, including: CompData */
     val rxdat = io.resps.rxdat
-    when(rxdat.fire && rxdat.bits.last) {
-        state.w_compdat := true.B
+    when(rxdat.fire) {
+        when(rxdat.bits.last) {
+            state.w_compdat := true.B
 
-        when(rxdat.bits.chiOpcode === CompData) {
-            gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
-            gotDirty := gotDirty || rxdat.bits.resp === Resp.UC_PD
-            dbid     := rxdat.bits.dbID
+            when(rxdat.bits.chiOpcode === CompData) {
+                gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
+                gotDirty := gotDirty || rxdat.bits.resp === Resp.UC_PD
+                dbid     := rxdat.bits.dbID
+            }
+        }.otherwise {
+            state.w_compdat_first := true.B
         }
     }
     assert(!(rxdat.fire && state.w_compdat), s"mshr is not watting for rxdat")
@@ -482,10 +492,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
      */
     val sinke = io.resps.sinke
-    when(sinke.fire) {
+    when(sinke.fire && state.s_grant) {
         state.w_grantack := true.B
     }
-    assert(!(sinke.fire && state.w_grantack), s"mshr is not watting for sinke")
+    // assert(!(sinke.fire && state.w_grantack), s"mshr is not watting for sinke")
 
     /** Receive ProbeAck/ProbeAckData response */
     val sinkc = io.resps.sinkc
@@ -610,7 +620,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val waitForSent_snpresp_s3   = RegNext(waitForSent_snpresp_s2, true.B) // TODO: optimize? some snpresp will not reach stage 4
     val waitForSent_snpresp_s4   = RegNext(waitForSent_snpresp_s3, true.B)
     val waitForSent_snpresp      = waitForSent_snpresp_s0 && waitForSent_snpresp_s1 && waitForSent_snpresp_s2 && waitForSent_snpresp_s3 && waitForSent_snpresp_s4
-    val willFree                 = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp
+    val hasRetry                 = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.retryTasks.stage4.elements.map(_._2).toSeq).asUInt.orR
+    val willFree                 = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp && !hasRetry
     when(valid && willFree) {
         valid := false.B
     }

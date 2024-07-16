@@ -1,6 +1,6 @@
 package Utils
 
-import circt.stage.{ChiselStage, FirtoolOption}
+import _root_.circt.stage.{ChiselStage, FirtoolOption}
 import chisel3._
 import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation

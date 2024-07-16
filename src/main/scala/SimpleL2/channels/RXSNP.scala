@@ -16,14 +16,11 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
         val task  = DecoupledIO(new TaskBundle)
     })
 
-    // TODO: Stall
-
-    io.rxsnp.ready := io.task.ready
-
     // Addr in CHI SNP channel has 3 fewer bits than full address
     val snpFullAddr        = Cat(io.rxsnp.bits.addr, 0.U(3.W)) // TODO: move into CHIBridge?
     val (tag, set, offset) = parseAddress(snpFullAddr)
 
+    io.rxsnp.ready           := io.task.ready
     io.task.valid            := io.rxsnp.valid
     io.task.bits             := DontCare
     io.task.bits.set         := set

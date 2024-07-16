@@ -60,6 +60,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.dirRead_s1    <> dir.io.dirRead_s1
     reqArb.io.resetFinish   <> dir.io.resetFinish
     reqArb.io.mpStatus      <> mainPipe.io.status
+    reqArb.io.replayFreeCnt := replayStation.io.freeCnt
+    reqArb.io.mshrStatus    <> missHandler.io.mshrStatus
 
     mainPipe.io                <> DontCare
     mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
@@ -78,6 +80,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     ds.io.fromMainPipe.mshrId_s3      := mainPipe.io.toDS.mshrId_s3
     ds.io.toTXDAT.dsResp_s6s7.ready   := txdat.io.data_s6s7.ready
     ds.io.toSourceD.dsResp_s6s7.ready := sourceD.io.data_s6s7.ready
+    ds.io.willRefillWrite_s1          := reqArb.io.willRefillWrite_s1
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 

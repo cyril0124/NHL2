@@ -111,7 +111,7 @@ object xsutils extends SbtModule with ScalafmtModule with CommonModule {
 // 
 // NHL2
 // 
-object NHL2 extends SbtModule with ScalafmtModule with CommonModule {
+object NHL2Project extends SbtModule with ScalafmtModule with CommonModule {
 	override def millSourcePath = os.pwd
 	override def ivyDeps = super.ivyDeps() ++ Agg(
 		getVersion("chisel"),
