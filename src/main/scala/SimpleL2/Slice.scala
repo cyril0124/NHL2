@@ -51,17 +51,19 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.c <> io.tl.c
     sinkE.io.e <> io.tl.e
 
-    reqArb.io               <> DontCare
-    reqArb.io.taskMSHR_s0   <> missHandler.io.tasks.mpTask
-    reqArb.io.taskReplay_s1 <> replayStation.io.req_s1
-    reqArb.io.taskSinkA_s1  <> sinkA.io.task
-    reqArb.io.taskSinkC_s1  <> sinkC.io.task
-    reqArb.io.taskSnoop_s1  <> rxsnp.io.task
-    reqArb.io.dirRead_s1    <> dir.io.dirRead_s1
-    reqArb.io.resetFinish   <> dir.io.resetFinish
-    reqArb.io.mpStatus      <> mainPipe.io.status
-    reqArb.io.replayFreeCnt := replayStation.io.freeCnt
-    reqArb.io.mshrStatus    <> missHandler.io.mshrStatus
+    reqArb.io                            <> DontCare
+    reqArb.io.taskMSHR_s0                <> missHandler.io.tasks.mpTask
+    reqArb.io.taskReplay_s1              <> replayStation.io.req_s1
+    reqArb.io.taskSinkA_s1               <> sinkA.io.task
+    reqArb.io.taskSinkC_s1               <> sinkC.io.task
+    reqArb.io.taskSnoop_s1               <> rxsnp.io.task
+    reqArb.io.dirRead_s1                 <> dir.io.dirRead_s1
+    reqArb.io.resetFinish                <> dir.io.resetFinish
+    reqArb.io.mpStatus                   <> mainPipe.io.status
+    reqArb.io.replayFreeCnt              := replayStation.io.freeCnt
+    reqArb.io.mshrStatus                 <> missHandler.io.mshrStatus
+    reqArb.io.probeAckDataWillWriteDS_s2 := sinkC.io.probeAckDataWillWriteDS_s2
+    reqArb.io.willReadDS_s3              := mainPipe.io.willReadDS_s3
 
     mainPipe.io                <> DontCare
     mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
@@ -81,6 +83,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     ds.io.toTXDAT.dsResp_s6s7.ready   := txdat.io.data_s6s7.ready
     ds.io.toSourceD.dsResp_s6s7.ready := sourceD.io.data_s6s7.ready
     ds.io.willRefillWrite_s1          := reqArb.io.willRefillWrite_s1
+    ds.io.mayReadDS_s1                := reqArb.io.mayReadDS_s1
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 

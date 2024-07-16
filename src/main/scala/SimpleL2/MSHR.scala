@@ -344,6 +344,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
     mpTask_wbdata.bits.readTempDs  := false.B
     mpTask_wbdata.bits.updateDir   := false.B
+    mpTask_wbdata.bits.resp        := Mux(!meta.isInvalid, Resp.UD_PD, Resp.I)
+    assert(!(mpTask_wbdata.fire && meta.isBranch), "CopyBackWrData is only for Tip Dirty")
 
     def stateToResp(rawState: UInt, dirty: Bool, passDirty: Bool) = {
         val resp = Mux(
@@ -453,6 +455,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         assert(state.s_snpresp, "try to retry an already activated task!")
         assert(valid, "retry on an invalid mshr!")
     }
+    val retryVec_s2 = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt
+    assert(!(PopCount(retryVec_s2) > 1.U), "only allow one retry task at stage2! retryVec_s2:0b%b", retryVec_s2)
 
     /** Receive [[RXDAT]] responses, including: CompData */
     val rxdat = io.resps.rxdat
@@ -495,6 +499,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     when(sinke.fire && state.s_grant) {
         state.w_grantack := true.B
     }
+
+    /** Should not check w_grantack beacuse it is possible that the GrantAck is received even if no mshr is matched due to the request hit on [[MainPipe]]. */
     // assert(!(sinke.fire && state.w_grantack), s"mshr is not watting for sinke")
 
     /** Receive ProbeAck/ProbeAckData response */
@@ -604,24 +610,22 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
      * If there is, then we cannot free the [[MSHR]].
      */
-    val noWait                   = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
-    val noSchedule               = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
-    val waitForSent_grant_s0     = state.s_grant
-    val waitForSent_grant_s1     = RegNext(state.s_grant, true.B)
-    val waitForSent_grant_s2     = RegNext(waitForSent_grant_s1, true.B)
-    val waitForSent_grant        = waitForSent_grant_s0 && waitForSent_grant_s1 && waitForSent_grant_s2
-    val waitForSent_accessack_s0 = state.s_accessack
-    val waitForSent_accessack_s1 = RegNext(state.s_accessack, true.B)
-    val waitForSent_accessack_s2 = RegNext(waitForSent_accessack_s1, true.B)
-    val waitForSent_accessack    = waitForSent_accessack_s0 && waitForSent_accessack_s1 && waitForSent_accessack_s2
-    val waitForSent_snpresp_s0   = state.s_snpresp
-    val waitForSent_snpresp_s1   = RegNext(state.s_snpresp, true.B)
-    val waitForSent_snpresp_s2   = RegNext(waitForSent_snpresp_s1, true.B)
-    val waitForSent_snpresp_s3   = RegNext(waitForSent_snpresp_s2, true.B) // TODO: optimize? some snpresp will not reach stage 4
-    val waitForSent_snpresp_s4   = RegNext(waitForSent_snpresp_s3, true.B)
-    val waitForSent_snpresp      = waitForSent_snpresp_s0 && waitForSent_snpresp_s1 && waitForSent_snpresp_s2 && waitForSent_snpresp_s3 && waitForSent_snpresp_s4
-    val hasRetry                 = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.retryTasks.stage4.elements.map(_._2).toSeq).asUInt.orR
-    val willFree                 = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp && !hasRetry
+    val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
+    val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
+
+    def recursiveRegNext(n: Int, init: Bool): Bool = {
+        if (n == 0) init
+        else RegNext(recursiveRegNext(n - 1, init), true.B)
+    }
+    val maxWaitCnt_base       = 3
+    val maxWaitCnt_extra      = 2 // We need extra cycles to wait for retry beacuse stage1 may be stalled due to DataStorage being busy(multi-cycle path), hence we cannot determine the definite cycle to wait for retry.
+    val maxWaitCnt            = maxWaitCnt_base + maxWaitCnt_extra
+    val waitForSent_grant     = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_grant)).reduce(_ && _)
+    val waitForSent_accessack = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_accessack)).reduce(_ && _)
+    val waitForSent_snpresp   = (0 until maxWaitCnt + 2).map(i => recursiveRegNext(i, state.s_snpresp)).reduce(_ && _)
+    val hasRetry              = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.retryTasks.stage4.elements.map(_._2).toSeq).asUInt.orR
+
+    val willFree = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp && !hasRetry
     when(valid && willFree) {
         valid := false.B
     }
@@ -633,10 +637,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.set       := req.set
     io.status.reqTag    := req.tag
     io.status.metaTag   := dirResp.meta.tag
-    io.status.needsRepl := evictNotSent || wbNotSent                                                          // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
+    io.status.needsRepl := evictNotSent || wbNotSent                                                                                                // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
-    io.status.dirHit    := dirResp.hit                                                                        // Used by Directory to occupy a particular way.
+    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp && state.s_grant && state.s_accessack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.dirHit    := dirResp.hit                                                                                                              // Used by Directory to occupy a particular way.
 
     LeakChecker(io.status.valid, !io.status.valid, Some(s"mshr_valid"), maxCount = deadlockThreshold)
     // TODO: LeakChecker(io.retryTasks.stage2.accessack_s2, io.alloc_s3.fire, Some("mshr_accessack_retry"), maxCount = deadlockThreshold - 100)

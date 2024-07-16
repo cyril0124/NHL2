@@ -35,12 +35,12 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val data = UInt(dataBits.W)
     }))
 
-    val task = Mux(io.task_s2.valid, io.task_s2.bits, io.task_s6s7.bits)
-    io.task_s2.ready   := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready)
-    io.task_s6s7.ready := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && !io.task_s2.valid
+    val task = Mux(io.task_s6s7.valid, io.task_s6s7.bits, io.task_s2.bits)
+    io.task_s2.ready   := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && !io.task_s6s7.valid
+    io.task_s6s7.ready := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready)
 
-    io.data_s2.ready   := skidBuffer.io.enq.ready
-    io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode) && !io.data_s2.valid
+    io.data_s2.ready   := skidBuffer.io.enq.ready && !io.data_s6s7.valid
+    io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode)
 
     nonDataRespQueue.io.enq.valid     := (io.task_s2.valid || io.task_s6s7.valid) && !needData(task.opcode)
     nonDataRespQueue.io.enq.bits.task := task

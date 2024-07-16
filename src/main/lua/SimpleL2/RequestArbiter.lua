@@ -130,10 +130,10 @@ local test_basic_sink_req = env.register_test_case "test_basic_sink_req" {
 
         env.negedge()
             taskSinkA_s1.valid:set(1)
-
+        env.posedge()
+            assert(dirRead_s1:fire())
         env.negedge()
             taskSinkA_s1.valid:set(0)
-            assert(dirRead_s1:fire())
 
         env.posedge(10)
         reset_ready()
@@ -144,6 +144,8 @@ local test_mshr_block_sink_req = env.register_test_case "test_mshr_block_sink_re
     function ()
         env.dut_reset()
         set_ready()
+
+        reqArb.blockA_addrConflict:set_force(0)
 
         env.posedge()
 
@@ -162,7 +164,7 @@ local test_mshr_block_sink_req = env.register_test_case "test_mshr_block_sink_re
         env.negedge()
             assert(taskMSHR_s0.ready:get() == 0)
             assert(taskSinkA_s1.ready:get() == 0)
-            assert(reqArb.isTaskMSHR_s1:get() == 1)
+            assert(reqArb.mshrTaskFull_s1:get() == 1)
             taskMSHR_s0.valid:set(0)
         
         env.posedge()
@@ -176,6 +178,7 @@ local test_mshr_block_sink_req = env.register_test_case "test_mshr_block_sink_re
             taskSinkA_s1.valid:set(0)
 
         env.posedge(10)
+        reqArb.blockA_addrConflict:set_release()
         reset_ready()
     end
 }

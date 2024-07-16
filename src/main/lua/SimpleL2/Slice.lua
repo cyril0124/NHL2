@@ -1869,18 +1869,18 @@ local test_get_hit = env.register_test_case "test_get_hit" {
             env.negedge()
                 tl_a:get(to_address(0x10, 0x20), source)
             env.posedge()
-                chi_txreq.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() end)
                 chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
             env.posedge()
                 chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
             env.posedge()
-                chi_txrsp.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() end)
                 chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function () return tl_d:fire() end); tl_d:dump()
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
             env.negedge()
-                expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                expect.equal(tl_d.bits.data:get()[1], 0xbeef); tl_d:dump()
         end
 
         -- normal hit
@@ -1899,13 +1899,13 @@ local test_get_hit = env.register_test_case "test_get_hit" {
             }
 
             local source = 3 -- core 0 DCache
-            env.negedge()
+            env.negedge(10)
                 tl_a:get(to_address(0x10, 0x20), source)
             env.negedge()
-                tl_d.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function () return tl_d:fire() end); tl_d:dump()
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
             env.negedge()
-                expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+                expect.equal(tl_d.bits.data:get()[1], 0xbeef); tl_d:dump()
         end
 
         env.posedge(100)
@@ -2717,7 +2717,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
         
         do
             -- ret2src == false, probeack_data
-            env.negedge()
+            env.negedge(10)
             chi_rxsnp:snpshared(to_address(0x06, 0x02), 3, 0) -- ret2src == false
             env.expect_happen_until(10, function ()
                 return tl_b:fire()
@@ -3757,7 +3757,7 @@ verilua "mainTask" { function ()
 
     -- local test_all = false
     local test_all = true
-  
+
     -- 
     -- normal test cases
     -- 

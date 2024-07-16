@@ -39,8 +39,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         val dsWrite_s2 = Flipped(DecoupledIO(new DSWrite))
 
         /** Refilled data from [[TempDataStorage]] */
-        val willRefillWrite_s1 = Input(Bool())
-        val refillWrite_s2     = Flipped(ValidIO(new DSWrite))
+        val refillWrite_s2 = Flipped(ValidIO(new DSWrite))
+
+        val willRefillWrite_s1 = Input(Bool()) // from RequestArbiter
+        val mayReadDS_s1       = Input(Bool()) // from RequestArbiter
 
         /** Read interface for [[MainPipe]] */
         val fromMainPipe = new Bundle {
@@ -93,13 +95,14 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
     val willRefillWrite_s2 = RegNext(io.willRefillWrite_s1, false.B)
+    val mayReadDS_s2       = RegNext(io.mayReadDS_s1, false.B)
     val wrSet_sinkC_s2     = io.dsWrite_s2.bits.set
     val wrWayOH_sinkC_s2   = io.dsWrite_s2.bits.wayOH
     val wrData_sinkC_s2    = io.dsWrite_s2.bits.data
     val wen_sinkC_s2       = io.dsWrite_s2.fire
     // TODO: calculate ECC
 
-    assert(!(RegNext(io.dsWrite_s2.valid, false.B) && io.dsWrite_s2.valid), "continuous write!")
+    _assert(!(RegNext(io.dsWrite_s2.fire, false.B) && io.dsWrite_s2.fire), "continuous write!")
 
     // -----------------------------------------------------------------------------------------
     // Stage 3 (mainpipe read)
@@ -126,7 +129,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val wenVec_s3  = Cat(wen_sinkC_s3, wen_refill_s3)
     val wen_s3     = wenVec_s3.orR
 
-    assert(PopCount(wenVec_s3) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
+    _assert(PopCount(wenVec_s3) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     assert(!(wen_s3 && ren_s3 && wayConflict), "read and write at the same time with wayConflict! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     // TODO: allow write different way during conetious cycles
     // TODO: allow read different way during conetious cycles
@@ -144,18 +147,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
             sram.io.r.req.valid       := ren_s3 && rdWayEn
             sram.io.r.req.bits.setIdx := rdSet_s3
 
-            assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
-            assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+            _assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
+            _assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
         }
     }
 
-    io.dsWrite_s2.ready := !wen_s3 && !willRefillWrite_s2 && !io.willRefillWrite_s1
-
-    /**
-     * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
-     * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
-     */
-    assert(!((wen_s3 || ren_s3) && !sramReady), "sram is not ready! wen_s3:%d(wen_sinkC_s3:%d wen_refill_s3:%d), ren_s3:%d", wen_s3, wen_sinkC_s3, wen_refill_s3, ren_s3)
+    io.dsWrite_s2.ready := !wen_s3 && !ren_s3 && !io.willRefillWrite_s1 && !willRefillWrite_s2 && !io.mayReadDS_s1 && !mayReadDS_s2
 
     // -----------------------------------------------------------------------------------------
     // Stage 4 (read accept)
@@ -172,6 +169,21 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val accessWayOH_s4 = Mux(wen_s4, wrWayOH_s4, rdWayOH_s4)
     wayConflict := RegNext(hasAccess_s3) && (accessWayOH_s3 & accessWayOH_s4).orR
     sramReady   := !wayConflict
+
+    /**
+     * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
+     * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
+     */
+    _assert(
+        !((wen_s3 || ren_s3) && !sramReady),
+        "sram is not ready! wen_s3:%d(wen_sinkC_s3:%d wen_refill_s3:%d), ren_s3:%d, ren_s4:%d, wen_s4:%d",
+        wen_s3,
+        wen_sinkC_s3,
+        wen_refill_s3,
+        ren_s3,
+        ren_s4,
+        wen_s4
+    )
 
     // -----------------------------------------------------------------------------------------
     // Stage 5 (read finish && ECC)

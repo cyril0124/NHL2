@@ -13,6 +13,13 @@ import SimpleL2.chi._
 import Utils.GenerateVerilog
 import scala.math.BigInt
 
+object _assert {
+    def apply(cond: Bool, message: String, data: Bits*) = {
+        val regData = data.map(RegNext(_))
+        assert(RegNext(cond), message, regData: _*)
+    }
+}
+
 class CHIBundleDownstream_1(params: CHIBundleParameters, aggregateIO: Boolean = false) extends Bundle {
     val tx_req: CHIChannelIO[CHIBundleREQ] = CHIChannelIO(new CHIBundleREQ(params), aggregateIO)
     val tx_dat: CHIChannelIO[CHIBundleDAT] = CHIChannelIO(new CHIBundleDAT(params), aggregateIO)

@@ -368,18 +368,26 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
     function ()
         env.dut_reset()
 
-        dut.io_dsWrite_s2_ready:set(1)
+        dut.io_dsWrite_s2_ready:set(0)
         dut.io_task_ready:set(0)
         dut.io_toTempDS_write_ready:set(0)
 
         env.posedge()
+            sinkC.first:expect(1)
 
+        env.negedge()
+            tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
+            tl_c.bits.size:set(6)
+            tl_c.valid:set(1)
+        env.posedge()
+            tl_c.ready:expect(1)
         env.negedge()
             tl_c.ready:expect(0)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
             tl_c.bits.size:set(6)
             tl_c.valid:set(1)
         env.negedge()
+            tl_c.valid:set(0)
 
         verilua "appendTasks" {
             check_no_fire = function ()
@@ -401,6 +409,8 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
         }
 
         env.posedge(200)
+
+        env.dut_reset()
 
         verilua "appendTasks" {
             check_fire_1 = function ()
@@ -427,7 +437,7 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
 
         -- probeack cannot be stalled
         env.negedge()
-            tl_c.ready:expect(0)
+            tl_c.ready:expect(1)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAck)
             tl_c.valid:set(1)
         env.negedge()

@@ -62,6 +62,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val status         = Output(new MpStatus)
         val retryTasks     = new MpMshrRetryTasks
         val willFull_txrsp = Input(Bool())
+        val willReadDS_s3  = Output(Bool()) // Used by ReqArb to control the multi cycle read path of DataStorage
     })
 
     io <> DontCare
@@ -99,11 +100,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val sourcedStall_s2 = io.sourceD_s2.valid && !io.sourceD_s2.ready
     val txdatStall_s2   = io.txdat_s2.valid && !io.txdat_s2.ready
     io.retryTasks.mshrId_s2                := task_s2.mshrId
-    io.retryTasks.stage2.valid             := (sourcedStall_s2 || txdatStall_s2) && task_s2.isMshrTask
-    io.retryTasks.stage2.bits.grant_s2     := task_s2.opcode === Grant || task_s2.opcode === GrantData
-    io.retryTasks.stage2.bits.accessack_s2 := task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData
-    io.retryTasks.stage2.bits.snpresp_s2   := task_s2.opcode === SnpRespData
-    io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.opcode === CopyBackWrData // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
+    io.retryTasks.stage2.valid             := (sourcedStall_s2 || txdatStall_s2) && task_s2.isMshrTask && valid_s2
+    io.retryTasks.stage2.bits.grant_s2     := !task_s2.isCHIOpcode && (task_s2.opcode === Grant || task_s2.opcode === GrantData)
+    io.retryTasks.stage2.bits.accessack_s2 := !task_s2.isCHIOpcode && (task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData)
+    io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
+    io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
 
     // -----------------------------------------------------------------------------------------
     // Stage 3
@@ -340,10 +341,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     assert(!(io.replResp_s3.fire && !task_s3.isMshrTask), "replResp_s3 should only be valid when task_s3.isMshrTask")
 
     /** read data from [[DataStorage]] */
-    val readToTempDS_s3   = io.mshrAlloc_s3.fire && (needProbeOnHit_a_s3 || needReadOnHit_a_s3) // Read data into TempDataStorage
+    val readToTempDS_s3   = io.mshrAlloc_s3.fire && (needProbeOnHit_a_s3 || needReadOnHit_a_s3 || needProbe_b_s3) // Read data into TempDataStorage
     val readOnHit_s3      = hit_s3 && (isAcquireBlock_s3 && !acquireReplay_s3 || isGet_s3 && !getReplay_s3) && !mshrAlloc_s3
     val readOnCopyBack_s3 = task_s3.isMshrTask && task_s3.isCHIOpcode && task_s3.opcode === CopyBackWrData && task_s3.channel === CHIChannel.TXDAT
-    val readOnSnpOK_s3    = snpNeedData_s3
+    val readOnSnpOK_s3    = snpNeedData_s3 && !mshrAlloc_s3
     val readOnMpTask_s3   = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT
     io.toDS.dsWrWayOH_s3.valid   := valid_s3 && !task_s3.isMshrTask && task_s3.opcode === ReleaseData
     io.toDS.dsWrWayOH_s3.bits    := dirResp_s3.wayOH // provide WayOH for SinkC(ReleaseData) to write DataStorage
@@ -359,9 +360,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             readOnSnpOK_s3                                                               -> DataDestination.TXDAT
         )
     )
+    io.willReadDS_s3 := io.toDS.dsRead_s3.valid
     assert(
         PopCount(Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)) <= 1.U,
-        "%b",
+        "multiple ds read! %b",
         Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)
     )
 
@@ -414,7 +416,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             )
         )
 
-    val fire_s3 = needAllocDestSinkC_s3 || valid_replay_s3 || valid_refill_s3 || valid_wb_s3 || valid_snpresp_s3 || valid_snpresp_mp_s3 || valid_snpdata_s3 || valid_snpresp_mp_s3
+    val fire_s3 = needAllocDestSinkC_s3 || valid_replay_s3 || valid_refill_s3 || valid_wb_s3 || valid_snpresp_s3 || valid_snpresp_mp_s3 || valid_snpdata_s3 || valid_snpdata_mp_s3 || valid_snpresp_mp_s3
     assert(!(valid_replay_s3 && valid_refill_s3), "Only one of valid_replay_s3 and valid_refill_s3 can be true!")
 
     // -----------------------------------------------------------------------------------------
@@ -431,7 +433,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val respOpcode_s4           = RegEnable(respOpcode_s3, fire_s3)
     val respParam_s4            = RegEnable(respParam_s3, fire_s3)
     val snpResp_s4              = RegEnable(snpResp_s3, fire_s3)
-    val needAllocDestSinkC_s4   = RegNext(needAllocDestSinkC_s3, false.B)
+    val needAllocDestSinkC_s4   = RegNext(needAllocDestSinkC_s3 && !valid_replay_s3, false.B)
     val valid_wb_s4             = RegNext(valid_wb_s3, false.B)
     val valid_snpdata_s4        = RegNext(valid_snpdata_s3, false.B)
     val valid_snpdata_mp_s4     = RegNext(valid_snpdata_mp_s3, false.B)

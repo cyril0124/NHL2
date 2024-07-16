@@ -206,6 +206,14 @@ local function call_with_hook_and_callback(hook_func, callback_func, functions)
     end
 end
 
+local function assert_next(cond, ...)
+    assert(type(cond) == "boolean")
+    if not cond then
+        negedge()
+        assert(false, ...)
+    end
+end
+
 local lester = require "lester"
 local expect = lester.expect
 
@@ -225,4 +233,5 @@ return {
     expect_happen_until     = expect_happen_until,
     expect_not_happen_until = expect_not_happen_until,
     call_with_hook_and_callback = call_with_hook_and_callback,
+    assert_next             = assert_next,
 }
