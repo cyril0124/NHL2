@@ -38,13 +38,17 @@ class SinkC()(implicit p: Parameters) extends L2Module {
             val write = DecoupledIO(new TempDataWrite)
         }
 
-        val probeAckDataWillWriteDS_s2 = Output(Bool())
+        val fromReqArb = new Bundle {
+            val mayReadDS_s2    = Input(Bool()) // from RequestArbiter
+            val willRefillDS_s2 = Input(Bool()) // from RequestArbiter
+        }
+        val toReqArb = new Bundle {
+            val willWriteDS_s1 = Output(Bool()) // to RequestArbiter
+            val willWriteDS_s2 = Output(Bool()) // to RequestArbiter
+        }
     })
 
-    io      <> DontCare
-    io.c    <> DontCare
-    io.task <> DontCare
-
+    val blockDsWrite_s1    = WireInit(false.B)
     val (tag, set, offset) = parseAddress(io.c.bits.address)
     assert(offset === 0.U, "offset is not zero")
 
@@ -113,37 +117,6 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     }
 
     /**
-     * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
-     * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
-     */
-    io.task.valid           := io.c.valid && (isReleaseData && last || isRelease && !hasData)
-    io.task.bits.channel    := L2Channel.ChannelC
-    io.task.bits.opcode     := io.c.bits.opcode
-    io.task.bits.param      := io.c.bits.param
-    io.task.bits.source     := io.c.bits.source
-    io.task.bits.isPrefetch := false.B
-    io.task.bits.set        := set
-    io.task.bits.tag        := tag
-
-    /**
-     * ReleaseData is allowed to write data into [[DataStorage]] directly since L2Cache is inclusive.
-     * ReleaseData is always hit.
-     * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
-     */
-    val dsWrite_s1 = WireInit(0.U.asTypeOf(Valid(new DSWrite)))
-    dsWrite_s1.valid      := io.c.fire && last && (isReleaseData || isProbeAckData && respDataToDS)
-    dsWrite_s1.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
-    dsWrite_s1.bits.set   := set
-    dsWrite_s1.bits.wayOH := respMatchEntry.wayOH // For ReleaseData, wayOH is provided in MainPipe stage 3
-
-    io.dsWrite_s2.valid      := Mux(isProbeAckData, io.c.valid && last && isProbeAckData && respDataToDS, RegNext(dsWrite_s1.valid && isReleaseData, false.B))
-    io.dsWrite_s2.bits.data  := Mux(isProbeAckData, Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire)), RegNext(dsWrite_s1.bits.data, 0.U))
-    io.dsWrite_s2.bits.set   := Mux(isProbeAckData, set, RegNext(dsWrite_s1.bits.set, 0.U))
-    io.dsWrite_s2.bits.wayOH := Mux(isProbeAckData, respMatchEntry.wayOH, RegNext(dsWrite_s1.bits.wayOH, 0.U)) // For ReleaseData, wayOH is provided in MainPipe stage 3
-
-    io.probeAckDataWillWriteDS_s2 := io.dsWrite_s2.valid && RegNext(isProbeAckData, false.B)
-
-    /**
      * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
      * Release/ReleaseData is request, not response.
      */
@@ -168,36 +141,84 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
+    // -----------------------------------------------------------------------------------------
+    // Stage 1
+    // -----------------------------------------------------------------------------------------
+    val fire_s1 = io.c.fire && ((isReleaseData || isProbeAckData) && last || isRelease && !hasData)
+
+    /**
+     * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
+     * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
+     */
+    io.task.valid           := io.c.valid && (isReleaseData && last || isRelease && !hasData)
+    io.task.bits            := DontCare
+    io.task.bits.channel    := L2Channel.ChannelC
+    io.task.bits.opcode     := io.c.bits.opcode
+    io.task.bits.param      := io.c.bits.param
+    io.task.bits.source     := io.c.bits.source
+    io.task.bits.isPrefetch := false.B
+    io.task.bits.set        := set
+    io.task.bits.tag        := tag
+
+    /**
+     * ReleaseData is allowed to write data into [[DataStorage]] directly since L2Cache is inclusive.
+     * ReleaseData is always hit.
+     * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
+     */
+    val dsWrite_s1 = WireInit(0.U.asTypeOf(Valid(new DSWrite)))
+    dsWrite_s1.valid      := io.c.fire && last && (isReleaseData || isProbeAckData && respDataToDS)
+    dsWrite_s1.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
+    dsWrite_s1.bits.set   := set
+    dsWrite_s1.bits.wayOH := respMatchEntry.wayOH // For ReleaseData, wayOH is provided in MainPipe stage 3
+
+    io.toReqArb.willWriteDS_s1 := io.c.valid && last && hasData
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 2
+    // -----------------------------------------------------------------------------------------
+    io.dsWrite_s2.valid      := RegNext(fire_s1, false.B)
+    io.dsWrite_s2.bits.data  := RegEnable(dsWrite_s1.bits.data, 0.U, fire_s1)
+    io.dsWrite_s2.bits.set   := RegEnable(dsWrite_s1.bits.set, 0.U, fire_s1)
+    io.dsWrite_s2.bits.wayOH := RegEnable(dsWrite_s1.bits.wayOH, 0.U, fire_s1) // For ReleaseData, wayOH is provided in MainPipe stage 3
+    assert(!(io.dsWrite_s2.valid && !io.dsWrite_s2.ready), "sinkC dsWrite_s2 should always ready!")
+
+    io.toReqArb.willWriteDS_s2 := RegNext(fire_s1, false.B)
+
     // TODO: ReleaseData does not need to Replay, so it is necessary to make sure that when Release is fired and the SourceD is prepared to receive the ReleaseAck.
     io.c.ready := Mux(
         isRelease,
-        Mux(hasData, io.dsWrite_s2.ready && io.task.ready || first, io.task.ready),                                  // ReleaseData / Release
-        hasData && Mux(respDataToTempDS, io.toTempDS.write.ready || first, io.dsWrite_s2.ready || first) || !hasData // ProbeAckData / ProbeAck
+        Mux(hasData, !blockDsWrite_s1 && io.task.ready || first, io.task.ready),                                                                                    // ReleaseData / Release
+        hasData && ((respDataToTempDS && io.toTempDS.write.ready || !respDataToTempDS) && (respDataToDS && !blockDsWrite_s1 || !respDataToDS) || first) || !hasData // ProbeAckData / ProbeAck
     )
 
+    blockDsWrite_s1 := io.fromReqArb.mayReadDS_s2 || io.fromReqArb.willRefillDS_s2
+
+    // @formatter:off
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
-    assert(
-        !(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid && !dsWrite_s1.valid),
-        "SinkC data is not written into TempDataStorage or DataStorage"
-    )
+    assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid && !dsWrite_s1.valid),"SinkC data is not written into TempDataStorage or DataStorage")
     LeakChecker(io.c.valid, io.c.fire, Some("SinkC_io_c_valid"), maxCount = deadlockThreshold)
 
     when(io.dsWrite_s2.fire || io.toTempDS.write.fire) {
-        when(isProbeAckData) {
+        val _isRelease = Mux(io.toTempDS.write.fire, isRelease, RegNext(isRelease))
+        val _isProbeAckData = Mux(io.toTempDS.write.fire, isProbeAckData, RegNext(isProbeAckData))
+        val _respMatchEntry = Mux(io.toTempDS.write.fire, respMatchEntry, RegNext(respMatchEntry))
+        val _address = Mux(io.toTempDS.write.fire, io.c.bits.address, RegNext(io.c.bits.address))
+        val _opcode = Mux(io.toTempDS.write.fire, io.c.bits.opcode, RegNext(io.c.bits.opcode))
+        val _param = Mux(io.toTempDS.write.fire, io.c.bits.param, RegNext(io.c.bits.param))
+        
+        when(_isProbeAckData) {
             assert(
-                !(!isRelease && !respMatchEntry.valid),
-                "ProbeAckData write data does not match any valid entry! address:0x%x opcode:%d param:%d dsWrite_s2.fire:%d toTempDS.write.fire:%d io.c.fire:%d",
-                io.c.bits.address,
-                io.c.bits.opcode,
-                io.c.bits.param,
+                !(!_isRelease && !_respMatchEntry.valid),
+                "ProbeAckData write data does not match any valid entry! address:0x%x opcode:%d param:%d dsWrite_s2.fire:%d toTempDS.write.fire:%d",
+                _address,
+                _opcode,
+                _param,
                 io.dsWrite_s2.fire,
-                io.toTempDS.write.fire,
-                io.c.fire
+                io.toTempDS.write.fire
             )
         }
     }
-
-    dontTouch(io)
+    // @formatter:on
 }
 
 object SinkC extends App {

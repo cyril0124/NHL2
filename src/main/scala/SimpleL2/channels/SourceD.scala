@@ -55,7 +55,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     assert(!(io.task_s6s7.fire && needData(task.opcode) && !io.data_s6s7.fire), "data should arrive with task!")
     assert(!(io.data_s6s7.fire && needData(task.opcode) && !io.task_s6s7.fire), "task should arrive with data!")
     assert(!(needData(io.task_s2.bits.opcode) && (io.task_s2.valid ^ io.data_s2.valid)), "task_s2 should be valid with data_s2 valid!")
-    assert(!(needData(io.task_s6s7.bits.opcode) && (io.task_s6s7.valid ^ io.data_s6s7.valid)), "task_s6s7 should be valid with task_s6s7 valid!")
+    assert(!(needData(io.task_s6s7.bits.opcode) && (io.task_s6s7.valid ^ io.data_s6s7.valid)), "task_s6s7 should be valid with data_s6s7 valid!")
     assert(!(io.data_s2.valid && !io.task_s2.valid), "unnecessary data_s2! task_s2.opcode:%d", io.task_s2.bits.opcode)
     assert(!(io.data_s6s7.valid && !io.task_s6s7.valid), "unnecessary data_s6s7! task_s6s7.opcode:%d", io.task_s6s7.bits.opcode)
 

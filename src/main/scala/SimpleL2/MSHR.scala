@@ -613,12 +613,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
     val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
 
+    // TODO: Add feedback from mainpipe
     def recursiveRegNext(n: Int, init: Bool): Bool = {
         if (n == 0) init
         else RegNext(recursiveRegNext(n - 1, init), true.B)
     }
     val maxWaitCnt_base       = 3
-    val maxWaitCnt_extra      = 2 // We need extra cycles to wait for retry beacuse stage1 may be stalled due to DataStorage being busy(multi-cycle path), hence we cannot determine the definite cycle to wait for retry.
+    val maxWaitCnt_extra      = 10 // TODO: optimize this // We need extra cycles to wait for retry beacuse stage1 may be stalled due to DataStorage being busy(multi-cycle path), hence we cannot determine the definite cycle to wait for retry.
     val maxWaitCnt            = maxWaitCnt_base + maxWaitCnt_extra
     val waitForSent_grant     = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_grant)).reduce(_ && _)
     val waitForSent_accessack = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_accessack)).reduce(_ && _)

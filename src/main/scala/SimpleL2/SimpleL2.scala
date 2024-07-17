@@ -2,6 +2,7 @@ package SimpleL2
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.{SourceInfo, SourceLine}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -14,9 +15,21 @@ import Utils.GenerateVerilog
 import scala.math.BigInt
 
 object _assert {
-    def apply(cond: Bool, message: String, data: Bits*) = {
+    def apply(cond: Bool, message: String, data: Bits*)(implicit s: SourceInfo) = {
         val regData = data.map(RegNext(_))
-        assert(RegNext(cond), message, regData: _*)
+        val debugInfo = s match {
+            case SourceLine(filename, line, col) => s"($filename:$line:$col)"
+            case _                               => ""
+        }
+        assert(RegNext(cond), message + " at " + debugInfo, regData: _*)
+    }
+
+    def apply(cond: Bool)(implicit s: SourceInfo) = {
+        val debugInfo = s match {
+            case SourceLine(filename, line, col) => s"($filename:$line:$col)"
+            case _                               => ""
+        }
+        assert(RegNext(cond), "at " + debugInfo)
     }
 }
 

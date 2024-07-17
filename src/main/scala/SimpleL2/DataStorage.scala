@@ -41,9 +41,6 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         /** Refilled data from [[TempDataStorage]] */
         val refillWrite_s2 = Flipped(ValidIO(new DSWrite))
 
-        val willRefillWrite_s1 = Input(Bool()) // from RequestArbiter
-        val mayReadDS_s1       = Input(Bool()) // from RequestArbiter
-
         /** Read interface for [[MainPipe]] */
         val fromMainPipe = new Bundle {
             val dsRead_s3    = Flipped(ValidIO(new DSRead))
@@ -94,12 +91,15 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
-    val willRefillWrite_s2 = RegNext(io.willRefillWrite_s1, false.B)
-    val mayReadDS_s2       = RegNext(io.mayReadDS_s1, false.B)
-    val wrSet_sinkC_s2     = io.dsWrite_s2.bits.set
-    val wrWayOH_sinkC_s2   = io.dsWrite_s2.bits.wayOH
-    val wrData_sinkC_s2    = io.dsWrite_s2.bits.data
-    val wen_sinkC_s2       = io.dsWrite_s2.fire
+    val wrSet_sinkC_s2   = io.dsWrite_s2.bits.set
+    val wrWayOH_sinkC_s2 = io.dsWrite_s2.bits.wayOH
+    val wrData_sinkC_s2  = io.dsWrite_s2.bits.data
+    val wen_sinkC_s2     = io.dsWrite_s2.fire
+
+    val wen_refill_s2     = io.refillWrite_s2.valid
+    val wrData_refill_s2  = io.refillWrite_s2.bits.data
+    val wrSet_refill_s2   = io.refillWrite_s2.bits.set
+    val wrWayOH_refill_s2 = io.refillWrite_s2.bits.wayOH
     // TODO: calculate ECC
 
     _assert(!(RegNext(io.dsWrite_s2.fire, false.B) && io.dsWrite_s2.fire), "continuous write!")
@@ -118,10 +118,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
     val wrWayOH_sinkC_s3 = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
 
-    val wen_refill_s3     = io.refillWrite_s2.valid
-    val wrData_refill_s3  = io.refillWrite_s2.bits.data
-    val wrSet_refill_s3   = io.refillWrite_s2.bits.set
-    val wrWayOH_refill_s3 = io.refillWrite_s2.bits.wayOH
+    val wen_refill_s3     = RegNext(wen_refill_s2, false.B)
+    val wrData_refill_s3  = RegEnable(wrData_refill_s2, wen_refill_s2)
+    val wrSet_refill_s3   = RegEnable(wrSet_refill_s2, wen_refill_s2)
+    val wrWayOH_refill_s3 = RegEnable(wrWayOH_refill_s2, wen_refill_s2)
 
     val wrSet_s3   = Mux(wen_refill_s3, wrSet_refill_s3, wrSet_sinkC_s3)
     val wrWayOH_s3 = Mux(wen_refill_s3, wrWayOH_refill_s3, wrWayOH_sinkC_s3)
@@ -152,7 +152,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.dsWrite_s2.ready := !wen_s3 && !ren_s3 && !io.willRefillWrite_s1 && !willRefillWrite_s2 && !io.mayReadDS_s1 && !mayReadDS_s2
+    io.dsWrite_s2.ready := !wen_s3 && !ren_s3
 
     // -----------------------------------------------------------------------------------------
     // Stage 4 (read accept)
@@ -174,15 +174,19 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
      * It is permitted that [[DataStorage]] can be access by different wayOH during the consective cycles.
      * However, it is not permitted that [[DataStorage]] is accessed by the same wayOH during the consective cycle.
      */
+    val wen_sinkC_s4  = RegNext(wen_sinkC_s3, false.B)
+    val wen_refill_s4 = RegNext(wen_refill_s3, false.B)
     _assert(
         !((wen_s3 || ren_s3) && !sramReady),
-        "sram is not ready! wen_s3:%d(wen_sinkC_s3:%d wen_refill_s3:%d), ren_s3:%d, ren_s4:%d, wen_s4:%d",
+        "sram is not ready! wen_s3:%d(wen_sinkC_s3:%d wen_refill_s3:%d), ren_s3:%d, wen_s4:%d(wen_sinkC_s4:%d wen_refill_s4:%d), ren_s4:%d",
         wen_s3,
         wen_sinkC_s3,
         wen_refill_s3,
         ren_s3,
-        ren_s4,
-        wen_s4
+        wen_s4,
+        wen_sinkC_s4,
+        wen_refill_s4,
+        ren_s4
     )
 
     // -----------------------------------------------------------------------------------------
@@ -210,26 +214,24 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 6 (data output)
     // -----------------------------------------------------------------------------------------
-    val ren_s6    = RegInit(false.B)
-    val rdData_s6 = RegEnable(rdData_s5, fire_s5)
-    val rdDest_s6 = RegEnable(rdDest_s5, fire_s5)
-    // val rdMshrIdx_s6     = RegEnable(rdMshrIdx_s5, fire_s5)
-    val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT
-    val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD
-    val fire_s6          = ren_s6 && ready_s7 && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
-    // val fire_s6          = ren_s6 && ready_s7 && rdDest_s6 =/= DataDestination.TempDataStorage && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
+    val ren_s7_dup           = WireInit(false.B)
+    val readToSourceD_s7_dup = WireInit(false.B)
+    val readToTXDAT_s7_dup   = WireInit(false.B)
 
-    when(!fire_s5 && ren_s6 && rdDest_s6 === DataDestination.TempDataStorage) {
-        ren_s6 := false.B
-    }.elsewhen(fire_s5 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
+    val ren_s6           = RegInit(false.B)
+    val rdData_s6        = RegEnable(rdData_s5, fire_s5)
+    val rdDest_s6        = RegEnable(rdDest_s5, fire_s5)
+    val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD
+    val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT
+    val fire_s6          = ren_s6 && ready_s7 && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
+
+    when(fire_s5) {
         ren_s6 := true.B
-    }.elsewhen(!fire_s5 && ready_s7) {
+    }.elsewhen((io.toSourceD.dsResp_s6s7.fire && readToSourceD_s6 && !(ren_s7_dup && readToSourceD_s7_dup) || io.toTXDAT.dsResp_s6s7.fire && readToTXDAT_s6 && !(ren_s7_dup && readToTXDAT_s7_dup)) && !fire_s5 && ren_s6) {
+        ren_s6 := false.B
+    }.elsewhen(fire_s6 && !ren_s5) {
         ren_s6 := false.B
     }
-
-    // io.toTempDS.write_s6.valid     := rdDest_s6 === DataDestination.TempDataStorage && ren_s6
-    // io.toTempDS.write_s6.bits.data := rdData_s6
-    // io.toTempDS.write_s6.bits.idx  := rdMshrIdx_s6
 
     assert(!(fire_s5 && ren_s6), "stage 6 is full!")
     assert(!(ren_s6 && readToSourceD_s6 && readToTXDAT_s6))
@@ -243,13 +245,15 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdDest_s7        = RegEnable(rdDest_s6, fire_s6)
     val readToTXDAT_s7   = rdDest_s7 === DataDestination.TXDAT
     val readToSourceD_s7 = rdDest_s7 === DataDestination.SourceD
-    val fire_s7          = io.toTXDAT.dsResp_s6s7.fire || io.toSourceD.dsResp_s6s7.fire
+    val fire_s7          = io.toTXDAT.dsResp_s6s7.fire && readToTXDAT_s7 || io.toSourceD.dsResp_s6s7.fire && readToSourceD_s7
+    ren_s7_dup           := ren_s7
+    readToSourceD_s7_dup := readToSourceD_s7
+    readToTXDAT_s7_dup   := readToTXDAT_s7
+    ready_s7             := !ren_s7
 
-    ready_s7 := !ren_s7
-
-    when(fire_s6 && (!io.toSourceD.dsResp_s6s7.fire || !io.toTXDAT.dsResp_s6s7.fire)) {
+    when(fire_s6) {
         ren_s7 := true.B
-    }.elsewhen(!fire_s6 && fire_s7 && ren_s7) {
+    }.elsewhen(fire_s7 && ren_s7 && !fire_s6) {
         ren_s7 := false.B
     }
 
@@ -257,7 +261,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     LeakChecker(ren_s7, !ren_s7, Some("ren_s7"), maxCount = 2000)
 
     io.toTXDAT.dsResp_s6s7.valid     := ren_s6 && readToTXDAT_s6 || ren_s7 && readToTXDAT_s7
-    io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToSourceD_s7 && ren_s7, rdData_s7, rdData_s6)
+    io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToTXDAT_s7 && ren_s7, rdData_s7, rdData_s6)
 
     io.toSourceD.dsResp_s6s7.valid     := ren_s6 && readToSourceD_s6 || ren_s7 && readToSourceD_s7
     io.toSourceD.dsResp_s6s7.bits.data := Mux(readToSourceD_s7 && ren_s7, rdData_s7, rdData_s6)

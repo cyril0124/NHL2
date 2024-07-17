@@ -35,12 +35,12 @@ class TXDAT()(implicit p: Parameters) extends L2Module {
         val data  = UInt(dataBits.W)
     }))
 
-    val txdat = Mux(io.task_s2.valid, io.task_s2.bits, io.task_s6s7.bits)
-    io.task_s2.ready   := skidBuffer.io.enq.ready
-    io.task_s6s7.ready := skidBuffer.io.enq.ready && !io.task_s2.valid
+    val txdat = Mux(io.task_s6s7.valid, io.task_s6s7.bits, io.task_s2.bits)
+    io.task_s2.ready   := skidBuffer.io.enq.ready && !io.task_s6s7.valid
+    io.task_s6s7.ready := skidBuffer.io.enq.ready
 
-    io.data_s2.ready   := skidBuffer.io.enq.ready
-    io.data_s6s7.ready := skidBuffer.io.enq.ready && !io.data_s2.valid
+    io.data_s2.ready   := skidBuffer.io.enq.ready && !io.data_s6s7.valid
+    io.data_s6s7.ready := skidBuffer.io.enq.ready
 
     skidBuffer.io.enq.valid      := io.task_s2.valid || io.task_s6s7.valid
     skidBuffer.io.enq.bits.txdat := txdat

@@ -87,6 +87,7 @@ tl_a.acquire_block = function (this, addr, param, source)
     assert(param ~= nil)
 
     env.negedge()
+        this.ready:expect(1)
         this.valid:set(1)
         this.bits.opcode:set(TLOpcodeA.AcquireBlock)
         this.bits.address:set(addr, true)
@@ -720,11 +721,13 @@ local test_grantdata_continuous_stall_3 = env.register_test_case "test_grantdata
                     env.expect_happen_until(100, function (c)
                         return tl_d:fire() and tl_d.bits.data:get()[1] == datas_0[i]
                     end)
+                    tl_d:dump()
                     tl_d.bits.opcode:expect(TLOpcodeD.GrantData)
 
                     env.expect_happen_until(100, function (c)
                         return tl_d:fire() and tl_d.bits.data:get()[1] == datas_1[i]
                     end)
+                    tl_d:dump()
                     tl_d.bits.opcode:expect(TLOpcodeD.GrantData)
                 end
 
@@ -1496,6 +1499,7 @@ local test_probe_toN = env.register_test_case "test_probe_toN" {
             print "core 0 acquire"
             local source = 1 -- core 0 source
             
+            env.negedge(10)
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source) -- core 0 acquire
             
             env.expect_happen_until(20, function ()
@@ -2200,7 +2204,7 @@ local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_ev
             end
         }
         
-        env.negedge(10)
+        env.negedge(20)
         mshrs[0].io_status_valid:expect(0)
 
         env.posedge(200)
@@ -2748,7 +2752,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
     
         do
             -- ret2src == true, probeack
-            env.negedge(10)
+            env.negedge(20)
             chi_rxsnp:snpshared(to_address(0x06, 0x01), 3, 1) -- ret2src == true(need resp data)
             env.expect_happen_until(10, function ()
                 return tl_b:fire()
@@ -2781,7 +2785,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
 
         do
             -- ret2src == true, probeack_data
-            env.negedge(10)
+            env.negedge(20)
             chi_rxsnp:snpshared(to_address(0x06, 0x03), 3, 1) -- ret2src == true(need resp data)
             env.expect_happen_until(10, function ()
                 return tl_b:fire()

@@ -62,7 +62,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val status         = Output(new MpStatus)
         val retryTasks     = new MpMshrRetryTasks
         val willFull_txrsp = Input(Bool())
-        val willReadDS_s3  = Output(Bool()) // Used by ReqArb to control the multi cycle read path of DataStorage
     })
 
     io <> DontCare
@@ -92,7 +91,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s2.valid       := valid_s2 && task_s2.isMshrTask && isTXDAT_s2
     io.txdat_s2.bits        := DontCare
     io.txdat_s2.bits.txnID  := task_s2.txnID
-    io.txdat_s2.bits.dbID   := task_s2.txnID // TODO:
+    io.txdat_s2.bits.dbID   := task_s2.mshrId // TODO:
     io.txdat_s2.bits.resp   := task_s2.resp
     io.txdat_s2.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s2.bits.opcode := task_s2.opcode
@@ -360,7 +359,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             readOnSnpOK_s3                                                               -> DataDestination.TXDAT
         )
     )
-    io.willReadDS_s3 := io.toDS.dsRead_s3.valid
     assert(
         PopCount(Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)) <= 1.U,
         "multiple ds read! %b",
@@ -502,15 +500,19 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 6
     // -----------------------------------------------------------------------------------------
+    val valid_s7_dup     = WireInit(false.B)
+    val isSourceD_s7_dup = WireInit(false.B)
+    val isTXDAT_s7_dup   = WireInit(false.B)
+
     val task_s6      = RegEnable(task_s5, 0.U.asTypeOf(new TaskBundle), valid_s5)
     val valid_s6     = RegInit(false.B)
     val isSourceD_s6 = !task_s6.isCHIOpcode
     val isTXDAT_s6   = task_s6.isCHIOpcode
     val fire_s6      = valid_s6 && ready_s7 && (io.sourceD_s6s7.valid && !io.sourceD_s6s7.ready || io.txdat_s6s7.valid && !io.txdat_s6s7.ready)
 
-    when(valid_s5 && (!io.sourceD_s6s7.fire || !io.txdat_s6s7.fire)) {
+    when(valid_s5) {
         valid_s6 := true.B
-    }.elsewhen((io.sourceD_s6s7.fire || io.txdat_s6s7.fire) && !valid_s5 && ready_s7) {
+    }.elsewhen((io.sourceD_s6s7.fire && isSourceD_s6 && !(valid_s7_dup && isSourceD_s7_dup) || io.txdat_s6s7.fire && isTXDAT_s6 && !(valid_s7_dup && isTXDAT_s7_dup)) && !valid_s5 && valid_s6) {
         valid_s6 := false.B
     }.elsewhen(fire_s6 && !valid_s5) {
         valid_s6 := false.B
@@ -523,25 +525,29 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_s7     = RegInit(false.B)
     val isSourceD_s7 = !task_s7.isCHIOpcode
     val isTXDAT_s7   = task_s7.isCHIOpcode
-    ready_s7 := !valid_s7
+    val fire_s7      = io.sourceD_s6s7.fire && isSourceD_s7 || io.txdat_s6s7.fire && isTXDAT_s7
+    valid_s7_dup     := valid_s7
+    isSourceD_s7_dup := isSourceD_s7
+    isTXDAT_s7_dup   := isTXDAT_s7
+    ready_s7         := !valid_s7
 
-    when(fire_s6 && (!io.sourceD_s6s7.fire || !io.txdat_s6s7.fire)) {
+    when(fire_s6) {
         valid_s7 := true.B
-    }.elsewhen((io.sourceD_s6s7.fire || io.txdat_s6s7.fire) && valid_s7 && !fire_s6) {
+    }.elsewhen(fire_s7 && valid_s7 && !fire_s6) {
         valid_s7 := false.B
     }
 
     // TODO: extra queue for non-data SourceD
     io.sourceD_s6s7.valid := valid_s6 && isSourceD_s6 || valid_s7 && isSourceD_s7
-    io.sourceD_s6s7.bits  := Mux(valid_s7, task_s7, task_s6)
+    io.sourceD_s6s7.bits  := Mux(valid_s7 && isSourceD_s7, task_s7, task_s6)
 
     io.txdat_s6s7.valid       := valid_s6 && isTXDAT_s6 || valid_s7 && isTXDAT_s7
     io.txdat_s6s7.bits        := DontCare
-    io.txdat_s6s7.bits.txnID  := Mux(valid_s7, task_s7.txnID, task_s6.txnID)
-    io.txdat_s6s7.bits.dbID   := Mux(valid_s7, task_s7.txnID, task_s6.txnID) // TODO:
+    io.txdat_s6s7.bits.txnID  := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID)
+    io.txdat_s6s7.bits.dbID   := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID) // TODO:
     io.txdat_s6s7.bits.be     := Fill(beatBytes, 1.U)
-    io.txdat_s6s7.bits.opcode := Mux(valid_s7, task_s7.opcode, task_s6.opcode)
-    io.txdat_s6s7.bits.resp   := Mux(valid_s7, task_s7.resp, task_s6.resp)
+    io.txdat_s6s7.bits.opcode := Mux(valid_s7 && isTXDAT_s7, task_s7.opcode, task_s6.opcode)
+    io.txdat_s6s7.bits.resp   := Mux(valid_s7 && isTXDAT_s7, task_s7.resp, task_s6.resp)
 
     hasValidDataBuf_s6s7 := !(Cat(valid_s6, valid_s7).andR)
 
