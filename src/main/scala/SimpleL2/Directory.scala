@@ -153,6 +153,8 @@ class Directory()(implicit p: Parameters) extends L2Module {
         val resetFinish = Output(Bool()) // reset finish is ASSERTED when all meta entries are reset
     })
 
+    println(s"[${this.getClass().toString()}] DirectoryMetaEntry bits: ${(new DirectoryMetaEntry).getWidth}")
+
     // TODO: ECC
 
     io <> DontCare

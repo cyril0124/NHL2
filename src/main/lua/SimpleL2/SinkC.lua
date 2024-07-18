@@ -372,15 +372,18 @@ local test_stalled_probeack_probeackdata = env.register_test_case "test_stalled_
         dut.io_task_ready:set(0)
         dut.io_toTempDS_write_ready:set(0)
 
+        send_respDest(0, 0, 0, 0, 1, 0)
+
         env.posedge()
             sinkC.first:expect(1)
 
         env.negedge()
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)
+            tl_c.bits.address:set(0, true)
             tl_c.bits.size:set(6)
             tl_c.valid:set(1)
-        env.posedge()
-            tl_c.ready:expect(1)
+            env.posedge()
+                tl_c.ready:expect(1)
         env.negedge()
             tl_c.ready:expect(0)
             tl_c.bits.opcode:set(TLOpcodeC.ProbeAckData)

@@ -88,6 +88,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
     }
 
+    println(s"[${this.getClass().toString()}] DSEntry group bits: ${(new DSEntry(groupBytes)).getWidth}")
+
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------

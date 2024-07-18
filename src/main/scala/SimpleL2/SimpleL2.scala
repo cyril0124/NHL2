@@ -100,11 +100,11 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     val sinkNodes = Seq.fill(nrSlice) { TLManagerNode(Seq(managerParameters)) }
     // val node = TLManagerNode(Seq(managerParameters))
 
-    println(s"addressBits:$addressBits")
-    println(s"tagBits:$tagBits")
-    println(s"setBits:$setBits")
-    println(s"bankBits:$bankBits")
-    println(s"offsetBits:$offsetBits")
+    println(s"[${this.getClass().toString()}] addressBits:$addressBits")
+    println(s"[${this.getClass().toString()}] tagBits:$tagBits")
+    println(s"[${this.getClass().toString()}] setBits:$setBits")
+    println(s"[${this.getClass().toString()}] bankBits:$bankBits")
+    println(s"[${this.getClass().toString()}] offsetBits:$offsetBits")
 
     // finalTxnID => | bankID | txnID |
     def setTxnID(txnID: UInt, sliceID: UInt): UInt = {

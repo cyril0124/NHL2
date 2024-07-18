@@ -8,7 +8,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import xs.utils.{ParallelPriorityMux}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.chi._
 import SimpleL2.chi.CHIOpcodeREQ._
 import SimpleL2.chi.CHIOpcodeRSP._
@@ -17,7 +17,6 @@ import SimpleL2.chi.CHIOpcodeSNP._
 import SimpleL2.TLState._
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
-import Utils.LeakChecker
 
 class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     // s: send
@@ -280,8 +279,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
     mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck) &&
-        state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && RegNext(RegNext(state.s_cbwrdata, true.B), true.B) /* delay two cycle to meet the DataStorage timing */ /* && state.s_evict && state.w_comp */ && // wait for all Evict/WriteBackFull(replacement operations) finish
-        (state.s_read && state.w_compdat && state.s_compack) &&                                                                                                                                                                      // wait read finish
+        state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && // wait for all Evict/WriteBackFull(replacement operations) finish
+        (state.s_read && state.w_compdat && state.s_compack) &&                    // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
         (state.s_aprobe && state.w_aprobeack) // need to wait for aProbe to finish (cause by Acquire)
     mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
@@ -631,20 +630,30 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         valid := false.B
     }
 
-    // TODO: deadlock check
     val evictNotSent = !state.s_evict
     val wbNotSent    = !state.s_wb
     io.status.valid     := valid
     io.status.set       := req.set
     io.status.reqTag    := req.tag
     io.status.metaTag   := dirResp.meta.tag
-    io.status.needsRepl := evictNotSent || wbNotSent                                                                                                // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
+    io.status.needsRepl := evictNotSent || wbNotSent                                                                                    // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && !(state.s_evict && state.w_comp && state.s_grant && state.s_accessack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
-    io.status.dirHit    := dirResp.hit                                                                                                              // Used by Directory to occupy a particular way.
+    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.s_accessack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.dirHit    := dirResp.hit                                                                                                  // Used by Directory to occupy a particular way.
 
-    LeakChecker(io.status.valid, !io.status.valid, Some(s"mshr_valid"), maxCount = deadlockThreshold)
-    // TODO: LeakChecker(io.retryTasks.stage2.accessack_s2, io.alloc_s3.fire, Some("mshr_accessack_retry"), maxCount = deadlockThreshold - 100)
+    LeakChecker.withCallback(io.status.valid, !io.status.valid, Some(s"mshr_valid"), maxCount = deadlockThreshold) {
+        this.state.elements.foreach { case (name, data) =>
+            printf(cf"state.$name: $data\n")
+        }
+        this.io.status.elements.foreach { case (name, data) =>
+            printf(cf"io.status.$name: $data%x\n")
+        }
+        printf(cf"addr_reqTag:${Cat(io.status.reqTag, io.status.set, 0.U(6.W))}%x\n")
+        printf(cf"addr_metaTag:${Cat(io.status.metaTag, io.status.set, 0.U(6.W))}%x\n")
+        printf(cf"channel:${req.channel}\n")
+        printf(cf"isCHIOpcode:${req.isCHIOpcode}\n")
+        printf(cf"opcode:${req.opcode}\n")
+    }
 }
 
 object MSHR extends App {

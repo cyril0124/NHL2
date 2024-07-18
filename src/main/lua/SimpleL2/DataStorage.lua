@@ -139,7 +139,7 @@ local test_refill_write = env.register_test_case "test_refill_write" {
             refillWrite_s2.bits.set:set(0x02)
         env.negedge()
             refillWrite_s2.valid:set(0)
-        env.negedge()
+        env.negedge(10)
             dsRead_s3.valid:set(1) -- read back
             dsRead_s3.bits.set:set(0x02)
             dsRead_s3.bits.wayOH:set(("0b0010"):number())

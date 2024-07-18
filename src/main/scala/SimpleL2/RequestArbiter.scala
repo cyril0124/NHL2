@@ -211,10 +211,17 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         tag_s3        := task_s2.tag
     }
 
+    // def addrMatchVec(set: UInt, tag: UInt): UInt = {
+    //     VecInit(io.mshrStatus.map { case s =>
+    //         val matchTag = Mux(s.needsRepl, s.metaTag, s.reqTag)
+    //         s.valid && s.set === set && matchTag === tag
+    //     }).asUInt
+    // }
+
     def addrMatchVec(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { case s =>
-            val matchTag = Mux(s.needsRepl, s.metaTag, s.reqTag)
-            s.valid && s.set === set && matchTag === tag
+            // s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag)
+            s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
         }).asUInt
     }
 
