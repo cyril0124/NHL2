@@ -43,6 +43,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val dirWrite_s3   = ValidIO(new DirWrite)
         val mshrAlloc_s3  = DecoupledIO(new MshrAllocBundle)
         val mshrFreeOH_s3 = Input(UInt(nrMSHR.W))
+        val mshrNested    = Output(new MshrNestedWriteback)
         val toDS = new Bundle {
             val dsRead_s3    = ValidIO(new DSRead)
             val mshrId_s3    = Output(UInt(mshrBits.W))
@@ -127,9 +128,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isAcquire_s3      = isAcquireBlock_s3 || isAcquirePerm_s3
     val isPrefetch_s3     = task_s3.opcode === Hint && task_s3.isChannelA                                                                   // TODO: Prefetch
     val cacheAlias_s3     = isAcquire_s3 && hit_s3 && isReqClient_s3 && meta_s3.aliasOpt.getOrElse(0.U) =/= task_s3.aliasOpt.getOrElse(0.U) // TODO: Cache Alias
-    val isSnpToN_s3       = CHIOpcodeSNP.isSnpToN(task_s3.opcode)
-    val isSnpOnceX_s3     = CHIOpcodeSNP.isSnpOnceX(task_s3.opcode)
-    val isSnoop_s3        = task_s3.opcode === SnpShared || task_s3.opcode === SnpUnique || isSnpToN_s3 || isSnpOnceX_s3                    // TODO: Other opcode
+    val isSnpToN_s3       = CHIOpcodeSNP.isSnpToN(task_s3.opcode) && task_s3.isChannelB
+    val isSnpToB_s3       = CHIOpcodeSNP.isSnpToB(task_s3.opcode) && task_s3.isChannelB
+    val isSnpOnceX_s3     = CHIOpcodeSNP.isSnpOnceX(task_s3.opcode) && task_s3.isChannelB
+    val isSnoop_s3        = isSnpToB_s3 || isSnpToN_s3 || isSnpOnceX_s3                                                                     // TODO: Other opcode
     val isFwdSnoop_s3     = CHIOpcodeSNP.isSnpXFwd(task_s3.opcode)
     val isRelease_s3      = (task_s3.opcode === Release || task_s3.opcode === ReleaseData) && task_s3.isChannelC
 
@@ -161,7 +163,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val needProbe_b_s3        = task_s3.isChannelB && hit_s3 && (needProbe_snpOnceX_s3 || needProbe_snpToB_s3 || needProbe_snpToN_s3)
 
     val mshrAlloc_a_s3 = needReadDownward_a_s3 || needProbe_a_s3 || cacheAlias_s3
-    val mshrAlloc_b_s3 = needProbe_b_s3
+    val mshrAlloc_b_s3 = needProbe_b_s3 && !task_s3.snpHitWriteBack
     val mshrAlloc_c_s3 = false.B // for inclusive cache, Release/ReleaseData always hit
     val mshrAlloc_s3   = (mshrAlloc_a_s3 || mshrAlloc_b_s3 || mshrAlloc_c_s3) && !task_s3.isMshrTask && valid_s3
 
@@ -232,6 +234,14 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrAlloc_s3.bits.req             := task_s3
     io.mshrAlloc_s3.bits.req.isAliasTask := cacheAlias_s3
 
+    io.mshrNested     <> DontCare
+    io.mshrNested.set := task_s3.set
+    io.mshrNested.tag := task_s3.tag
+    // // io.mshrNested.snoop.cleanDirty :=
+    io.mshrNested.snoop.toN := isSnpToN_s3 && valid_s3
+    io.mshrNested.snoop.toB := isSnpToB_s3 && valid_s3
+    // io.mshrNested.release   := DontCare
+
     /** coherency check */
     when(valid_s3) {
         val addr = Cat(task_s3.tag, task_s3.set, 0.U(6.W))
@@ -241,7 +251,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
         // assert(!(task_s3.isChannelA && task_s3.param === BtoT && isAcquire_s3 && !hit_s3), "Acquire.BtoT should always hit! addr:%x", addr)
         assert(!(task_s3.isChannelA && isAcquire_s3 && task_s3.param === BtoT && hit_s3 && !isReqClient_s3), "Acquire.BtoT should have clientsOH! addr:%x", addr)
-        assert(!(task_s3.isChannelA && isAcquire_s3 && task_s3.param === NtoB && dirResp_s3.hit && meta_s3.isTrunk), "Acquire.NtoB should never get trunk state! addr:%x", addr)
+        assert(
+            !(task_s3.isChannelA && isAcquire_s3 && task_s3.param === NtoB && dirResp_s3.hit && isReqClient_s3 && meta_s3.isTrunk),
+            "Acquire.NtoB should never get trunk state! addr:%x",
+            addr
+        )
 
         assert(!(task_s3.isChannelC && isRelease_s3 && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
         assert(!(isRelease_s3 && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB
@@ -263,7 +277,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
      *     => Get is a TL-UL message which will not modify the coherent state
      *     => Prefetch only change the L2 state and not response upwards to L1
      */
-    val snpNotUpdateDir_s3 = dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && task_s3.opcode === SnpShared || !dirResp_s3.hit
+    val snpNotUpdateDir_s3 = dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && task_s3.opcode === SnpShared || !dirResp_s3.hit || task_s3.snpHitWriteBack
     val dirWen_mshr_s3     = task_s3.isMshrTask && task_s3.updateDir
     val dirWen_a_s3        = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3 && !acquireReplay_s3
     val dirWen_b_s3        = task_s3.isChannelB && !mshrAlloc_s3 && isSnoop_s3 && !snpNotUpdateDir_s3 && !snpReplay_s3 // TODO: Snoop

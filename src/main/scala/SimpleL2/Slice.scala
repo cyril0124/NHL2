@@ -104,6 +104,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.mshrStatus   <> dir.io.mshrStatus
     missHandler.io.replResp_s3  <> dir.io.replResp_s3
     missHandler.io.retryTasks   <> mainPipe.io.retryTasks
+    missHandler.io.mshrNested   <> mainPipe.io.mshrNested
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?

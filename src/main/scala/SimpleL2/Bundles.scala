@@ -9,19 +9,6 @@ import SimpleL2._
 import SimpleL2.Configs._
 import SimpleL2.chi.Resp
 
-class MainPipeRequest(implicit p: Parameters) extends L2Bundle {
-    val owner   = UInt(RequestOwner.width.W)
-    val opcode  = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
-    val channel = UInt(TLChannel.width.W)
-    val source  = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W
-    val address = UInt(addressBits.W)
-    val dataId  = UInt(log2Ceil(nrTempDataEntry).W)
-
-    def txnID = source     // alias to source
-    def chiOpcode = opcode // alias to opcode
-    def isSnoop = channel === TLChannel.ChannelB
-}
-
 class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val isCHIOpcode = Bool()
     val opcode      = UInt(5.W)                                       // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
@@ -46,6 +33,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
     val updateDir    = Bool()
     val newMetaEntry = new DirectoryMetaEntryNoTag
+
+    val snpHitWriteBack = Bool() // for Snoop nested MSHR
 
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true

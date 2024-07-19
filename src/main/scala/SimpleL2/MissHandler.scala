@@ -26,6 +26,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val tasks         = new MshrTasks
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MpMshrRetryTasks)
+        val mshrNested    = Input(new MshrNestedWriteback)
     })
 
     io <> DontCare
@@ -92,13 +93,19 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         assert(!(mshr.io.resps.sinkc.valid && !mshr.io.status.valid), s"sinkc valid but mshr_${i} invalid")
 
         val retry_s2 = io.retryTasks.stage2
-        mshr.io.retryTasks.stage2.accessack_s2 := retry_s2.fire && retry_s2.bits.accessack_s2 && retryTasksMatchOH_s2(i)
-        mshr.io.retryTasks.stage2.cbwrdata_s2  := retry_s2.fire && retry_s2.bits.cbwrdata_s2 && retryTasksMatchOH_s2(i)
-        mshr.io.retryTasks.stage2.snpresp_s2   := retry_s2.fire && retry_s2.bits.snpresp_s2 && retryTasksMatchOH_s2(i)
-        mshr.io.retryTasks.stage2.grant_s2     := retry_s2.fire && retry_s2.bits.grant_s2 && retryTasksMatchOH_s2(i)
-
         val retry_s4 = io.retryTasks.stage4
-        mshr.io.retryTasks.stage4.snpresp_s4 := retry_s4.fire && retry_s4.bits.snpresp_s4 && retryTasksMatchOH_s4(i)
+        mshr.io.retryTasks.stage2.valid             := retry_s2.fire && retryTasksMatchOH_s2(i)
+        mshr.io.retryTasks.stage2.bits.accessack_s2 := retry_s2.bits.accessack_s2
+        mshr.io.retryTasks.stage2.bits.cbwrdata_s2  := retry_s2.bits.cbwrdata_s2
+        mshr.io.retryTasks.stage2.bits.snpresp_s2   := retry_s2.bits.snpresp_s2
+        mshr.io.retryTasks.stage2.bits.grant_s2     := retry_s2.bits.grant_s2
+        mshr.io.retryTasks.stage4.valid             := retry_s4.fire && retryTasksMatchOH_s4(i)
+        mshr.io.retryTasks.stage4.bits.snpresp_s4   := retry_s4.bits.snpresp_s4
+
+        mshr.io.nested.set     := io.mshrNested.set
+        mshr.io.nested.tag     := io.mshrNested.tag
+        mshr.io.nested.snoop   := io.mshrNested.snoop
+        mshr.io.nested.release := io.mshrNested.release
 
         io.mshrStatus(i) := mshr.io.status
     }

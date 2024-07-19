@@ -36,6 +36,14 @@ object MixedState {
         mixedState := Cat(state, dirty)
         mixedState
     }
+
+    def cleanDirty(mixedState: UInt) = {
+        Cat(mixedState(2, 1), 0.U(1.W))
+    }
+
+    def setDirty(mixedState: UInt) = {
+        Cat(mixedState(2, 1), 1.U(1.W))
+    }
 }
 
 class MixedState {
@@ -58,6 +66,42 @@ trait HasMixedState {
     def isTip = state(2, 1) === TLState.TIP
     def isInvalid = state(2, 1) === TLState.INVALID
     def rawState = state(2, 1)
+}
+
+trait HadMixedStateOps {
+    implicit class MixedStateOps(val state: UInt) {
+        def widthCheck(x: UInt) = require(x.getWidth == MixedState.width)
+
+        def isDirty = {
+            widthCheck(state)
+            state(0)
+        }
+
+        def isBranch = {
+            widthCheck(state)
+            state(2, 1) === TLState.BRANCH
+        }
+
+        def isTrunk = {
+            widthCheck(state)
+            state(2, 1) === TLState.TRUNK
+        }
+
+        def isTip = {
+            widthCheck(state)
+            state(2, 1) === TLState.TIP
+        }
+
+        def isInvalid = {
+            widthCheck(state)
+            state(2, 1) === TLState.INVALID
+        }
+
+        def rawState = {
+            widthCheck(state)
+            state(2, 1)
+        }
+    }
 }
 
 class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {

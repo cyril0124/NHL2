@@ -44,7 +44,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val w_rprobeack_first = Bool()
     val w_sprobeack       = Bool()
     val w_sprobeack_first = Bool()
-    val w_dbidresp        = Bool()
+    val w_compdbid        = Bool()
     val w_comp            = Bool()
     val w_replResp        = Bool()
 }
@@ -56,6 +56,7 @@ class MshrInfo()(implicit p: Parameters) extends L2Bundle {
 
 class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val valid     = Bool()
+    val willFree  = Bool()
     val set       = UInt(setBits.W)
     val reqTag    = UInt(tagBits.W)
     val metaTag   = UInt(tagBits.W)
@@ -63,6 +64,12 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val wayOH     = UInt(ways.W)
     val dirHit    = Bool()
     val lockWay   = Bool()
+    val state     = UInt(MixedState.width.W)
+
+    val w_replResp  = Bool()
+    val w_rprobeack = Bool()
+    val w_comp      = Bool()
+    val w_compdbid  = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -91,8 +98,27 @@ class MshrRetryStage4()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
-    val stage2 = new MshrRetryStage2
-    val stage4 = new MshrRetryStage4
+    val stage2 = ValidIO(new MshrRetryStage2)
+    val stage4 = ValidIO(new MshrRetryStage4)
+}
+
+class MshrNestedSnoop()(implicit p: Parameters) extends L2Bundle {
+    val toN        = Bool()
+    val toB        = Bool()
+    val cleanDirty = Bool()
+}
+
+class MshrNestedRelease()(implicit p: Parameters) extends L2Bundle {
+    val TtoN = Bool()
+    val BtoN = Bool()
+    // val setDirty = Bool()
+}
+
+class MshrNestedWriteback()(implicit p: Parameters) extends L2Bundle {
+    val set     = UInt(setBits.W)
+    val tag     = UInt(tagBits.W)
+    val snoop   = new MshrNestedSnoop
+    val release = new MshrNestedRelease
 }
 
 class MSHR()(implicit p: Parameters) extends L2Module {
@@ -102,7 +128,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val status      = Output(new MshrStatus)
         val tasks       = new MshrTasks
         val resps       = new MshrResps
-        val retryTasks  = Input(new MshrRetryTasks)
+        val retryTasks  = Flipped(new MshrRetryTasks)
+        val nested      = Input(new MshrNestedWriteback)
         val id          = Input(UInt(mshrBits.W))
     })
 
@@ -129,6 +156,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val dbid            = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
     val gotDirty        = RegInit(false.B)
     val gotT            = RegInit(false.B)
+    val replGotDirty    = RegInit(false.B)                                                                             // gotDirty for replacement cache line
     val needProbe       = RegInit(false.B)
     val needPromote     = RegInit(false.B)
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
@@ -165,6 +193,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         dbid            := 0.U
         gotT            := false.B
         gotDirty        := false.B
+        replGotDirty    := false.B
         probeAckClients := 0.U
         probeAckParams.foreach(_ := 0.U)
     }
@@ -336,15 +365,28 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     )
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
-    mpTask_wbdata.valid            := !state.s_cbwrdata && state.w_dbidresp
+    mpTask_wbdata.valid            := !state.s_cbwrdata && state.w_compdbid
     mpTask_wbdata.bits.txnID       := dbid
     mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.opcode      := CopyBackWrData
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
     mpTask_wbdata.bits.readTempDs  := false.B
     mpTask_wbdata.bits.updateDir   := false.B
-    mpTask_wbdata.bits.resp        := Mux(!meta.isInvalid, Resp.UD_PD, Resp.I)
-    assert(!(mpTask_wbdata.fire && meta.isBranch), "CopyBackWrData is only for Tip Dirty")
+    mpTask_wbdata.bits.resp := Resp.setPassDirty(
+        MuxLookup(meta.state, Resp.I)(
+            Seq(
+                MixedState.BC  -> Resp.SC,
+                MixedState.BD  -> Resp.SD_PD,
+                MixedState.TC  -> Resp.UC,
+                MixedState.TTC -> Resp.UC,
+                MixedState.TD  -> Resp.UD_PD,
+                MixedState.TTD -> Resp.UD_PD
+            )
+        ),
+        replGotDirty || meta.state.isDirty
+    )
+    // CopyBackWrData can be in other state excpept Tip Dirty due to snoop nested.
+    // assert(!(mpTask_wbdata.fire && meta.isBranch), "CopyBackWrData is only for Tip Dirty")
 
     def stateToResp(rawState: UInt, dirty: Bool, passDirty: Bool) = {
         val resp = Mux(
@@ -429,32 +471,36 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     }
 
     /** mpTask needs to be retried due to insufficent resources  */
-    when(io.retryTasks.stage2.accessack_s2) {
-        state.s_accessack := false.B
-        assert(state.s_accessack, "try to retry an already activated task!")
-        assert(valid, "retry on an invalid mshr!")
+    when(io.retryTasks.stage2.fire) {
+        when(io.retryTasks.stage2.bits.accessack_s2) {
+            state.s_accessack := false.B
+            assert(state.s_accessack, "try to retry an already activated task!")
+            assert(valid, "retry on an invalid mshr!")
+        }
+        when(io.retryTasks.stage2.bits.grant_s2) {
+            state.s_grant := false.B
+            assert(state.s_grant, "try to retry an already activated task!")
+            assert(valid, "retry on an invalid mshr!")
+        }
+        when(io.retryTasks.stage2.bits.cbwrdata_s2) {
+            state.s_cbwrdata := false.B
+            assert(state.s_cbwrdata, "try to retry an already activated task!")
+            assert(valid, "retry on an invalid mshr!")
+        }
+        when(io.retryTasks.stage2.bits.snpresp_s2) {
+            state.s_snpresp := false.B
+            assert(state.s_snpresp, "try to retry an already activated task!")
+            assert(valid, "retry on an invalid mshr!")
+        }
     }
-    when(io.retryTasks.stage2.grant_s2) {
-        state.s_grant := false.B
-        assert(state.s_grant, "try to retry an already activated task!")
-        assert(valid, "retry on an invalid mshr!")
+    when(io.retryTasks.stage4.fire) {
+        when(io.retryTasks.stage4.bits.snpresp_s4) {
+            state.s_snpresp := false.B
+            assert(state.s_snpresp, "try to retry an already activated task!")
+            assert(valid, "retry on an invalid mshr!")
+        }
     }
-    when(io.retryTasks.stage2.cbwrdata_s2) {
-        state.s_cbwrdata := false.B
-        assert(state.s_cbwrdata, "try to retry an already activated task!")
-        assert(valid, "retry on an invalid mshr!")
-    }
-    when(io.retryTasks.stage2.snpresp_s2) {
-        state.s_snpresp := false.B
-        assert(state.s_snpresp, "try to retry an already activated task!")
-        assert(valid, "retry on an invalid mshr!")
-    }
-    when(io.retryTasks.stage4.snpresp_s4) {
-        state.s_snpresp := false.B
-        assert(state.s_snpresp, "try to retry an already activated task!")
-        assert(valid, "retry on an invalid mshr!")
-    }
-    val retryVec_s2 = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt
+    val retryVec_s2 = VecInit(io.retryTasks.stage2.bits.elements.map(_._2).toSeq).asUInt & io.retryTasks.stage2.fire
     assert(!(PopCount(retryVec_s2) > 1.U), "only allow one retry task at stage2! retryVec_s2:0b%b", retryVec_s2)
 
     /** Receive [[RXDAT]] responses, including: CompData */
@@ -483,10 +529,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         when(opcode === Comp) {
             state.w_comp := true.B
         }.elsewhen(opcode === CompDBIDResp) {
-            state.w_dbidresp := true.B
+            state.w_compdbid := true.B
         }
     }
-    assert(!(rxrsp.fire && state.w_comp && state.w_dbidresp), s"mshr is not watting for rxrsp")
+    assert(!(rxrsp.fire && state.w_comp && state.w_compdbid), s"mshr is not watting for rxrsp")
 
     /**
      * A [[MSHR]] will wait GrantAck for Acquire requests.
@@ -530,7 +576,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_sprobeack_first := true.B
             state.w_sprobeack       := state.w_sprobeack | probeFinish | (nextProbeAckClients === probeClients)
         }.elsewhen(sinkc.bits.opcode === ProbeAckData) {
-            gotDirty := Mux(!state.w_rprobeack, gotDirty, true.B) // rprobeack is NOT the same cacheline as the request cacheline
+            when(!state.w_rprobeack) {
+                replGotDirty := true.B
+            }.otherwise {
+                gotDirty := true.B // rprobeack is NOT the same cacheline as the request cacheline
+            }
 
             state.w_aprobeack_first := true.B
             state.w_aprobeack       := state.w_aprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
@@ -546,7 +596,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_comp  := true.B
 
                 state.s_wb       := false.B
-                state.w_dbidresp := false.B
+                state.w_compdbid := false.B
                 state.s_cbwrdata := false.B
             }
         }.otherwise {
@@ -560,6 +610,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     // val rxrsp = io.resps.rxrsp
 
+    /** 
+     * Receive replacement response(from [[Directory]]).
+     * Update directory meta/Setup replacement action(Evict/WriteBackFull) according to the response.
+     */
     val replResp = io.replResp_s3
     when(replResp.fire) {
 
@@ -581,7 +635,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                  */
                 when(replResp.bits.meta.isDirty) {
                     state.s_wb       := false.B // Send WriteBackFull is it is a dirty way
-                    state.w_dbidresp := false.B // Wait CompDBIDResp
+                    state.w_compdbid := false.B // Wait CompDBIDResp
                     state.s_cbwrdata := false.B // Send CopyBackWrData
                 }.otherwise {
                     state.s_evict := false.B // Send Evict if it is not a dirty way
@@ -606,6 +660,61 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     assert(!(replResp.fire && state.w_replResp), s"mshr is not watting for replResp_s3")
 
     /**
+     * Deal with snoop nested and release nested.
+     * We should also update meta and other flags according to the nested signals from MainPipe. 
+     * Some nested conditions:
+     *  (1) If a WriteBackFull/Evict is nested my downstream Snoop(sam address), the [[MainPipe]] should ack the Snoop first and notify the nested [[MSHR]] at Stage 3 to update the directory meta.
+     *  (2) ...
+     */
+    val nestedMatch    = valid && !meta.isInvalid && req.set === io.nested.set && meta.tag === io.nested.tag && state.w_replResp
+    val nedtedHitMatch = valid && dirResp.hit && req.set === io.nested.set && meta.tag === io.nested.tag
+    when(nestedMatch) {
+        val nested = io.nested.snoop
+        // when(nested.cleanDirty) {
+        //     // TODO: toB ?
+        //     meta.state := MixedState.cleanDirty(meta.state)
+        // }
+
+        when(nested.toB) {
+            meta.state := Mux(meta.isInvalid, MixedState.I, MixedState.BC)
+        }
+
+        when(nested.toN) {
+            meta.state := MixedState.I
+        }
+
+        // If WriteBackFull/Evict is not fired, snoop will cancle the WriteBackFull/Evict on certain conditions.
+        // TODO:
+
+        assert(!(nested.toB && nested.toN), s"nested toB and toN at the same time")
+
+        /**
+         * from IHI0050G: P272
+         * While a Snoop transaction response is pending, the only transaction responses that are permitted to be sent to the same address are:
+         *  - RetryAck for a CopyBack
+         *  - RetryAck and DBIDResp for a WriteUnique and Atomics
+         *  - RetryAck and, if applicable, a ReadReceipt for a Read request type
+         *  - RetryAck for a Dataless request type
+         * Once a completion is sent for a transaction, the HN-F must not send a Snoop request to the same cache line until receiving:
+         *  - A CompAck for any Read and Dataless requests except for ReadOnce* and ReadNoSnp
+         *  - A CompAck response for a CopyBack request that the HN-F has requested completes without a data transfer
+         *  - A CopyBackWriteData response for a CopyBack request that the HN-F has requested completes with a data transfer
+         *  - A NonCopyBackWriteData response for an Atomic request
+         *  - A WriteData response, and if applicable, CompAck, for a WriteUnique request where the HN-F has not used a DWT flow
+         *  - A Comp response from the Subordinate Node for a WriteUnique request where the HN-F has used a DWT flow
+         */
+        val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
+        assert((!state.w_compdbid || !state.w_comp) && hasNestedSnoop || !hasNestedSnoop, "w_compdbid:%d, w_comp:%d", state.w_compdbid, state.w_comp)
+    }
+
+    when(nestedMatch) {
+        val nested = io.nested.release
+        // when(nested.setDirty) {
+        //     meta.state := MixedState.setDirty(meta.state)
+        // }
+    }
+
+    /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
      * If there is, then we cannot free the [[MSHR]].
      */
@@ -623,7 +732,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val waitForSent_grant     = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_grant)).reduce(_ && _)
     val waitForSent_accessack = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_accessack)).reduce(_ && _)
     val waitForSent_snpresp   = (0 until maxWaitCnt + 2).map(i => recursiveRegNext(i, state.s_snpresp)).reduce(_ && _)
-    val hasRetry              = VecInit(io.retryTasks.stage2.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.retryTasks.stage4.elements.map(_._2).toSeq).asUInt.orR
+    val hasRetry              = VecInit(io.retryTasks.stage2.bits.elements.map(_._2).toSeq).asUInt.orR && io.retryTasks.stage2.fire || VecInit(io.retryTasks.stage4.bits.elements.map(_._2).toSeq).asUInt.orR && io.retryTasks.stage4.fire
 
     val willFree = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp && !hasRetry
     when(valid && willFree) {
@@ -633,6 +742,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val evictNotSent = !state.s_evict
     val wbNotSent    = !state.s_wb
     io.status.valid     := valid
+    io.status.willFree  := willFree
     io.status.set       := req.set
     io.status.reqTag    := req.tag
     io.status.metaTag   := dirResp.meta.tag
@@ -640,6 +750,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.wayOH     := dirResp.wayOH
     io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.s_accessack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
     io.status.dirHit    := dirResp.hit                                                                                                  // Used by Directory to occupy a particular way.
+    io.status.state     := meta.state
+
+    io.status.w_replResp  := state.w_replResp
+    io.status.w_rprobeack := state.w_rprobeack
+    io.status.w_comp      := state.w_comp
+    io.status.w_compdbid  := state.w_compdbid
+
+    val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
+    val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))
+    dontTouch(addr_reqTag_debug)
+    dontTouch(addr_metaTag_debug)
 
     LeakChecker.withCallback(io.status.valid, !io.status.valid, Some(s"mshr_valid"), maxCount = deadlockThreshold) {
         this.state.elements.foreach { case (name, data) =>
@@ -648,8 +769,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         this.io.status.elements.foreach { case (name, data) =>
             printf(cf"io.status.$name: $data%x\n")
         }
-        printf(cf"addr_reqTag:${Cat(io.status.reqTag, io.status.set, 0.U(6.W))}%x\n")
-        printf(cf"addr_metaTag:${Cat(io.status.metaTag, io.status.set, 0.U(6.W))}%x\n")
+        printf(cf"addr_reqTag:${addr_reqTag_debug}%x\n")
+        printf(cf"addr_metaTag:${addr_metaTag_debug}%x\n")
         printf(cf"channel:${req.channel}\n")
         printf(cf"isCHIOpcode:${req.isCHIOpcode}\n")
         printf(cf"opcode:${req.opcode}\n")

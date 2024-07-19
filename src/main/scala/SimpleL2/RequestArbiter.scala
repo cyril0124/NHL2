@@ -59,21 +59,30 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val ready_s1            = WireInit(false.B)
     val valid_s1            = WireInit(false.B)
     val mshrTaskFull_s1     = RegInit(false.B)
+    val noSpaceForReplay_s1 = WireInit(false.B)
+
     val blockA_s1           = WireInit(false.B)
     val blockA_forReplay_s1 = WireInit(false.B)
+
     val blockB_s1           = WireInit(false.B)
     val blockB_forReplay_s1 = WireInit(false.B)
-    val blockC_s1           = WireInit(false.B)
-    val noSpaceForReplay_s1 = WireInit(false.B)
-    val mayReadDS_s2        = WireInit(false.B)
-    val willWriteDS_s2      = WireInit(false.B)
-    val willRefillDS_s2     = WireInit(false.B)
-    val willWriteDS_s3      = WireInit(false.B)
-    val willRefillDS_s3     = WireInit(false.B)
+
+    val blockC_s1 = WireInit(false.B)
+
+    val task_s2         = RegInit(0.U.asTypeOf(new TaskBundle))
+    val valid_s2        = RegInit(false.B)
+    val mayReadDS_s2    = WireInit(false.B)
+    val willWriteDS_s2  = WireInit(false.B)
+    val willRefillDS_s2 = WireInit(false.B)
+    val willWriteDS_s3  = WireInit(false.B)
+    val willRefillDS_s3 = WireInit(false.B)
 
     val valid_s3 = RegInit(false.B)
     val set_s3   = RegInit(0.U(setBits.W))
     val tag_s3   = RegInit(0.U(tagBits.W))
+
+    val taskSnoop_s1  = io.taskSnoop_s1.bits
+    val taskReplay_s1 = io.taskReplay_s1.bits
 
     // -----------------------------------------------------------------------------------------
     // Stage 0
@@ -96,16 +105,72 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     ready_s1 := !mshrTaskFull_s1
 
+    def addrMatchVec(set: UInt, tag: UInt): UInt = {
+        VecInit(io.mshrStatus.map { case s =>
+            // s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag)
+            s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
+        }).asUInt
+    }
+
+    def addrMatchVec_reqTag(set: UInt, tag: UInt): UInt = {
+        VecInit(io.mshrStatus.map { case s =>
+            s.valid && s.set === set && s.reqTag === tag
+        }).asUInt
+    }
+
+    val addrMatchVec_sinka         = addrMatchVec(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
+    val addrMatchVec_replay        = addrMatchVec(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
+    val addrMatchVec_snp           = addrMatchVec(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
+    val addrMatchVec_reqTag_snp    = addrMatchVec_reqTag(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
+    val addrMatchVec_reqTag_replay = addrMatchVec_reqTag(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
+
+    val mayReadDS_a_s1_dup            = WireInit(false.B)
+    val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrMatchVec_sinka.orR
+    val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrMatchVec_replay.orR
+    val blockA_mayReadDS =
+        mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
+    blockA_s1           := blockA_addrConflict || blockA_mayReadDS || io.fromSinkC.willWriteDS_s1
+    blockA_forReplay_s1 := blockA_addrConflict_forReplay || blockA_mayReadDS
+
+    def mshrBlockSnp(set: UInt, tag: UInt): UInt = {
+        VecInit(io.mshrStatus.map { s =>
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && s.w_replResp && !s.w_rprobeack // Snoop nested WrteBackFull/Evict, mshr is waitting for ProbeAck since dirty data may exist in upstream cache.
+        }).asUInt
+    }
+
+    def snpHitWriteBack(set: UInt, tag: UInt): UInt = {
+        VecInit(io.mshrStatus.map { s =>
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_comp || !s.w_compdbid)
+        }).asUInt
+    }
+
+    // val reqBlockSnp           = addrMatchVec_snp.orR || addrMatchVec_reqTag_snp.orR
+    // val reqBlockSnp_forReplay = addrMatchVec_replay.orR || addrMatchVec_reqTag_replay.orR
+    val reqBlockSnp           = addrMatchVec_reqTag_snp.orR
+    val reqBlockSnp_forReplay = addrMatchVec_reqTag_replay.orR
+    val blockB_mayReadDS      = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
+    // blockB_s1           := reqBlockSnp || mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+    // blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+    blockB_s1           := reqBlockSnp || mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+    blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+
+    blockC_s1 := mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2 // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
+
     /** Task priority: MSHR > Replay > CMO > Snoop > SinkC > SinkA */
     val opcodeSinkC_s1 = io.taskSinkC_s1.bits.opcode
     val otherTasks_s1  = Seq(io.taskReplay_s1, io.taskCMO_s1, io.taskSnoop_s1, io.taskSinkC_s1, io.taskSinkA_s1)
     val chnlTask_s1    = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     val arb            = Module(new Arbiter(chiselTypeOf(chnlTask_s1.bits), otherTasks_s1.size))
-    io.taskCMO_s1    <> arb.io.in(0)
-    io.taskSnoop_s1  <> arb.io.in(1)
-    io.taskSinkC_s1  <> arb.io.in(2) // TODO: Store Miss Release / PutPartial?
-    io.taskReplay_s1 <> arb.io.in(3)
-    io.taskSinkA_s1  <> arb.io.in(4)
+    val arbTaskCMO     = arb.io.in(0)
+    val arbTaskSnoop   = arb.io.in(1)
+    val arbTaskSinkC   = arb.io.in(2)
+    val arbTaskReplay  = arb.io.in(3)
+    val arbTaskSinkA   = arb.io.in(4)
+    io.taskCMO_s1    <> arbTaskCMO
+    io.taskSnoop_s1  <> arbTaskSnoop
+    io.taskSinkC_s1  <> arbTaskSinkC // TODO: Store Miss Release / PutPartial?
+    io.taskReplay_s1 <> arbTaskReplay
+    io.taskSinkA_s1  <> arbTaskSinkA
     arb.io.out       <> chnlTask_s1
 
     // TODO: CMO Task
@@ -117,17 +182,18 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    arb.io.in(1).valid    := io.taskSnoop_s1.valid && !blockB_s1
-    io.taskSnoop_s1.ready := arb.io.in(1).ready && !blockB_s1
+    arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag).orR
+    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !blockB_s1
+    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !blockB_s1
 
-    arb.io.in(2).valid    := io.taskSinkC_s1.valid && !blockC_s1
-    io.taskSinkC_s1.ready := arb.io.in(2).ready && !blockC_s1
+    arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
+    io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
 
-    arb.io.in(3).valid     := io.taskReplay_s1.valid && !blockReplay_s1
-    io.taskReplay_s1.ready := arb.io.in(3).ready && !blockReplay_s1
+    arbTaskReplay.valid    := io.taskReplay_s1.valid && !blockReplay_s1
+    io.taskReplay_s1.ready := arbTaskReplay.ready && !blockReplay_s1
 
-    arb.io.in(4).valid    := io.taskSinkA_s1.valid && !blockA_s1
-    io.taskSinkA_s1.ready := arb.io.in(4).ready && !blockA_s1
+    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !blockA_s1
+    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !blockA_s1
 
     // TODO: block when no space for Replay
     chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && io.dirRead_s1.ready && Mux(!chnlTask_s1.bits.isReplayTask, !noSpaceForReplay_s1, true.B)
@@ -142,6 +208,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_a_s1    = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get
     val mayReadDS_b_s1    = task_s1.isChannelB
     val mayReadDS_mshr_s1 = mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT
+    mayReadDS_a_s1_dup := mayReadDS_a_s1
 
     val dsReady_s1     = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2 && !io.fromSinkC.willWriteDS_s1
     val tempDsReady_s1 = io.tempDsRead_s1.ready && (tempDsToDs_s1 && dsReady_s1 || !tempDsToDs_s1)
@@ -172,8 +239,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2
     // -----------------------------------------------------------------------------------------
-    val task_s2           = RegInit(0.U.asTypeOf(new TaskBundle))
-    val valid_s2          = RegInit(false.B)
     val fire_s2           = WireInit(false.B)
     val tempDsToDs_s2     = (task_s2.tempDsDest & DataDestination.DataStorage).orR && task_s2.isMshrTask && task_s2.readTempDs
     val mayReadDS_a_s2    = task_s2.isChannelA && (task_s2.opcode === AcquireBlock || task_s2.opcode === Get)
@@ -195,6 +260,9 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.mpReq_s2.valid := valid_s2
     io.mpReq_s2.bits  := task_s2
 
+    io.toSinkC.mayReadDS_s2    := mayReadDS_s2
+    io.toSinkC.willRefillDS_s2 := willRefillDS_s2
+
     // -----------------------------------------------------------------------------------------
     // Stage 3
     // -----------------------------------------------------------------------------------------
@@ -210,59 +278,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         set_s3        := task_s2.set
         tag_s3        := task_s2.tag
     }
-
-    // def addrMatchVec(set: UInt, tag: UInt): UInt = {
-    //     VecInit(io.mshrStatus.map { case s =>
-    //         val matchTag = Mux(s.needsRepl, s.metaTag, s.reqTag)
-    //         s.valid && s.set === set && matchTag === tag
-    //     }).asUInt
-    // }
-
-    def addrMatchVec(set: UInt, tag: UInt): UInt = {
-        VecInit(io.mshrStatus.map { case s =>
-            // s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag)
-            s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
-        }).asUInt
-    }
-
-    def addrMatchVec_reqTag(set: UInt, tag: UInt): UInt = {
-        VecInit(io.mshrStatus.map { case s =>
-            s.valid && s.set === set && s.reqTag === tag
-        }).asUInt
-    }
-
-    // val addrMatchVec_metaTag_debug = VecInit(io.mshrStatus.map { case s =>
-    //     s.valid && s.set === task_s1.set && s.metaTag === task_s1.tag
-    // }).asUInt
-    // val addrMatchVec_reqTag_debug = VecInit(io.mshrStatus.map { case s =>
-    //     s.valid && s.set === task_s1.set && s.reqTag === task_s1.tag
-    // }).asUInt
-    // dontTouch(addrMatchVec_metaTag_debug)
-    // dontTouch(addrMatchVec_reqTag_debug)
-
-    val addrMatchVec_sinka         = addrMatchVec(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
-    val addrMatchVec_replay        = addrMatchVec(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
-    val addrMatchVec_snp           = addrMatchVec(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
-    val addrMatchVec_reqTag_snp    = addrMatchVec_reqTag(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
-    val addrMatchVec_reqTag_replay = addrMatchVec_reqTag(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
-
-    val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrMatchVec_sinka.orR
-    val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrMatchVec_replay.orR
-    val blockA_mayReadDS =
-        mayReadDS_a_s1 && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
-    blockA_s1           := blockA_addrConflict || blockA_mayReadDS || io.fromSinkC.willWriteDS_s1
-    blockA_forReplay_s1 := blockA_addrConflict_forReplay || blockA_mayReadDS
-
-    val reqBlockSnp           = addrMatchVec_snp.orR || addrMatchVec_reqTag_snp.orR
-    val reqBlockSnp_forReplay = addrMatchVec_replay.orR || addrMatchVec_reqTag_replay.orR
-    val blockB_mayReadDS      = /* TODO: mayReadDS_b_s1 && */ (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2)
-    blockB_s1           := reqBlockSnp || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
-    blockB_forReplay_s1 := reqBlockSnp_forReplay || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
-
-    blockC_s1 := mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2 // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
-
-    io.toSinkC.mayReadDS_s2    := mayReadDS_s2
-    io.toSinkC.willRefillDS_s2 := willRefillDS_s2
 
     // Channel C does not need to replay
     val mayReplayCnt = WireInit(0.U(io.replayFreeCnt.getWidth.W))

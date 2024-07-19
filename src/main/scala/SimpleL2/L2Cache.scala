@@ -9,7 +9,7 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.chi._
 
-abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param
+abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HadMixedStateOps
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
 
 class L2Cache()(implicit p: Parameters) extends L2Module {

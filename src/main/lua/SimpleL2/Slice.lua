@@ -357,6 +357,7 @@ local ds = slice.ds
 local tempDS = slice.tempDS
 local sourceD = slice.sourceD
 local txrsp = slice.txrsp
+local txdat = slice.txdat
 local sinkC = slice.sinkC
 local reqArb = slice.reqArb
 local rxdat = slice.rxdat
@@ -365,6 +366,16 @@ local mshrs = {}
 for i = 0, 15 do
     mshrs[i] = ms["mshrs_" .. i]
 end
+
+local mpReq_s2 = ([[
+    | valid
+    | opcode
+    | channel
+    | source
+    | set
+    | tag
+    | snpHitWriteBack
+]]):bundle {hier = mp:name(), prefix = "io_mpReq_s2_", name = "mpReq_s2"}
 
 local function write_dir(set, wayOH, tag, state, clientsOH)
     assert(type(set) == "number")
@@ -3733,25 +3744,829 @@ local test_sinkA_replay = env.register_test_case "test_sinkA_replay" {
     end
 }
 
--- TODO: MainPipe block SinkA request due to same address conflict.(also test in RequestArbiter)
-local test_block_sinkA_for_same_addr = env.register_test_case "test_block_sinkA_for_same_addr" {
+
+local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_nested_writebackfull" {
     function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function send_and_resp_request()
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            env.posedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        end
+
+        do
+            -- SnpShared nested at TD state
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            local snp_address = chi_txreq.bits.addr:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x00) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.SC_PD)
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x02) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.SC_PD)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TD)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(1)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(1)
+                env.negedge()
+                    mp.valid_s5:expect(1)
+                env.negedge()
+                    mp.valid_s6:expect(1)
+                    mp.io_txdat_s6s7_valid:is(1)
+                    txdat.io_data_s6s7_valid:is(1)
+                env.negedge()
+                    mp.valid_s7:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp_dbidresp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
         
+        do
+            -- SnpShared nested at TTD state, snoop wait rprobe finish
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TTD, clientsOH)
+
+            send_and_resp_request()
+            
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
+            env.negedge()
+                chi_rxsnp.ready:expect(0)
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(snp_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+            env.expect_not_happen_until(20, function ()
+                return reqArb.io_mpReq_s2_valid:is(1)
+            end)
+
+            tl_c:probeack(snp_address, TLParam.TtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x00) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.SC_PD)
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x02) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.SC_PD)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TTD)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(1)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(1)
+                env.negedge()
+                    mp.valid_s5:expect(1)
+                env.negedge()
+                    mp.valid_s6:expect(1)
+                    mp.io_txdat_s6s7_valid:is(1)
+                    txdat.io_data_s6s7_valid:is(1)
+                env.negedge()
+                    mp.valid_s7:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp_dbidresp(0, 3)    
+                
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpUnique nested at TD state
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            local snp_address = chi_txreq.bits.addr:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            chi_rxsnp:snpunique(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x00) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.I_PD)
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x02) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.I_PD)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TD)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(1)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toN:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(1)
+                env.negedge()
+                    mp.valid_s5:expect(1)
+                env.negedge()
+                    mp.valid_s6:expect(1)
+                    mp.io_txdat_s6s7_valid:is(1)
+                    txdat.io_data_s6s7_valid:is(1)
+                env.negedge()
+                    mp.valid_s7:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp_dbidresp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpUnique nested at TTD state, snoop wait rprobe finish
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TTD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TTD, clientsOH)
+
+            send_and_resp_request()
+            
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(snp_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+                env.posedge()
+                chi_rxsnp.ready:expect(0)
+            env.expect_not_happen_until(20, function ()
+                return reqArb.io_mpReq_s2_valid:is(1)
+            end)
+
+            tl_c:probeack(snp_address, TLParam.TtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            
+            chi_rxsnp:snpunique(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x00) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.I_PD)
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.dataID:is(0x02) and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
+                        chi_txdat.bits.resp:expect(CHIResp.I_PD)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TTD)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(1)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toN:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(1)
+                env.negedge()
+                    mp.valid_s5:expect(1)
+                env.negedge()
+                    mp.valid_s6:expect(1)
+                    mp.io_txdat_s6s7_valid:is(1)
+                    txdat.io_data_s6s7_valid:is(1)
+                env.negedge()
+                    mp.valid_s7:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp_dbidresp(0, 3)    
+                
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
+
+            tl_e:grantack(0)  
+        end
+
+        env.posedge(100)
     end
 }
 
+local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
 
--- TODO: Block Snoop request(need data) when stage6 & stage7 is full.
--- TODO: replacement policy
--- TODO: Get not preferCache
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function send_and_resp_request()
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            env.posedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        end
+
+        do
+            -- SnpShared nested at BC state
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.BC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            local snp_address = chi_txreq.bits.addr:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.SC)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.BC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpShared nested at BBC state
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.BC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.BC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(snp_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+            env.posedge()
+                chi_rxsnp.ready:expect(0)
+            env.expect_not_happen_until(20, function ()
+                return reqArb.io_mpReq_s2_valid:is(1)
+            end)
+
+            tl_c:probeack(snp_address, TLParam.BtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.SC)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.BC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpShared nested at TC state
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            local snp_address = chi_txreq.bits.addr:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.SC)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0) 
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpShared nested at TTC state
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TTC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(snp_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+            env.posedge()
+                chi_rxsnp.ready:expect(0)
+            env.expect_not_happen_until(20, function ()
+                return reqArb.io_mpReq_s2_valid:is(1)
+            end)
+
+            tl_c:probeack(snp_address, TLParam.TtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            
+            chi_rxsnp:snpshared(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.SC)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TTC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpUnique nested at TC state
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            local snp_address = chi_txreq.bits.addr:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            chi_rxsnp:snpunique(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.I)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toB:expect(0)
+                    mp.io_mshrNested_snoop_toN:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpUnique nested at TTC state
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TTC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(snp_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+            env.posedge()
+                chi_rxsnp.ready:expect(0)
+            env.expect_not_happen_until(20, function ()
+                return reqArb.io_mpReq_s2_valid:is(1)
+            end)
+
+            tl_c:probeack(snp_address, TLParam.TtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            
+            chi_rxsnp:snpunique(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.I)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TTC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toN:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            -- SnpUnique nested at TTC state(after ProbeAck)
+            local clientsOH = ("0b01"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TTC, clientsOH)
+
+            send_and_resp_request()
+
+            env.expect_happen_until(10, function () return tl_b:fire() end)
+            local snp_address = tl_b.bits.address:get()
+            print(("snp_address is 0x%x"):format(snp_address))
+
+            tl_c:probeack(snp_address, TLParam.TtoN, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            
+            chi_rxsnp:snpunique(snp_address, 3, 0)
+
+            do
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+                        chi_txrsp.bits.resp:expect(CHIResp.I)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+                    end
+                }
+
+                env.expect_happen_until(10, function () return mpReq_s2:fire() and mpReq_s2.bits.channel:is(0x02) and mpReq_s2.bits.snpHitWriteBack:is(1) end)
+                env.negedge()
+                    mp.valid_s3:expect(1)
+                    mp.io_dirResp_s3_bits_hit:expect(1)
+                    mp.io_dirResp_s3_bits_meta_state:expect(MixedState.TTC)
+                    mp.io_dirWrite_s3_valid:expect(0)
+                    mp.io_toDS_dsRead_s3_valid:expect(0)
+                    mp.io_mshrAlloc_s3_valid:expect(0)
+                    mp.io_mshrNested_snoop_toN:expect(1)
+                env.negedge()
+                    mp.valid_snpresp_s4:is(1)
+                    mp.valid_s4:expect(0)
+                env.negedge()
+                    mp.valid_s5:expect(0)
+            end
+
+            env.negedge()
+                chi_rxrsp:comp(0, 3)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return reqArb.io_tempDsRead_s1_valid:is(1) end)
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+
+            tl_e:grantack(0)  
+        end
+        
+        -- TODO: SnpUnique BC/BBC
+
+        env.posedge(100)
+    end
+}
 
 -- TODO: nest: Release nest Probe, Snoop nest WriteBack/Evict
-local test_release_nest_probe = env.register_test_case "test_release_and_probe" {
+local test_release_nested_probe = env.register_test_case "test_release_and_probe" {
     function ()
 
     end
 }
 
+-- TODO: replacement policy
+-- TODO: Get not preferCache
 -- TODO: CHI retry
 
  
@@ -3810,6 +4625,9 @@ verilua "mainTask" { function ()
     test_replresp_retry()
     test_txrsp_mp_replay()
     test_sinkA_replay()
+
+    test_snoop_nested_writebackfull()
+    test_snoop_nested_evict()
     end
 
    
