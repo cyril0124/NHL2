@@ -73,7 +73,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io.replay_s4      <> replayStation.io.replay_s4
     mainPipe.io.willFull_txrsp := txrsp.io.willFull
 
-    val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire
+    val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire && mainPipe.io.retryTasks.stage2.bits.isRetry_s2
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
     ds.io.refillWrite_s2.valid        := tempDS.io.toDS.refillWrite_s2.valid && !cancelRefillWrite_s2
     ds.io.refillWrite_s2.bits         := tempDS.io.toDS.refillWrite_s2.bits
@@ -93,6 +93,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     tempDS.io.fromReqArb.dsWrWayOH_s1 := reqArb.io.dsWrWayOH_s1
 
     sinkC.io.respDest_s4                := mainPipe.io.allocDestSinkC_s4
+    sinkC.io.fromReqArb.mayReadDS_s1    := reqArb.io.toSinkC.mayReadDS_s1
+    sinkC.io.fromReqArb.willRefillDS_s1 := reqArb.io.toSinkC.willRefillDS_s1
     sinkC.io.fromReqArb.mayReadDS_s2    := reqArb.io.toSinkC.mayReadDS_s2
     sinkC.io.fromReqArb.willRefillDS_s2 := reqArb.io.toSinkC.willRefillDS_s2
 

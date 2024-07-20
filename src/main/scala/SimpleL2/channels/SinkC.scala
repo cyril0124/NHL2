@@ -39,12 +39,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         }
 
         val fromReqArb = new Bundle {
-            val mayReadDS_s2    = Input(Bool()) // from RequestArbiter
-            val willRefillDS_s2 = Input(Bool()) // from RequestArbiter
+            val mayReadDS_s1    = Input(Bool())
+            val willRefillDS_s1 = Input(Bool())
+            val mayReadDS_s2    = Input(Bool())
+            val willRefillDS_s2 = Input(Bool())
         }
         val toReqArb = new Bundle {
-            val willWriteDS_s1 = Output(Bool()) // to RequestArbiter
-            val willWriteDS_s2 = Output(Bool()) // to RequestArbiter
+            val willWriteDS_s1 = Output(Bool())
+            val willWriteDS_s2 = Output(Bool())
         }
     })
 
@@ -137,7 +139,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
      * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
      */
-    io.toTempDS.write.valid     := io.c.valid && last && isProbeAckData && respDataToTempDS // TODO: io.c.fire
+    io.toTempDS.write.valid     := io.c.fire && last && isProbeAckData && respDataToTempDS // TODO: io.c.fire
     io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
@@ -191,7 +193,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         hasData && ((respDataToTempDS && io.toTempDS.write.ready || !respDataToTempDS) && (respDataToDS && !blockDsWrite_s1 || !respDataToDS) || first) || !hasData // ProbeAckData / ProbeAck
     )
 
-    blockDsWrite_s1 := io.fromReqArb.mayReadDS_s2 || io.fromReqArb.willRefillDS_s2
+    blockDsWrite_s1 := io.fromReqArb.mayReadDS_s1 || io.fromReqArb.willRefillDS_s1 || io.fromReqArb.mayReadDS_s2 || io.fromReqArb.willRefillDS_s2
 
     // @formatter:off
     assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))

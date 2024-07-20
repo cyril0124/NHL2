@@ -25,16 +25,20 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_rprobe     = Bool() // probe upwards, cause by Replace
     val s_sprobe     = Bool() // probe upwards, cause by Snoop
     val s_grant      = Bool() // response grant upwards
+    val s_accessack  = Bool()
+    val s_cbwrdata   = Bool()
     val s_snpresp    = Bool() // resposne SnpResp downwards
     val s_evict      = Bool() // evict downwards(for clean state)
     val s_wb         = Bool() // writeback downwards(for dirty state)
-    val s_cbwrdata   = Bool()
     val s_compack    = Bool() // response CompAck downwards
     val s_makeunique = Bool()
-    val s_accessack  = Bool()
     val s_repl       = Bool() // send replTask to MainPipe
 
     // w: wait
+    val w_grant_sent      = Bool()
+    val w_accessack_sent  = Bool()
+    val w_cbwrdata_sent   = Bool()
+    val w_snpresp_sent    = Bool()
     val w_grantack        = Bool()
     val w_compdat         = Bool()
     val w_compdat_first   = Bool()
@@ -91,6 +95,7 @@ class MshrResps()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrRetryStage2()(implicit p: Parameters) extends L2Bundle {
+    val isRetry_s2   = Bool()
     val grant_s2     = Bool() // GrantData
     val accessack_s2 = Bool() // AccessAckData
     val cbwrdata_s2  = Bool() // CopyBackWrData
@@ -98,7 +103,9 @@ class MshrRetryStage2()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrRetryStage4()(implicit p: Parameters) extends L2Bundle {
-    val snpresp_s4 = Bool() // SnpResp
+    val isRetry_s4  = Bool()
+    val snpresp_s4  = Bool() // SnpResp
+    val cbwrdata_s4 = Bool() // CopyBackWrData
 }
 
 class MshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
@@ -483,32 +490,67 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** mpTask needs to be retried due to insufficent resources  */
     when(io.retryTasks.stage2.fire) {
-        when(io.retryTasks.stage2.bits.accessack_s2) {
-            state.s_accessack := false.B
-            assert(state.s_accessack, "try to retry an already activated task!")
-            assert(valid, "retry on an invalid mshr!")
-        }
-        when(io.retryTasks.stage2.bits.grant_s2) {
-            state.s_grant := false.B
-            assert(state.s_grant, "try to retry an already activated task!")
-            assert(valid, "retry on an invalid mshr!")
-        }
-        when(io.retryTasks.stage2.bits.cbwrdata_s2) {
-            state.s_cbwrdata := false.B
-            assert(state.s_cbwrdata, "try to retry an already activated task!")
-            assert(valid, "retry on an invalid mshr!")
-        }
-        when(io.retryTasks.stage2.bits.snpresp_s2) {
-            state.s_snpresp := false.B
-            assert(state.s_snpresp, "try to retry an already activated task!")
-            assert(valid, "retry on an invalid mshr!")
+        when(io.retryTasks.stage2.bits.isRetry_s2) {
+            when(io.retryTasks.stage2.bits.accessack_s2) {
+                state.s_accessack := false.B
+                assert(state.s_accessack, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+            when(io.retryTasks.stage2.bits.grant_s2) {
+                state.s_grant := false.B
+                assert(state.s_grant, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+            when(io.retryTasks.stage2.bits.cbwrdata_s2) {
+                state.s_cbwrdata := false.B
+                assert(state.s_cbwrdata, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+            when(io.retryTasks.stage2.bits.snpresp_s2) {
+                state.s_snpresp := false.B
+                assert(state.s_snpresp, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+        }.otherwise {
+            when(io.retryTasks.stage2.bits.accessack_s2) {
+                state.w_accessack_sent := true.B
+                assert(!state.w_accessack_sent)
+            }
+            when(io.retryTasks.stage2.bits.grant_s2) {
+                state.w_grant_sent := true.B
+                assert(!state.w_grant_sent)
+            }
+            when(io.retryTasks.stage2.bits.cbwrdata_s2) {
+                state.w_cbwrdata_sent := true.B
+                assert(!state.w_cbwrdata_sent)
+            }
+            when(io.retryTasks.stage2.bits.snpresp_s2) {
+                state.w_snpresp_sent := true.B
+                assert(!state.w_snpresp_sent)
+            }
         }
     }
     when(io.retryTasks.stage4.fire) {
-        when(io.retryTasks.stage4.bits.snpresp_s4) {
-            state.s_snpresp := false.B
-            assert(state.s_snpresp, "try to retry an already activated task!")
-            assert(valid, "retry on an invalid mshr!")
+        when(io.retryTasks.stage4.bits.isRetry_s4) {
+            when(io.retryTasks.stage4.bits.snpresp_s4) {
+                state.s_snpresp := false.B
+                assert(state.s_snpresp, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+            when(io.retryTasks.stage4.bits.cbwrdata_s4) {
+                state.s_cbwrdata := false.B
+                assert(state.s_cbwrdata, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
+        }.otherwise {
+            when(io.retryTasks.stage4.bits.snpresp_s4) {
+                state.w_snpresp_sent := true.B
+                assert(!state.w_snpresp_sent)
+            }
+            when(io.retryTasks.stage4.bits.cbwrdata_s4) {
+                state.w_cbwrdata_sent := true.B
+                assert(!state.w_cbwrdata_sent)
+            }
         }
     }
     val retryVec_s2 = VecInit(io.retryTasks.stage2.bits.elements.map(_._2).toSeq).asUInt & io.retryTasks.stage2.fire
@@ -607,9 +649,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.s_evict      := true.B
                 state.w_evict_comp := true.B
 
-                state.s_wb       := false.B
-                state.w_compdbid := false.B
-                state.s_cbwrdata := false.B
+                state.s_wb            := false.B
+                state.w_compdbid      := false.B
+                state.s_cbwrdata      := false.B
+                state.w_cbwrdata_sent := false.B
             }
         }.otherwise {
             // TODO:
@@ -646,9 +689,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                  *      will be changed from Evict to WriteBackFull.
                  */
                 when(replResp.bits.meta.isDirty) {
-                    state.s_wb       := false.B // Send WriteBackFull is it is a dirty way
-                    state.w_compdbid := false.B // Wait CompDBIDResp
-                    state.s_cbwrdata := false.B // Send CopyBackWrData
+                    state.s_wb            := false.B // Send WriteBackFull is it is a dirty way
+                    state.w_compdbid      := false.B // Wait CompDBIDResp
+                    state.s_cbwrdata      := false.B // Send CopyBackWrData
+                    state.w_cbwrdata_sent := false.B
                 }.otherwise {
                     state.s_evict      := false.B // Send Evict if it is not a dirty way
                     state.w_evict_comp := false.B // Wait Comp
@@ -663,10 +707,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 }
             }
         }.otherwise {
-            state.s_repl      := false.B
-            state.s_accessack := !reqIsGet
-            state.s_grant     := !reqIsAcquire
-            dirResp.wayOH     := replResp.bits.wayOH
+            state.s_repl := false.B
+            // state.s_accessack := !reqIsGet
+            // state.s_grant     := !reqIsAcquire
+            dirResp.wayOH := replResp.bits.wayOH
         }
     }
     assert(!(replResp.fire && state.w_replResp), s"mshr is not watting for replResp_s3")
@@ -740,21 +784,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      */
     val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
     val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
-
-    // TODO: Add feedback from mainpipe
-    def recursiveRegNext(n: Int, init: Bool): Bool = {
-        if (n == 0) init
-        else RegNext(recursiveRegNext(n - 1, init), true.B)
-    }
-    val maxWaitCnt_base       = 3
-    val maxWaitCnt_extra      = 10 // TODO: optimize this // We need extra cycles to wait for retry beacuse stage1 may be stalled due to DataStorage being busy(multi-cycle path), hence we cannot determine the definite cycle to wait for retry.
-    val maxWaitCnt            = maxWaitCnt_base + maxWaitCnt_extra
-    val waitForSent_grant     = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_grant)).reduce(_ && _)
-    val waitForSent_accessack = (0 until maxWaitCnt).map(i => recursiveRegNext(i, state.s_accessack)).reduce(_ && _)
-    val waitForSent_snpresp   = (0 until maxWaitCnt + 2).map(i => recursiveRegNext(i, state.s_snpresp)).reduce(_ && _)
-    val hasRetry              = VecInit(io.retryTasks.stage2.bits.elements.map(_._2).toSeq).asUInt.orR && io.retryTasks.stage2.fire || VecInit(io.retryTasks.stage4.bits.elements.map(_._2).toSeq).asUInt.orR && io.retryTasks.stage4.fire
-
-    val willFree = noWait && noSchedule && waitForSent_grant && waitForSent_accessack && waitForSent_snpresp && !hasRetry
+    val willFree   = noWait && noSchedule
     when(valid && willFree) {
         valid := false.B
     }

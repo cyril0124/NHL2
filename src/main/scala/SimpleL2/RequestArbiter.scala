@@ -43,6 +43,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             val willWriteDS_s2 = Input(Bool())
         }
         val toSinkC = new Bundle {
+            val mayReadDS_s1    = Output(Bool())
+            val willRefillDS_s1 = Output(Bool())
             val mayReadDS_s2    = Output(Bool())
             val willRefillDS_s2 = Output(Bool())
         }
@@ -215,15 +217,17 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_mshr_s1 = mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT
     mayReadDS_a_s1_dup := mayReadDS_a_s1
 
-    val dsReady_s1     = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2 && !io.fromSinkC.willWriteDS_s1
+    val dsReady_s1     = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2
     val tempDsReady_s1 = io.tempDsRead_s1.ready && (tempDsToDs_s1 && dsReady_s1 || !tempDsToDs_s1)
     val mshrTaskReady_s1 = Mux(
         mshrTask_s1.isReplTask,
         io.dirRead_s1.ready,
         (mshrTask_s1.readTempDs && tempDsReady_s1 || !mshrTask_s1.readTempDs) && (mayReadDS_mshr_s1 && dsReady_s1 || !mayReadDS_mshr_s1)
     )
-    valid_s1 := chnlTask_s1.valid || mshrTaskFull_s1
-    fire_s1  := mshrTaskFull_s1 && mshrTaskReady_s1 || chnlTask_s1.fire
+    io.toSinkC.mayReadDS_s1    := mshrTaskFull_s1 && mayReadDS_mshr_s1
+    io.toSinkC.willRefillDS_s1 := mshrTaskFull_s1 && tempDsToDs_s1 && mshrTask_s1.readTempDs && !mshrTask_s1.isReplTask
+    valid_s1                   := chnlTask_s1.valid || mshrTaskFull_s1
+    fire_s1                    := mshrTaskFull_s1 && mshrTaskReady_s1 || chnlTask_s1.fire
 
     io.dirRead_s1.valid         := fire_s1 && !task_s1.isMshrTask || fire_s1 && task_s1.isMshrTask && task_s1.isReplTask
     io.dirRead_s1.bits.set      := task_s1.set

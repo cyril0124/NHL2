@@ -1225,10 +1225,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         env.posedge(2)
             mp.io_dirResp_s3_bits_hit:expect(0)
         
-        env.expect_happen_until(10, function ()
-            return chi_txreq.valid:get() == 1 and chi_txreq.ready:get() == 1
-        end)
-        chi_txreq:dump()
+        env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
         mshrs[0].io_status_valid:expect(1)
         mshrs[0].io_status_set:expect(0x10)
         mshrs[0].io_status_reqTag:expect(0x20)
@@ -1239,21 +1236,13 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
 
         verilua "appendTasks" {
             check_mshr_signals = function ()
-                env.expect_happen_until(10, function()
-                    return mshrs[0].state_w_compdat:get() == 1
-                end)
-
-                env.expect_happen_until(10, function()
-                    return mshrs[0].state_s_compack:get() == 1
-                end)
-
-                env.expect_happen_until(100, function ()
-                    return mshrs[0].willFree:get() == 1
-                end)
+                env.expect_happen_until(50, function() return mshrs[0].state_w_compdat:is(1) end)
+                env.expect_happen_until(50, function() return mshrs[0].state_s_compack:is(1) end)
+                env.expect_happen_until(50, function() return mshrs[0].willFree:is(1) end)
             end,
 
             check_mainpipe = function ()
-                env.expect_happen_until(100, function ()
+                env.expect_happen_until(50, function ()
                     return mp.io_dirWrite_s3_valid:get() == 1 and 
                             mp.io_dirWrite_s3_bits_meta_tag:get() == 0x20 and 
                             mp.io_dirWrite_s3_bits_meta_clientsOH:get() == 0x01 and 
@@ -1265,25 +1254,18 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                 -- 
                 -- check grant data
                 -- 
-                env.expect_happen_until(100, function ()
-                    return tl_d:fire() and 
-                            tl_d.bits.source:get() == 3 and 
-                            tl_d.bits.data:get()[1] == 0xdead and 
-                            tl_d.bits.sink:get() == 0 and 
-                            tl_d.bits.opcode:get() == TLOpcodeD.GrantData and
-                            tl_d.bits.param:get() == TLParam.toT
-                end)
+                env.expect_happen_until(50, function () return tl_d:fire() end)
                 tl_d:dump()
+                tl_d.bits.source:expect(3)
+                tl_d.bits.sink:expect(0)
+                tl_d.bits.opcode:expect(TLOpcodeD.GrantData)
+                tl_d.bits.param:expect(TLParam.toT)
+                expect.equal(tl_d.bits.data:get()[1], 0xdead)
 
-                env.expect_happen_until(100, function ()
-                    return tl_d:fire() and 
-                            tl_d.bits.source:get() == 3 and 
-                            tl_d.bits.data:get()[1] == 0xbeef and 
-                            tl_d.bits.sink:get() == 0 and 
-                            tl_d.bits.opcode:get() == TLOpcodeD.GrantData and
-                            tl_d.bits.param:get() == TLParam.toT
-                end)
+                env.negedge()
+                env.expect_happen_until(50, function () return tl_d:fire() end)
                 tl_d:dump()
+                expect.equal(tl_d.bits.data:get()[1], 0xbeef)
 
                 local sink = tl_d.bits.sink:get()
 
@@ -1292,7 +1274,7 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
                 -- 
                 tl_e:grantack(sink)
 
-                env.expect_not_happen_until(100, function ()
+                env.expect_not_happen_until(30, function ()
                     return tl_d:fire()
                 end)
 
@@ -1311,26 +1293,24 @@ local test_sinkA_miss = env.register_test_case "test_sinkA_miss" {
         sync:wait()
 
         -- read back data from DataStorage
-        verilua "appendTasks" {
-            function ()
-                env.expect_happen_until(100, function ()
-                    return ds.io_toSourceD_dsResp_s6s7_bits_data:get() == 0xdead
-                end)
-            end
-        }
         env.negedge(math.random(1, 10))
             dut:force_all()
             ds.io_fromMainPipe_dsRead_s3_valid:set(1)
             ds.io_fromMainPipe_dsRead_s3_bits_dest:set(SourceD)
             ds.io_fromMainPipe_dsRead_s3_bits_set:set(0x10)
             ds.io_fromMainPipe_dsRead_s3_bits_wayOH:set(0x01)
-        env.negedge()
+        env.negedge() -- s4
             dut:release_all()
+        env.negedge() -- s5
+        env.negedge() -- s6
+            ds.io_toSourceD_dsResp_s6s7_valid:expect(1)
+            expect.equal(ds.io_toSourceD_dsResp_s6s7_bits_data:get(), 0xdead)
             sourceD.io_data_s6s7_valid:set_force(0)
         env.negedge(10)
             sourceD.io_data_s6s7_valid:set_release()
 
         env.dut_reset()
+        env.negedge(100)
     end
 }
 
@@ -3516,7 +3496,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             env.expect_happen_until(10, function () return chi_txrsp.valid:is(1) and chi_txrsp.ready:is(1) end)
 
             for i = 1, 20 do
-                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) and mp.io_retryTasks_stage2_bits_isRetry_s2:is(1) end)
                 print(env.cycles() .. " do grant_s2 retry " .. i)
                 env.posedge()
             end
@@ -3524,7 +3504,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             tl_d.ready:set(1)
             sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release(); sourceD._skidBuffer_io_enq_ready:set_release(); sourceD.skidBuffer.io_enq_ready_0:set_release()
             env.posedge()
-            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) and mp.io_retryTasks_stage2_bits_isRetry_s2:is(1) end)
             
             env.posedge(100)
             tl_e:grantack(0)
@@ -3544,7 +3524,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             env.expect_happen_until(10, function () return chi_txrsp.valid:is(1) and chi_txrsp.ready:is(1) end)
 
             for i = 1, 20 do
-                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_accessack_s2:is(1) end)
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_accessack_s2:is(1) and mp.io_retryTasks_stage2_bits_isRetry_s2:is(1) end)
                 print(env.cycles() .. " do accessack_s2 retry " .. i)
                 env.posedge()
             end
@@ -3552,7 +3532,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             tl_d.ready:set(1)
             sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release()
             env.posedge()
-            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) and mp.io_retryTasks_stage2_bits_isRetry_s2:is(1) end)
             
             env.posedge(100)
         end
@@ -3580,14 +3560,14 @@ local test_stage4_mshr_retry = env.register_test_case "test_stage4_mshr_retry" {
             tl_c:probeack(to_address(0x01, 0x04), TLParam.TtoN, 0)
 
             for i = 1, 20 do
-                env.expect_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) end)
+                env.expect_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) and mp.io_retryTasks_stage4_bits_isRetry_s4:is(1) end)
                 print(env.cycles() .. " do snpresp_s4 retry " .. i)
                 env.posedge()
             end
 
             txrsp.io_mpTask_s4_ready:set_release()
             env.posedge()
-            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) end)
+            env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage4_valid:is(1) and mp.io_retryTasks_stage4_bits_snpresp_s4:is(1) and mp.io_retryTasks_stage4_bits_isRetry_s4:is(1) end)
         end
 
         env.posedge(100)
@@ -4740,7 +4720,6 @@ verilua "mainTask" { function ()
     local test_all = true
 
     -- test_snoop_nested_read()
-    -- test_snoop_nested_evict()
 
     -- 
     -- normal test cases
