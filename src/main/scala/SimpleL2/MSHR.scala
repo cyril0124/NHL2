@@ -45,7 +45,8 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val w_sprobeack       = Bool()
     val w_sprobeack_first = Bool()
     val w_compdbid        = Bool()
-    val w_comp            = Bool()
+    val w_comp            = Bool() // comp for read transaction
+    val w_evict_comp      = Bool() // comp for evict transaction
     val w_replResp        = Bool()
 }
 
@@ -66,10 +67,13 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val lockWay   = Bool()
     val state     = UInt(MixedState.width.W)
 
-    val w_replResp  = Bool()
-    val w_rprobeack = Bool()
-    val w_comp      = Bool()
-    val w_compdbid  = Bool()
+    val w_replResp   = Bool()
+    val w_rprobeack  = Bool()
+    val w_evict_comp = Bool()
+    val w_compdbid   = Bool()
+    val w_comp_first = Bool()
+
+    val waitProbeAck = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -211,9 +215,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (req.param === BtoT && dirResp.hit) -> MakeUnique,
-                    reqNeedT                            -> ReadUnique,
-                    reqNeedB                            -> ReadNotSharedDirty
+                    (reqNeedT && dirResp.hit)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
+                    (reqNeedT && !dirResp.hit) -> ReadUnique,
+                    reqNeedB                   -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,
@@ -308,8 +312,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
     mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck) &&
-        state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && // wait for all Evict/WriteBackFull(replacement operations) finish
-        (state.s_read && state.w_compdat && state.s_compack) &&                    // wait read finish
+        (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
+        (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
         (state.s_aprobe && state.w_aprobeack) // need to wait for aProbe to finish (cause by Acquire)
     mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
@@ -354,7 +358,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             MuxCase(
                 Fill(nrClients, false.B),
                 Seq(
-                    (reqIsGet)                 -> meta.clientsOH,
+                    (reqIsGet)                 -> Mux(dirResp.hit, meta.clientsOH, Fill(nrClients, false.B)),
                     (reqIsPrefetch)            -> meta.clientsOH,
                     (reqIsAcquire && reqNeedT) -> reqClientOH,
                     (reqIsAcquire && reqNeedB) -> (meta.clientsOH | reqClientOH)
@@ -362,6 +366,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             )
         ),                           // TODO:
         fromPrefetch = reqIsPrefetch // TODO:
+    )
+    assert(
+        !(io.tasks.mpTask.fire && mpTask_refill.valid && mpTask_refill.bits.opcode === AccessAckData && mpTask_refill.bits.updateDir && !dirResp.hit && mpTask_refill.bits.newMetaEntry.clientsOH.orR),
+        "clientsOH should be 0 when updateDir for AccessAckData, clientsOH:%b, dirResp.hit:%d",
+        mpTask_refill.bits.newMetaEntry.clientsOH,
+        dirResp.hit
     )
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
@@ -372,7 +382,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
     mpTask_wbdata.bits.readTempDs  := false.B
     mpTask_wbdata.bits.updateDir   := false.B
-    mpTask_wbdata.bits.resp := Resp.setPassDirty(
+    mpTask_wbdata.bits.resp := Resp.setPassDirty( // In CopyBackWrData, resp indicates the cacheline state before issuing the WriteBackFull transaction.
         MuxLookup(meta.state, Resp.I)(
             Seq(
                 MixedState.BC  -> Resp.SC,
@@ -383,10 +393,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 MixedState.TTD -> Resp.UD_PD
             )
         ),
-        replGotDirty || meta.state.isDirty
+        (replGotDirty && !meta.state.isDirty || meta.state.isDirty) && !meta.isInvalid
     )
     // CopyBackWrData can be in other state excpept Tip Dirty due to snoop nested.
     // assert(!(mpTask_wbdata.fire && meta.isBranch), "CopyBackWrData is only for Tip Dirty")
+    assert(!(mpTask_wbdata.fire && mpTask_wbdata.bits.resp === Resp.I_PD), "CopyBackWrData should not be sent with the resp filed value of I_PD")
 
     def stateToResp(rawState: UInt, dirty: Bool, passDirty: Bool) = {
         val resp = Mux(
@@ -420,10 +431,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.txnID       := req.txnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(gotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
-    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)
+    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
     mpTask_snpresp.bits.channel     := Mux(gotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc
-    mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT // | DataDestination.DataStorage
+    mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT
     mpTask_snpresp.bits.updateDir   := true.B
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = snprespFinalDirty,
@@ -527,12 +538,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         val opcode = rxrsp.bits.chiOpcode
         when(opcode === Comp) {
-            state.w_comp := true.B
+            state.w_comp       := true.B
+            state.w_evict_comp := true.B
         }.elsewhen(opcode === CompDBIDResp) {
             state.w_compdbid := true.B
         }
     }
-    assert(!(rxrsp.fire && state.w_comp && state.w_compdbid), s"mshr is not watting for rxrsp")
+    assert(!(rxrsp.fire && state.w_comp && state.w_evict_comp && state.w_compdbid), s"mshr is not watting for rxrsp")
 
     /**
      * A [[MSHR]] will wait GrantAck for Acquire requests.
@@ -541,7 +553,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * If we ignore this response, then we have to add some logic in [[SourceD]], so that we could do the same thing as we implement here.
      */
     val sinke = io.resps.sinke
-    when(sinke.fire && state.s_grant) {
+    when(sinke.fire && state.s_grant && !io.alloc_s3.fire && valid) {
         state.w_grantack := true.B
     }
 
@@ -592,8 +604,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_sprobeack       := state.w_sprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
 
             when(!state.s_evict) {
-                state.s_evict := true.B
-                state.w_comp  := true.B
+                state.s_evict      := true.B
+                state.w_evict_comp := true.B
 
                 state.s_wb       := false.B
                 state.w_compdbid := false.B
@@ -638,8 +650,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     state.w_compdbid := false.B // Wait CompDBIDResp
                     state.s_cbwrdata := false.B // Send CopyBackWrData
                 }.otherwise {
-                    state.s_evict := false.B // Send Evict if it is not a dirty way
-                    state.w_comp  := false.B // Wait Comp
+                    state.s_evict      := false.B // Send Evict if it is not a dirty way
+                    state.w_evict_comp := false.B // Wait Comp
                 }
 
                 /** Send Probe if victim way has clients */
@@ -683,7 +695,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             meta.state := MixedState.I
         }
 
-        // If WriteBackFull/Evict is not fired, snoop will cancle the WriteBackFull/Evict on certain conditions.
+        // If WriteBackFull/Evict is not fired, snoop will cancle the WriteBackFull/Evict under certain conditions.
+        // TODO:
+
+        // Snoop is permitted to cancle the unfired Probe under certain conditions.
         // TODO:
 
         assert(!(nested.toB && nested.toN), s"nested toB and toN at the same time")
@@ -704,7 +719,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
          *  - A Comp response from the Subordinate Node for a WriteUnique request where the HN-F has used a DWT flow
          */
         val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
-        assert((!state.w_compdbid || !state.w_comp) && hasNestedSnoop || !hasNestedSnoop, "w_compdbid:%d, w_comp:%d", state.w_compdbid, state.w_comp)
+        assert(
+            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack) && hasNestedSnoop || !hasNestedSnoop,
+            "w_compdbid:%d, w_evict_comp:%d",
+            state.w_compdbid,
+            state.w_evict_comp
+        )
     }
 
     when(nestedMatch) {
@@ -752,10 +772,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.dirHit    := dirResp.hit                                                                                                  // Used by Directory to occupy a particular way.
     io.status.state     := meta.state
 
-    io.status.w_replResp  := state.w_replResp
-    io.status.w_rprobeack := state.w_rprobeack
-    io.status.w_comp      := state.w_comp
-    io.status.w_compdbid  := state.w_compdbid
+    io.status.w_replResp   := state.w_replResp
+    io.status.w_rprobeack  := state.w_rprobeack
+    io.status.w_evict_comp := state.w_evict_comp
+    io.status.w_compdbid   := state.w_compdbid
+    io.status.w_comp_first := state.w_evict_comp && state.w_compdat_first
+
+    io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))

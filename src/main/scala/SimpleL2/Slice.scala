@@ -127,6 +127,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid
     txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data
 
+    sinkE.io.allocRespSinkE <> sourceD.io.allocRespSinkE
+
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> missHandler.io.tasks.sourceb
     io.chi.txreq <> txreq.io.out

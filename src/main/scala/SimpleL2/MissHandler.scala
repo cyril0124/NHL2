@@ -43,12 +43,13 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     val rxdatMatchOH    = UIntToOH(rxdat.bits.txnID)(nrMSHR - 1, 0)
     val rxrspMatchOH    = UIntToOH(rxrsp.bits.txnID)(nrMSHR - 1, 0)
     val sinkeMatchOH    = UIntToOH(sinke.bits.sink)(nrMSHR - 1, 0)
+    val waitProbeAckVec = VecInit(mshrs.map(_.io.status.waitProbeAck)).asUInt
     val sinkcSetMatchOH = VecInit(mshrs.map(_.io.status.set === sinkc.bits.set)).asUInt(nrMSHR - 1, 0)
     val sinkcTagMatchOH = VecInit(mshrs.map { mshr =>
         val matchTag = Mux(mshr.io.status.needsRepl, mshr.io.status.metaTag, mshr.io.status.reqTag)
         matchTag === sinkc.bits.tag
     }).asUInt(nrMSHR - 1, 0)
-    val sinkcMatchOH = mshrValidVec & sinkcSetMatchOH & sinkcTagMatchOH
+    val sinkcMatchOH = mshrValidVec & sinkcSetMatchOH & sinkcTagMatchOH & waitProbeAckVec
     assert(!(rxdat.fire && !rxdatMatchOH.orR), "rxdat does not match any mshr! txnID => %d/0x%x", rxdat.bits.txnID, rxdat.bits.txnID)
     assert(!(rxrsp.fire && !rxrspMatchOH.orR), "rxrsp does not match any mshr! txnID => %d/0x%x", rxrsp.bits.txnID, rxrsp.bits.txnID)
     assert(!(sinke.fire && !sinkeMatchOH.orR), "sinke does not match any mshr! sink => %d/0x%x", sinke.bits.sink, sinke.bits.sink)
@@ -109,6 +110,22 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
         io.mshrStatus(i) := mshr.io.status
     }
+
+    /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
+    val nestedSetMatchVec     = VecInit(mshrs.map(_.io.status.set === io.mshrNested.set)).asUInt
+    val nestedReqTagMatchVec  = VecInit(mshrs.map(m => m.io.status.reqTag === io.mshrNested.tag)).asUInt
+    val nestedMetaTagMatchVec = VecInit(mshrs.map(m => m.io.status.metaTag === io.mshrNested.tag && m.io.status.lockWay)).asUInt
+    val hasNestedActions      = VecInit(io.mshrNested.snoop.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.mshrNested.release.elements.map(_._2).toSeq).asUInt.orR
+    assert(
+        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedReqTagMatchVec & mshrValidVec) > 1.U),
+        "nested set and reqTag should be unique, %b",
+        nestedSetMatchVec & nestedReqTagMatchVec & mshrValidVec
+    )
+    assert(
+        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidVec) > 1.U),
+        "nested set and metaTag should be unique, %b",
+        nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidVec
+    )
 
     val mshrCount = PopCount(mshrValidVec)
     val mshrFull  = mshrCount >= nrMSHR.U

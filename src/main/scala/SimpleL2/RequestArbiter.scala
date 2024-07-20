@@ -140,19 +140,24 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     def snpHitWriteBack(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { s =>
-            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_comp || !s.w_compdbid)
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_evict_comp || !s.w_compdbid)
         }).asUInt
     }
 
-    // val reqBlockSnp           = addrMatchVec_snp.orR || addrMatchVec_reqTag_snp.orR
-    // val reqBlockSnp_forReplay = addrMatchVec_replay.orR || addrMatchVec_reqTag_replay.orR
-    val reqBlockSnp           = addrMatchVec_reqTag_snp.orR
-    val reqBlockSnp_forReplay = addrMatchVec_reqTag_replay.orR
-    val blockB_mayReadDS      = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
-    // blockB_s1           := reqBlockSnp || mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
-    // blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
-    blockB_s1           := reqBlockSnp || mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
-    blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+    /**
+     * After MSHR receives the first beat of CompData, and before L2 receives GrantAck from L1, snoop of X should be **blocked**, 
+     * because a slave should not issue a Probe if there is a pending GrantAck on the block according to TileLink spec.
+     */
+    val reqBlockSnp_forSnoop  = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && s.w_comp_first }).asUInt.orR
+    val reqBlockSnp_forReplay = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskReplay_s1.set && s.reqTag === taskReplay_s1.tag && !s.willFree && s.w_comp_first }).asUInt.orR
+
+    val mshrBlockSnp_forSnoop  = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
+    val mshrBlockSnp_forReplay = mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR
+
+    val blockB_mayReadDS = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
+
+    blockB_s1           := reqBlockSnp_forSnoop || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
+    blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp_forReplay || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1
 
     blockC_s1 := mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2 // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
 

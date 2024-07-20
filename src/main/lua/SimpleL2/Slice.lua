@@ -314,12 +314,13 @@ local chi_rxsnp = ([[
 chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src)
     local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
     env.negedge()
-        chi_rxsnp.ready:expect(1)
         chi_rxsnp.bits.txnID:set(txn_id)
         chi_rxsnp.bits.addr:set(addr, true)
         chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
         chi_rxsnp.bits.retToSrc:set(ret2src)
         chi_rxsnp.valid:set(1)
+    env.posedge()
+        chi_rxsnp.ready:expect(1)
     env.negedge()
         chi_rxsnp.valid:set(0)
 end
@@ -3506,7 +3507,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             print "stage2 grant retry"
             
             tl_d.ready:set(0)
-            sourceD.io_task_s2_ready:set_force(0); sourceD.io_data_s2_ready:set_force(0) 
+            sourceD.io_task_s2_ready:set_force(0); sourceD.io_data_s2_ready:set_force(0); sourceD._skidBuffer_io_enq_ready:set_force(0); sourceD.skidBuffer.io_enq_ready_0:set_force(0)
             chi_txreq.ready:set(1); chi_txrsp.ready:set(1)
 
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, 3)
@@ -3521,7 +3522,7 @@ local test_stage2_mshr_retry = env.register_test_case "test_stage2_mshr_retry" {
             end
 
             tl_d.ready:set(1)
-            sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release()
+            sourceD.io_task_s2_ready:set_release(); sourceD.io_data_s2_ready:set_release(); sourceD._skidBuffer_io_enq_ready:set_release(); sourceD.skidBuffer.io_enq_ready_0:set_release()
             env.posedge()
             env.expect_not_happen_until(10, function () return mp.io_retryTasks_stage2_valid:is(1) and mp.io_retryTasks_stage2_bits_grant_s2:is(1) end)
             
@@ -4107,7 +4108,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             local snp_address = chi_txreq.bits.addr:get()
             print(("snp_address is 0x%x"):format(snp_address))
 
-            -- When MSHR is waiting for CompDBIDResp, a snoop is comming
+            -- When MSHR is waiting for Comp, a snoop is comming
             chi_rxsnp:snpshared(snp_address, 3, 0)
 
             do
@@ -4147,6 +4148,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
 
@@ -4220,6 +4222,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
 
@@ -4280,6 +4283,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0) 
         end
 
@@ -4353,6 +4357,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
 
@@ -4414,6 +4419,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
 
@@ -4487,6 +4493,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
 
@@ -4549,10 +4556,164 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                 end
             }
 
+            env.negedge(5)
             tl_e:grantack(0)  
         end
         
         -- TODO: SnpUnique BC/BBC
+
+        env.posedge(100)
+    end
+}
+
+local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function send_and_resp_request()
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            env.posedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        end
+
+        -- 
+        --             |   Snoop     Read   |
+        -- needs probe |    N         N     |
+        --             |    Y         N     |
+        --             |    Y         Y     |
+        --             |    N         Y     |
+        -- 
+
+        -- 
+        -- [1] Snoop needs MSHR
+        -- 
+        do
+            -- 
+            --   TC    I <-- AcquireBlock
+            --    \   / 
+            --     TTC
+            -- 
+            -- Snoop needs probe other core / Acquire needs probe other core
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, ("0b10"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, source)
+            
+
+        end
+
+
+        env.posedge(200)
+        env.TEST_SUCCESS()
+
+        -- 
+        -- [2] Snoop does not require MSHR
+        -- 
+        do
+            -- SnpShared + BC
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                chi_txreq:dump()
+            
+            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
+            
+            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+            chi_txrsp.bits.resp:expect(CHIResp.SC)
+
+            env.negedge()
+                chi_rxrsp:comp(0, 5) -- dbID = 5
+            env.negedge(10)
+                tl_e:grantack(0)
+            env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+        end
+
+        do
+            -- SnpUnique + BC
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                chi_txreq:dump()
+            
+            chi_rxsnp:snpunique(to_address(0x01, 0x01), 3, 0)
+
+            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+            chi_txrsp.bits.resp:expect(CHIResp.I)
+
+            env.negedge()
+                chi_rxrsp:comp(0, 5) -- dbID = 5
+            env.negedge(10)
+                tl_e:grantack(0)
+            env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+        end
+
+        do
+            -- 
+            --   BC     BC <--- AcquirePerm.BtoT
+            --     \    /
+            --       TD <--- SnpShared
+            -- 
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, ("0b11"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, source)
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(to_address(0x01, 0x01), 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+            env.posedge()
+                chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs Probe
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+
+            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 17)
+
+            env.negedge(10)
+            chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs to wait grant ack
+            tl_e:grantack(0)
+
+            -- 
+            --    I     TC
+            --     \    /
+            --       TTD
+            -- 
+            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
+            env.expect_happen_until(10, function () return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_meta_state:is(MixedState.TTD) end)
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+            tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoN, 0)
+            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end) 
+            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end)
+            env.negedge(20)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
 
         env.posedge(100)
     end
@@ -4565,6 +4726,7 @@ local test_release_nested_probe = env.register_test_case "test_release_and_probe
     end
 }
 
+-- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
 -- TODO: CHI retry
@@ -4576,6 +4738,9 @@ verilua "mainTask" { function ()
 
     -- local test_all = false
     local test_all = true
+
+    -- test_snoop_nested_read()
+    -- test_snoop_nested_evict()
 
     -- 
     -- normal test cases

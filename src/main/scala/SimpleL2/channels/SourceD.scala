@@ -13,11 +13,12 @@ import freechips.rocketchip.tilelink.TLMessages._
 // TODO: ReleaseAck on SourceB ?
 class SourceD()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val d         = DecoupledIO(new TLBundleD(tlBundleParams))
-        val task_s2   = Flipped(DecoupledIO(new TaskBundle))
-        val data_s2   = Flipped(DecoupledIO(UInt(dataBits.W)))
-        val task_s6s7 = Flipped(DecoupledIO(new TaskBundle))
-        val data_s6s7 = Flipped(DecoupledIO(UInt(dataBits.W)))
+        val d              = DecoupledIO(new TLBundleD(tlBundleParams))
+        val task_s2        = Flipped(DecoupledIO(new TaskBundle))
+        val data_s2        = Flipped(DecoupledIO(UInt(dataBits.W)))
+        val task_s6s7      = Flipped(DecoupledIO(new TaskBundle))
+        val data_s6s7      = Flipped(DecoupledIO(UInt(dataBits.W)))
+        val allocRespSinkE = ValidIO(new AllocRespSinkE)
     })
 
     val nonDataRespQueue = Module(
@@ -110,6 +111,9 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.d.bits.source  := deqTask.source
     io.d.bits.sink    := deqTask.sink
     io.d.bits.data    := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
+
+    io.allocRespSinkE.valid     := io.d.fire && (io.d.bits.opcode === GrantData && last || io.d.bits.opcode === Grant) && deqTask.isMshrTask
+    io.allocRespSinkE.bits.sink := io.d.bits.sink
 
     nonDataRespQueue.io.deq.ready := choseNonData && io.d.ready
     skidBuffer.io.deq.ready       := !choseNonData && io.d.ready && last
