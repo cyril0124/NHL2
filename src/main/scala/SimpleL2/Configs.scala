@@ -30,7 +30,7 @@ case class L2Param(
     nrClients: Int = 2, // number of L1 DCache
     enableClockGate: Boolean = true,
     nrMSHR: Int = 16,
-    nrReplayEntry: Int = 4,
+    nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
     metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,

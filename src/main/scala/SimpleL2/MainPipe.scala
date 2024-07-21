@@ -195,15 +195,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             }
 
             when(needReadOnMiss_a_s3) {
-                when(isAcquirePerm_s3 && task_s3.param === BtoT) {
-                    mshrAllocStates.s_makeunique := false.B
-                    mshrAllocStates.w_comp       := false.B
-                }.otherwise {
-                    mshrAllocStates.s_read          := false.B
-                    mshrAllocStates.w_compdat       := false.B
-                    mshrAllocStates.w_compdat_first := false.B
-                }
-                mshrAllocStates.s_compack := false.B
+                mshrAllocStates.s_read          := false.B
+                mshrAllocStates.w_compdat       := false.B
+                mshrAllocStates.w_compdat_first := false.B
+                mshrAllocStates.s_compack       := false.B
             }
         }
 
@@ -268,7 +263,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     /** Deal with snoop requests */
     // TODO: FwdSnoop => Irrespective of the value of RetToSrc, must return a copy if a Dirty cache line cannot be forwarded or kept.
-    val snpNeedData_s3  = !task_s3.isMshrTask && task_s3.isChannelB && hit_s3 && Mux(isFwdSnoop_s3, task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty, meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty)
+    val snpNeedData_s3 = !task_s3.isMshrTask && task_s3.isChannelB && hit_s3 && Mux(
+        isFwdSnoop_s3,
+        task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty,
+        meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty
+    )
     val snpChnlReqOK_s3 = !task_s3.isMshrTask && isSnoop_s3 && task_s3.isChannelB && !mshrAlloc_s3 && valid_s3 // Can ack snoop request without allocating MSHR, Snoop miss did not need mshr, response with SnpResp_I
     val snpReplay_s3    = task_s3.isChannelB && !mshrAlloc_s3 && (!snpNeedData_s3 && io.willFull_txrsp || snpNeedData_s3 && !hasValidDataBuf_s6s7) && valid_s3
     val snpRetry_s3     = task_s3.isMshrTask && snpNeedData_s3 && !hasValidDataBuf_s6s7 && valid_s3
@@ -302,7 +301,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         clientsOH = reqClientOH_s3 | meta_s3.clientsOH
     )
 
-    val snprespPassDirty_s3  = !isSnpOnceX_s3 && meta_s3.isDirty && hit_s3
+    val snprespPassDirty_s3  = !isSnpOnceX_s3 && meta_s3.isDirty && hit_s3 || task_s3.snpHitWriteBack && task_s3.snpGotDirty
     val snprespFinalState_s3 = Mux(isSnpToN_s3, MixedState.I, Mux(task_s3.opcode === SnpCleanShared, meta_s3.state, MixedState.BC))
     val newMeta_b_s3 = DirectoryMetaEntry(
         fromPrefetch = false.B, // TODO:

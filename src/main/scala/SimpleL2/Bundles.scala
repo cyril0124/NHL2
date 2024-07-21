@@ -35,6 +35,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val newMetaEntry = new DirectoryMetaEntryNoTag
 
     val snpHitWriteBack = Bool() // for Snoop nested MSHR
+    val snpGotDirty     = Bool() // for Snoop nested MSHR
 
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true

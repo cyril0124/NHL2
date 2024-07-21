@@ -78,6 +78,7 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_comp_first = Bool()
 
     val waitProbeAck = Bool()
+    val replGotDirty = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -222,9 +223,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (reqNeedT && dirResp.hit)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
-                    (reqNeedT && !dirResp.hit) -> ReadUnique,
-                    reqNeedB                   -> ReadNotSharedDirty
+                    (reqNeedT && dirResp.hit || req.opcode === AcquirePerm && req.param === BtoT) -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
+                    (reqNeedT && !dirResp.hit)                                                    -> ReadUnique,
+                    reqNeedB                                                                      -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,
@@ -233,7 +234,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     )
     io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_evict || !state.s_wb, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.txreq.bits.allowRetry := true.B                                                                        // TODO: Retry
-    io.tasks.txreq.bits.expCompAck := !state.s_read                                                                 // TODO: only for Read not for EvictS
+    io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique                                          // TODO: only for Read not for EvictS
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
     io.tasks.txreq.bits.order      := Order.None                                                                    // No ordering required
     io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
@@ -796,10 +797,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.set       := req.set
     io.status.reqTag    := req.tag
     io.status.metaTag   := dirResp.meta.tag
-    io.status.needsRepl := evictNotSent || wbNotSent                                                                                    // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
+    io.status.needsRepl := evictNotSent || wbNotSent                                                                                                                                      // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.s_accessack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
-    io.status.dirHit    := dirResp.hit                                                                                                  // Used by Directory to occupy a particular way.
+    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.dirHit    := dirResp.hit                                                                                                                                                    // Used by Directory to occupy a particular way.
     io.status.state     := meta.state
 
     io.status.w_replResp   := state.w_replResp
@@ -809,6 +810,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_comp_first := state.w_evict_comp && state.w_compdat_first
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
+    io.status.replGotDirty := replGotDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))

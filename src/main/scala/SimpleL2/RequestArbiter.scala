@@ -141,9 +141,19 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     }
 
     def snpHitWriteBack(set: UInt, tag: UInt): UInt = {
-        VecInit(io.mshrStatus.map { s =>
+        val matchVec = VecInit(io.mshrStatus.map { s =>
             s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_evict_comp || !s.w_compdbid)
         }).asUInt
+        assert(PopCount(matchVec) <= 1.U)
+        matchVec
+    }
+
+    def snpGotDirty(set: UInt, tag: UInt): UInt = {
+        val matchVec = VecInit(io.mshrStatus.map { s =>
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && s.replGotDirty
+        }).asUInt
+        assert(PopCount(matchVec) <= 1.U)
+        matchVec
     }
 
     /**
@@ -190,8 +200,9 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     )
 
     arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !blockB_s1
-    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !blockB_s1
+    arbTaskSnoop.bits.snpGotDirty     := snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag).orR
+    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_s1 && !blockB_s1
+    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_s1 && !blockB_s1
 
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
@@ -199,11 +210,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arbTaskReplay.valid    := io.taskReplay_s1.valid && !blockReplay_s1
     io.taskReplay_s1.ready := arbTaskReplay.ready && !blockReplay_s1
 
-    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !blockA_s1
-    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !blockA_s1
+    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !noSpaceForReplay_s1 && !blockA_s1
+    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !noSpaceForReplay_s1 && !blockA_s1
 
-    // TODO: block when no space for Replay
-    chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && io.dirRead_s1.ready && Mux(!chnlTask_s1.bits.isReplayTask, !noSpaceForReplay_s1, true.B)
+    chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && io.dirRead_s1.ready
     task_s1 := Mux(
         mshrTaskFull_s1,
         mshrTask_s1,
@@ -241,9 +251,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.dsWrSet_s1              := task_s1.set
     io.dsWrWayOH_s1            := task_s1.wayOH
 
-    val fireVec_s1 = VecInit(Seq(io.taskSinkA_s1.fire, io.taskSinkC_s1.fire, io.taskSnoop_s1.fire, io.taskCMO_s1.fire, io.taskReplay_s1.fire))
-    dontTouch(fireVec_s1)
-    assert(PopCount(fireVec_s1.asUInt) <= 1.U)
+    val fireVec_s1 = VecInit(Seq(io.taskSinkA_s1.fire, io.taskSinkC_s1.fire, io.taskSnoop_s1.fire, io.taskCMO_s1.fire, io.taskReplay_s1.fire)).asUInt
+    assert(PopCount(fireVec_s1) <= 1.U, "fireVec_s1:%b", fireVec_s1)
 
     // -----------------------------------------------------------------------------------------
     // Stage 2
@@ -293,8 +302,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReplay_s1 = valid_s1 && !task_s1.isMshrTask && !task_s1.isChannelC
     val mayReplay_s2 = valid_s2 && !task_s2.isMshrTask && !task_s2.isChannelC
     val mayReplay_s3 = valid_s3 && !isMshrTask_s3 && !(channel_s3 === L2Channel.ChannelC)
-    mayReplayCnt        := PopCount(Cat(mayReplay_s1, mayReplay_s2, mayReplay_s3))
+    // mayReplayCnt        := PopCount(Cat(mayReplay_s1, mayReplay_s2, mayReplay_s3))
+    mayReplayCnt        := PopCount(Cat(1.U, mayReplay_s2, mayReplay_s3)) // TODO:
     noSpaceForReplay_s1 := mayReplayCnt >= io.replayFreeCnt
+    // TODO: extra entry for Snoop?
 
     dontTouch(io)
 }
