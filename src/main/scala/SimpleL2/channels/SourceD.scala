@@ -19,6 +19,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val task_s6s7      = Flipped(DecoupledIO(new TaskBundle))
         val data_s6s7      = Flipped(DecoupledIO(UInt(dataBits.W)))
         val allocRespSinkE = ValidIO(new AllocRespSinkE)
+        val nonDataRespCnt = Output(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
     })
 
     val nonDataRespQueue = Module(
@@ -30,6 +31,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
             flow = true
         )
     )
+    io.nonDataRespCnt := nonDataRespQueue.io.count
 
     val skidBuffer = Module(new SkidBuffer(new Bundle {
         val task = new TaskBundle

@@ -23,16 +23,16 @@ object RespErr {
 object Resp {
     val width = 3
 
-    val I     = "b000".U(width.W)
-    val SC    = "b001".U(width.W)
-    val UC    = "b010".U(width.W)
-    val UD    = "b010".U(width.W) // for Snoop responses
-    val SD    = "b011".U(width.W) // for Snoop responses
-    val I_PD  = "b100".U(width.W) // for Snoop responses
-    val SC_PD = "b101".U(width.W) // for Snoop responses
-    val UC_PD = "b110".U(width.W) // for Snoop responses
-    val UD_PD = "b110".U(width.W)
-    val SD_PD = "b111".U(width.W)
+    val I     = "b000".U(width.W) // 0
+    val SC    = "b001".U(width.W) // 1
+    val UC    = "b010".U(width.W) // 2
+    val UD    = "b010".U(width.W) // 2  for Snoop responses
+    val SD    = "b011".U(width.W) // 3  for Snoop responses
+    val I_PD  = "b100".U(width.W) // 4  for Snoop responses
+    val SC_PD = "b101".U(width.W) // 5  for Snoop responses
+    val UC_PD = "b110".U(width.W) // 6  for Snoop responses
+    val UD_PD = "b110".U(width.W) // 6
+    val SD_PD = "b111".U(width.W) // 7
 
     def setPassDirty(resp: UInt, passDirty: Bool) = {
         require(resp.getWidth == width)

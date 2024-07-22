@@ -390,7 +390,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)
     )
 
-    val valid_cbwrdata_mp_s3 = readOnCopyBack_s3 && valid_s3
+    val valid_cbwrdata_mp_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && valid_s3
     val valid_snpdata_s3     = snpNeedData_s3 && !task_s3.isMshrTask && !mshrAlloc_s3 && valid_s3
     val valid_snpdata_mp_s3  = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT && valid_s3
     val valid_snpresp_s3     = !snpNeedData_s3 && snpChnlReqOK_s3 && !snpReplay_s3

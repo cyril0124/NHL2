@@ -64,6 +64,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.resetFinish              <> dir.io.resetFinish
     reqArb.io.mpStatus                 <> mainPipe.io.status
     reqArb.io.replayFreeCnt            := replayStation.io.freeCnt
+    reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCnt
     reqArb.io.mshrStatus               <> missHandler.io.mshrStatus
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
     reqArb.io.fromSinkC.willWriteDS_s2 := sinkC.io.toReqArb.willWriteDS_s2

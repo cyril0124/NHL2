@@ -226,9 +226,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (reqNeedT && dirResp.hit || req.opcode === AcquirePerm && req.param === BtoT) -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
-                    (reqNeedT && !dirResp.hit)                                                    -> ReadUnique,
-                    reqNeedB                                                                      -> ReadNotSharedDirty
+                    (reqNeedT && dirResp.hit)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
+                    (reqNeedT && !dirResp.hit) -> ReadUnique,
+                    reqNeedB                   -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,
@@ -397,6 +397,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.opcode      := CopyBackWrData
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
+    mpTask_wbdata.bits.tag         := meta.tag
     mpTask_wbdata.bits.readTempDs  := false.B
     mpTask_wbdata.bits.updateDir   := false.B
     mpTask_wbdata.bits.resp := Resp.setPassDirty( // In CopyBackWrData, resp indicates the cacheline state before issuing the WriteBackFull transaction.
@@ -640,10 +641,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_sprobeack_first := true.B
             state.w_sprobeack       := state.w_sprobeack | probeFinish | (nextProbeAckClients === probeClients)
         }.elsewhen(sinkc.bits.opcode === ProbeAckData) {
-            when(!state.w_rprobeack) {
-                replGotDirty := true.B
-            }.otherwise {
-                gotDirty := true.B // rprobeack is NOT the same cacheline as the request cacheline
+            val probeAckIsDirty = sinkc.bits.param === TtoN || sinkc.bits.param === TtoB
+            when(probeAckIsDirty) { // for now we think ProbeAckData.BtoN is not a diry data
+                when(!state.w_rprobeack) {
+                    replGotDirty := true.B
+                }.otherwise {
+                    gotDirty := true.B // rprobeack is NOT the same cacheline as the request cacheline
+                }
             }
 
             state.w_aprobeack_first := true.B
@@ -655,7 +659,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_sprobeack_first := true.B
             state.w_sprobeack       := state.w_sprobeack | ((probeFinish | nextProbeAckClients === probeClients) && sinkc.bits.last)
 
-            when(!state.s_evict) {
+            when(!state.s_evict && probeAckIsDirty) {
                 state.s_evict      := true.B
                 state.w_evict_comp := true.B
 
@@ -820,17 +824,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.set       := req.set
     io.status.reqTag    := req.tag
     io.status.metaTag   := dirResp.meta.tag
-    io.status.needsRepl := evictNotSent || wbNotSent                                                                                                                                      // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
+    io.status.needsRepl := evictNotSent || wbNotSent // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay   := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
-    io.status.dirHit    := dirResp.hit                                                                                                                                                    // Used by Directory to occupy a particular way.
-    io.status.state     := meta.state
+    io.status.lockWay := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.dirHit  := dirResp.hit                                                                                                                                                                         // Used by Directory to occupy a particular way.
+    io.status.state   := meta.state
 
     io.status.w_replResp   := state.w_replResp
     io.status.w_rprobeack  := state.w_rprobeack
     io.status.w_evict_comp := state.w_evict_comp
     io.status.w_compdbid   := state.w_compdbid
-    io.status.w_comp_first := state.w_evict_comp && state.w_compdat_first
+    io.status.w_comp_first := state.w_compdat_first
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.replGotDirty := replGotDirty
