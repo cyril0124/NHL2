@@ -231,7 +231,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         ren_s6 := true.B
     }.elsewhen((io.toSourceD.dsResp_s6s7.fire && readToSourceD_s6 && !(ren_s7_dup && readToSourceD_s7_dup) || io.toTXDAT.dsResp_s6s7.fire && readToTXDAT_s6 && !(ren_s7_dup && readToTXDAT_s7_dup)) && !fire_s5 && ren_s6) {
         ren_s6 := false.B
-    }.elsewhen(fire_s6 && !ren_s5) {
+    }.elsewhen(fire_s6 && !fire_s5) {
         ren_s6 := false.B
     }
 

@@ -329,7 +329,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
     mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck) &&
-        (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
+        (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
         (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
         (state.s_aprobe && state.w_aprobeack) // need to wait for aProbe to finish (cause by Acquire)
@@ -451,7 +451,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.opcode      := Mux(gotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
     mpTask_snpresp.bits.channel     := Mux(gotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
-    mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc
+    mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc && !replGotDirty
     mpTask_snpresp.bits.tempDsDest  := DataDestination.TXDAT
     mpTask_snpresp.bits.updateDir   := true.B
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
@@ -789,7 +789,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val nested = io.nested.release
 
         when(nested.setDirty) {
-            replGotDirty := true.B
+            when(nedtedHitMatch) {
+                gotDirty := true.B
+            }.otherwise {
+                replGotDirty := true.B
+            }
 
             when(!state.s_evict) {
                 state.s_evict         := true.B

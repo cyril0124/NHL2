@@ -246,10 +246,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     dontTouch(task_s1)
 
     val tempDsToDs_s1       = (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR
-    val mayReadDS_a_s1      = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get
+    val mayReadDS_a_s1      = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get || io.taskSinkA_s1.bits.opcode === AcquirePerm
     val mayReadDS_b_s1      = task_s1.isChannelB
     val mayReadDS_mshr_s1   = mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT
-    val mayReadDS_replay_s1 = io.taskReplay_s1.bits.opcode === AcquireBlock || io.taskReplay_s1.bits.opcode === Get
+    val mayReadDS_replay_s1 = io.taskReplay_s1.bits.opcode === AcquireBlock || io.taskReplay_s1.bits.opcode === Get || io.taskReplay_s1.bits.opcode === AcquirePerm
     mayReadDS_a_s1_dup      := mayReadDS_a_s1
     mayReadDS_replay_s1_dup := mayReadDS_replay_s1
 

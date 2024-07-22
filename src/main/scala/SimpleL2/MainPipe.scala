@@ -349,19 +349,19 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    val replRespValid_s3        = io.replResp_s3.fire && !io.replResp_s3.bits.retry
-    val replRespNeedProbe_s3    = replRespValid_s3 && io.replResp_s3.bits.meta.clientsOH.orR
-    val replRespTag_s3          = io.replResp_s3.bits.meta.tag
-    val replRespWayOH_s3        = io.replResp_s3.bits.wayOH
-    val allocMshrIdx_s3         = OHToUInt(io.mshrFreeOH_s3)                                                      // TODO: consider OneHot?
-    val needAllocDestSinkC_s3   = (needProbeOnHit_a_s3 || needProbe_b_s3) && mshrAlloc_s3 || replRespNeedProbe_s3 // TODO: Snoop
-    val probeAckDataToTempDS_s3 = isAcquireBlock_s3 || needProbe_b_s3 || isGet_s3 && needProbeOnHit_a_s3          // AcquireBlock need GrantData response
+    val replRespValid_s3      = io.replResp_s3.fire && !io.replResp_s3.bits.retry
+    val replRespNeedProbe_s3  = replRespValid_s3 && io.replResp_s3.bits.meta.clientsOH.orR
+    val replRespTag_s3        = io.replResp_s3.bits.meta.tag
+    val replRespWayOH_s3      = io.replResp_s3.bits.wayOH
+    val allocMshrIdx_s3       = OHToUInt(io.mshrFreeOH_s3)                                                      // TODO: consider OneHot?
+    val needAllocDestSinkC_s3 = (needProbeOnHit_a_s3 || needProbe_b_s3) && mshrAlloc_s3 || replRespNeedProbe_s3 // TODO: Snoop
+    val sinkDataToTempDS_s3   = needProbe_b_s3 || (isGet_s3 || isAcquireBlock_s3) && needProbeOnHit_a_s3        // AcquireBlock need GrantData response, nested ReleaseData will be saved into the TempDataStorage
 
     /**
      *  If L2 is TRUNK, L1 migh owns a dirty cacheline, any dirty data should be updated in L2. GrantData must contain clean cacheline data.
      *  If we receive a replResp_s3, we should always not write data into [[DataStorage]] as the received dirty data will be written back into next level cache due to replacement.
      */
-    val probeAckDataToDS_s3 = meta_s3.isTrunk || replRespNeedProbe_s3 // Dirty data caused by replacement probe operation should be written into DataStorage
+    val sinkDataToDS_s3 = meta_s3.isTrunk || replRespNeedProbe_s3 // Dirty data caused by replacement probe operation should be written into DataStorage
     assert(!(io.replResp_s3.fire && !task_s3.isMshrTask), "replResp_s3 should only be valid when task_s3.isMshrTask")
 
     /** read data from [[DataStorage]] */
@@ -445,29 +445,29 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 4
     // -----------------------------------------------------------------------------------------
-    val task_s4                 = RegInit(0.U.asTypeOf(new TaskBundle))
-    val replRespNeedProbe_s4    = RegEnable(replRespNeedProbe_s3, fire_s3)
-    val replRespTag_s4          = RegEnable(replRespTag_s3, fire_s3)
-    val replRespWayOH_s4        = RegEnable(replRespWayOH_s3, fire_s3)
-    val allocMshrIdx_s4         = RegEnable(allocMshrIdx_s3, fire_s3)
-    val probeAckDataToTempDS_s4 = RegEnable(probeAckDataToTempDS_s3, fire_s3)
-    val probeAckDataToDS_s4     = RegEnable(probeAckDataToDS_s3, fire_s3)
-    val dirRespWayOH_s4         = RegEnable(io.dirResp_s3.bits.wayOH, fire_s3)
-    val respOpcode_s4           = RegEnable(respOpcode_s3, fire_s3)
-    val respParam_s4            = RegEnable(respParam_s3, fire_s3)
-    val snpResp_s4              = RegEnable(snpResp_s3, fire_s3)
-    val snpRetry_s4             = RegEnable(snpRetry_s3, fire_s3)
-    val copyBackRetry_s4        = RegEnable(copyBackRetry_s3, fire_s3)
-    val needAllocDestSinkC_s4   = RegNext(needAllocDestSinkC_s3 && !valid_replay_s3, false.B)
-    val valid_cbwrdata_mp_s4    = RegNext(valid_cbwrdata_mp_s3, false.B)
-    val valid_snpdata_s4        = RegNext(valid_snpdata_s3, false.B)
-    val valid_snpdata_mp_s4     = RegNext(valid_snpdata_mp_s3, false.B)
-    val valid_snpresp_s4        = RegNext(valid_snpresp_s3, false.B)
-    val valid_snpresp_mp_s4     = RegNext(valid_snpresp_mp_s3, false.B)
-    val valid_replay_s4         = RegNext(valid_replay_s3, false.B)
-    val valid_refill_s4         = RegNext(valid_refill_s3, false.B)
-    val valid_s4                = valid_cbwrdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4
-    val needsDataBuf_s4         = valid_cbwrdata_mp_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || (valid_refill_s4 && (task_s4.opcode === AccessAckData || task_s4.opcode === GrantData))
+    val task_s4               = RegInit(0.U.asTypeOf(new TaskBundle))
+    val replRespNeedProbe_s4  = RegEnable(replRespNeedProbe_s3, fire_s3)
+    val replRespTag_s4        = RegEnable(replRespTag_s3, fire_s3)
+    val replRespWayOH_s4      = RegEnable(replRespWayOH_s3, fire_s3)
+    val allocMshrIdx_s4       = RegEnable(allocMshrIdx_s3, fire_s3)
+    val sinkDataToTempDS_s4   = RegEnable(sinkDataToTempDS_s3, fire_s3)
+    val sinkDataToDS_s4       = RegEnable(sinkDataToDS_s3, fire_s3)
+    val dirRespWayOH_s4       = RegEnable(io.dirResp_s3.bits.wayOH, fire_s3)
+    val respOpcode_s4         = RegEnable(respOpcode_s3, fire_s3)
+    val respParam_s4          = RegEnable(respParam_s3, fire_s3)
+    val snpResp_s4            = RegEnable(snpResp_s3, fire_s3)
+    val snpRetry_s4           = RegEnable(snpRetry_s3, fire_s3)
+    val copyBackRetry_s4      = RegEnable(copyBackRetry_s3, fire_s3)
+    val needAllocDestSinkC_s4 = RegNext(needAllocDestSinkC_s3 && !valid_replay_s3, false.B)
+    val valid_cbwrdata_mp_s4  = RegNext(valid_cbwrdata_mp_s3, false.B)
+    val valid_snpdata_s4      = RegNext(valid_snpdata_s3, false.B)
+    val valid_snpdata_mp_s4   = RegNext(valid_snpdata_mp_s3, false.B)
+    val valid_snpresp_s4      = RegNext(valid_snpresp_s3, false.B)
+    val valid_snpresp_mp_s4   = RegNext(valid_snpresp_mp_s3, false.B)
+    val valid_replay_s4       = RegNext(valid_replay_s3, false.B)
+    val valid_refill_s4       = RegNext(valid_refill_s3, false.B)
+    val valid_s4              = valid_cbwrdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4
+    val needsDataBuf_s4       = valid_cbwrdata_mp_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || (valid_refill_s4 && (task_s4.opcode === AccessAckData || task_s4.opcode === GrantData))
 
     val validVec_s4 = Cat(needAllocDestSinkC_s4, valid_cbwrdata_mp_s4, valid_snpdata_s4, valid_snpdata_mp_s4, valid_snpresp_s4, valid_snpresp_mp_s4, valid_replay_s4, valid_refill_s4)
     assert(PopCount(validVec_s4) <= 1.U, "validVec_s4:0b%b", validVec_s4)
@@ -485,8 +485,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.allocDestSinkC_s4.bits.wayOH    := Mux(replRespNeedProbe_s4, replRespWayOH_s4, dirRespWayOH_s4)
     io.allocDestSinkC_s4.bits.set      := task_s4.set
     io.allocDestSinkC_s4.bits.tag      := Mux(replRespNeedProbe_s4, replRespTag_s4, task_s4.tag)
-    io.allocDestSinkC_s4.bits.isTempDS := probeAckDataToTempDS_s4
-    io.allocDestSinkC_s4.bits.isDS     := probeAckDataToDS_s4
+    io.allocDestSinkC_s4.bits.isTempDS := sinkDataToTempDS_s4
+    io.allocDestSinkC_s4.bits.isDS     := sinkDataToDS_s4
     assert(
         !(io.allocDestSinkC_s4.valid && io.allocDestSinkC_s4.bits.isDS && !io.allocDestSinkC_s4.bits.wayOH.orR),
         "invalid wayOH! wayOH:0b%b",
