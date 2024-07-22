@@ -17,6 +17,11 @@
     },
     {
         "package": "SimpleL2",
+        "target": "RequestBuffer",
+        "unit_test": true
+    },
+    {
+        "package": "SimpleL2",
         "target": "MainPipe",
         "unit_test": true
     },

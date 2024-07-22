@@ -1,67 +1,68 @@
-// package SimpleL2
+package SimpleL2
 
-// import chisel3._
-// import chisel3.util._
-// import org.chipsalliance.cde.config._
-// import freechips.rocketchip.tilelink._
-// import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-// import Utils.GenerateVerilog
-// import SimpleL2.Configs._
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config._
+import freechips.rocketchip.tilelink._
+import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import Utils.GenerateVerilog
+import SimpleL2.Configs._
+import SimpleL2.Bundles._
+import freechips.rocketchip.util.SeqToAugmentedSeq
+import xs.utils.FastArbiter
 
-// class RequestBufferEntry(implicit p: Parameters) extends L2Bundle {
-//     val owner  = UInt(RequestOwner.width.W)
-//     val opcode = UInt(3.W)
-//     val source = UInt(tlBundleParams.sourceBits.W)
-// }
+class RequestBufferEntry(implicit p: Parameters) extends L2Bundle {
+    val task  = new TaskBundle
+    val ready = Bool()
+}
 
-// class RequestBuffer()(implicit p: Parameters) extends L2Module {
-//     val io = IO(new Bundle {
-//         val sinkA = Flipped(Decoupled(new TLBundleA(tlBundleParams)))
-//         val owner = Input(UInt(RequestOwner.width.W))
-//     })
+class RequestBuffer()(implicit p: Parameters) extends L2Module {
+    val io = IO(new Bundle {
+        val taskIn  = Flipped(DecoupledIO(new TaskBundle))
+        val taskOut = DecoupledIO(new TaskBundle)
+    })
 
-//     io.sinkA       <> DontCare
-//     io.sinkA.ready := true.B
+    val issueArb = Module(new FastArbiter(new TaskBundle, nrReqBufEntry))
+    val valids   = RegInit(VecInit(Seq.fill(nrReqBufEntry)(false.B)))
+    val buffers  = RegInit(VecInit(Seq.fill(nrReqBufEntry)(0.U.asTypeOf(new RequestBufferEntry))))
+    val freeVec  = ~valids.asUInt
+    val hasEntry = freeVec.orR
+    val insertOH = PriorityEncoderOH(freeVec)
 
-//     val valids  = RegInit(VecInit(Seq.fill(nrRequestBufferEntry)(false.B)))
-//     val buffers = RegInit(VecInit(Seq.fill(nrRequestBufferEntry)(0.U.asTypeOf(new RequestBufferEntry))))
-//     dontTouch(valids)
-//     dontTouch(buffers)
+    val storeTask = io.taskIn.valid && !io.taskOut.ready
+    io.taskIn.ready := hasEntry
 
-//     val insertVec = VecInit(PriorityEncoderOH((~valids.asUInt).asBools))
-//     assert(!(PopCount(insertVec.asUInt) > 1.U))
-//     dontTouch(insertVec)
+    buffers.zipWithIndex.zip(insertOH.asBools).foreach { case ((buf, i), en) =>
+        when(en && storeTask && io.taskIn.fire) {
+            valids(i) := true.B
+            buf.task  := io.taskIn.bits
+            assert(!valids(i))
+        }
+    }
 
-//     buffers.zip(insertVec).foreach { case (buf, chosen) =>
-//         when(chosen && io.sinkA.fire) {
-//             buf.opcode := io.sinkA.bits.opcode
-//             buf.source := io.sinkA.bits.source
-//             buf.owner  := io.owner
-//         }
-//     }
+    issueArb.io.in.zipWithIndex.foreach { case (in, i) =>
+        in.valid := valids(i) // && buffers(i).ready // TODO: ready
+        in.bits  := buffers(i).task
 
-//     valids.zip(insertVec).foreach { case (valid, chosen) =>
-//         when(chosen && io.sinkA.fire) {
-//             assert(valid === false.B)
+        when(in.fire) {
+            valids(i) := false.B
+            assert(valids(i))
+        }
+    }
 
-//             valid := true.B
-//         }
-//     }
+    io.taskOut            <> issueArb.io.out
+    io.taskOut.bits       := Mux(io.taskIn.fire, io.taskIn.bits, issueArb.io.out.bits)
+    io.taskOut.valid      := io.taskIn.fire || issueArb.io.out.valid
+    issueArb.io.out.ready := io.taskOut.ready && !io.taskIn.fire
 
-//     // TODO: LFSR Arbiter output         ||
-//     //       Normal Arbiter output       ||
-//     //       Round Robin Arbiter Output
+    dontTouch(storeTask)
+}
 
-//     // TODO: bypass
+object RequestBuffer extends App {
+    val config = new Config((_, _, _) => {
+        case L2ParamKey      => L2Param()
+        case DebugOptionsKey => DebugOptions()
+    })
 
-//     dontTouch(io)
-// }
-
-// object RequestBuffer extends App {
-//     val config = new Config((_, _, _) => {
-//         case L2ParamKey      => L2Param()
-//         case DebugOptionsKey => DebugOptions()
-//     })
-
-//     GenerateVerilog(args, () => new RequestBuffer()(config), name = "RequestBuffer", split = false)
-// }
+    GenerateVerilog(args, () => new RequestBuffer()(config), name = "RequestBuffer", split = false)
+}

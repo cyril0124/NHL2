@@ -120,6 +120,13 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         }).asUInt
     }
 
+    def noFreeWay(set: UInt): Bool = {
+        val sameSet_s2     = valid_s2 && task_s2.isChannelA && task_s2.set === set
+        val sameSet_s3     = RegNext(valid_s2 && task_s2.isChannelA, false.B) && RegEnable(task_s2.set, valid_s2) === set
+        val mshrSameSetVec = VecInit(io.mshrStatus.map(s => s.valid && s.isChannelA && s.set === set))
+        (PopCount(mshrSameSetVec) + sameSet_s2 + sameSet_s3) >= ways.U
+    }
+
     val addrMatchVec_sinka         = addrMatchVec(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
     val addrMatchVec_replay        = addrMatchVec(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
     val addrMatchVec_snp           = addrMatchVec(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
@@ -127,12 +134,14 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val addrMatchVec_reqTag_replay = addrMatchVec_reqTag(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
 
     val mayReadDS_a_s1_dup            = WireInit(false.B)
+    val noFreeWay_sinka               = noFreeWay(io.taskSinkA_s1.bits.set)
+    val noFreeWay_replay              = noFreeWay(io.taskReplay_s1.bits.set)
     val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrMatchVec_sinka.orR
     val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrMatchVec_replay.orR
     val blockA_mayReadDS =
         mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
-    blockA_s1           := blockA_addrConflict || blockA_mayReadDS || io.fromSinkC.willWriteDS_s1
-    blockA_forReplay_s1 := blockA_addrConflict_forReplay || blockA_mayReadDS
+    blockA_s1           := blockA_addrConflict || blockA_mayReadDS || io.fromSinkC.willWriteDS_s1 || noFreeWay_sinka
+    blockA_forReplay_s1 := blockA_addrConflict_forReplay || blockA_mayReadDS || noFreeWay_replay
 
     def mshrBlockSnp(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { s =>

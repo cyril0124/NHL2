@@ -39,6 +39,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val rxsnp = Module(new RXSNP)
 
     /** Other modules */
+    val reqBuf        = Module(new RequestBuffer)
     val reqArb        = Module(new RequestArbiter)
     val dir           = Module(new Directory)
     val ds            = Module(new DataStorage)
@@ -51,10 +52,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.c <> io.tl.c
     sinkE.io.e <> io.tl.e
 
+    reqBuf.io.taskIn <> sinkA.io.task
+
     reqArb.io                          <> DontCare
     reqArb.io.taskMSHR_s0              <> missHandler.io.tasks.mpTask
     reqArb.io.taskReplay_s1            <> replayStation.io.req_s1
-    reqArb.io.taskSinkA_s1             <> sinkA.io.task
+    reqArb.io.taskSinkA_s1             <> reqBuf.io.taskOut // sinkA.io.task
     reqArb.io.taskSinkC_s1             <> sinkC.io.task
     reqArb.io.taskSnoop_s1             <> rxsnp.io.task
     reqArb.io.dirRead_s1               <> dir.io.dirRead_s1
@@ -139,9 +142,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.chi.rxdat <> rxdat.io.rxdat
     io.chi.rxrsp <> rxrsp.io.rxrsp
     io.chi.rxsnp <> rxsnp.io.rxsnp
-
-    dontTouch(reqArb.io)
-    dontTouch(mainPipe.io)
 
     dontTouch(io)
 }

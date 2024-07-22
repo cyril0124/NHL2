@@ -34,7 +34,7 @@ case class L2Param(
     nrNonDataSourceDEntry: Int = 4,
     metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
-    nrRequestBufferEntry: Int = 4,
+    nrReqBufEntry: Int = 4,
     rdQueueEntries: Int = 2,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
@@ -76,7 +76,7 @@ trait HasL2Param {
     val enableClockGate       = l2param.enableClockGate
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
-    val nrRequestBufferEntry  = l2param.nrRequestBufferEntry
+    val nrReqBufEntry         = l2param.nrReqBufEntry
     val nrNonDataSourceDEntry = l2param.nrNonDataSourceDEntry
     val rdQueueEntries        = l2param.rdQueueEntries
 

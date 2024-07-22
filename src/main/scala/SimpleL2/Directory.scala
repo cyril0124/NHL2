@@ -311,6 +311,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     }).reduceTree(_ | _).asUInt
     val freeWayMask_s3 = ~occWayMask_s3
     val replRetry_s3   = occWayMask_s3.andR
+    val noFreeWay_s3   = replRetry_s3
 
     val chosenWayOH_s3     = Mux(hasInv_s3, invWayOH_s3, UIntToOH(random.LFSR(3))(ways - 1, 0) /* TODO: Replacment way */ )
     val chosenWay_s3       = OHToUInt(chosenWayOH_s3)

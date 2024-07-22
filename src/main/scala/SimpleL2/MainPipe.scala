@@ -237,9 +237,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrNested.set := task_s3.set
     io.mshrNested.tag := task_s3.tag
     // io.mshrNested.snoop.cleanDirty :=
-    io.mshrNested.snoop.toN := (isSnpToN_s3 && !mshrAlloc_s3 || task_s3.isMshrTask && task_s3.channel === L2Channel.ChannelB && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && hit_s3 && valid_s3
-    io.mshrNested.snoop.toB := (isSnpToB_s3 && !mshrAlloc_s3 || task_s3.isMshrTask && task_s3.channel === L2Channel.ChannelB && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && hit_s3 && valid_s3
-    // TODO: io.mshrNested.release   := DontCare
+    io.mshrNested.snoop.toN        := (isSnpToN_s3 && !mshrAlloc_s3 || task_s3.isMshrTask && task_s3.channel === L2Channel.ChannelB && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && hit_s3 && valid_s3
+    io.mshrNested.snoop.toB        := (isSnpToB_s3 && !mshrAlloc_s3 || task_s3.isMshrTask && task_s3.channel === L2Channel.ChannelB && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && hit_s3 && valid_s3
+    io.mshrNested.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData
+    io.mshrNested.release.TtoN     := isRelease_s3 && task_s3.param === TtoN
+    io.mshrNested.release.BtoN     := isRelease_s3 && task_s3.param === BtoN
 
     /** coherency check */
     when(valid_s3) {
@@ -256,7 +258,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             addr
         )
 
-        assert(!(task_s3.isChannelC && isRelease_s3 && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
+        // assert(!(task_s3.isChannelC && isRelease_s3 && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
         assert(!(isRelease_s3 && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB
         assert(!(isRelease_s3 && task_s3.param === NtoN), "Unsupported Release.NtoN")
     }

@@ -79,6 +79,7 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
 
     val waitProbeAck = Bool()
     val replGotDirty = Bool()
+    val isChannelA   = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -121,9 +122,9 @@ class MshrNestedSnoop()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrNestedRelease()(implicit p: Parameters) extends L2Bundle {
-    val TtoN = Bool()
-    val BtoN = Bool()
-    // val setDirty = Bool()
+    val TtoN     = Bool()
+    val BtoN     = Bool()
+    val setDirty = Bool()
 }
 
 class MshrNestedWriteback()(implicit p: Parameters) extends L2Bundle {
@@ -175,6 +176,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
     val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
+    val finishedProbes  = RegInit(0.U(nrClients.W))
     assert(
         !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) === 0.U),
         "Acquir Probe has no probe clients! probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b dirHit:%b isAliasTask:%b addr:%x",
@@ -207,6 +209,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         gotDirty        := false.B
         replGotDirty    := false.B
         probeAckClients := 0.U
+        finishedProbes  := 0.U
         probeAckParams.foreach(_ := 0.U)
     }
 
@@ -273,6 +276,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Send [[SourceB]] task
      * -------------------------------------------------------
      */
+    val probeSource = PriorityEncoderOH(~finishedProbes & probeClients)
     io.tasks.sourceb.valid := !state.s_aprobe /* TODO: acquire probe with MakeUnique */ ||
         !state.s_sprobe ||
         !state.s_rprobe // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
@@ -283,13 +287,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.sourceb.bits.data    := DontCare
     io.tasks.sourceb.bits.mask    := DontCare
     io.tasks.sourceb.bits.corrupt := DontCare
-    io.tasks.sourceb.bits.source  := clientOHToSource(probeClients)                                  // TODO:
+    io.tasks.sourceb.bits.source  := clientOHToSource(probeSource)
     when(io.tasks.sourceb.fire) {
-        state.s_aprobe := true.B
-        state.s_sprobe := true.B
-        state.s_rprobe := true.B
-
         assert(probeClients.orR, "probeClients:0b%b should not be empty", probeClients)
+
+        val nextFinishedProbes = finishedProbes | getClientBitOH(io.tasks.sourceb.bits.source)
+        finishedProbes := nextFinishedProbes
+
+        when(nextFinishedProbes === probeClients) {
+            state.s_aprobe := true.B
+            state.s_sprobe := true.B
+            state.s_rprobe := true.B
+        }
     }
 
     /**
@@ -774,9 +783,22 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     when(nestedMatch) {
         val nested = io.nested.release
-        // when(nested.setDirty) {
-        //     meta.state := MixedState.setDirty(meta.state)
-        // }
+
+        when(nested.setDirty) {
+            replGotDirty := true.B
+
+            when(!state.s_evict) {
+                state.s_evict         := true.B
+                state.w_evict_comp    := true.B
+                state.s_wb            := false.B
+                state.w_compdbid      := false.B
+                state.s_cbwrdata      := false.B
+                state.w_cbwrdata_sent := false.B
+            }
+        }
+
+        when(nested.TtoN) {}
+
     }
 
     /**
@@ -790,8 +812,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         valid := false.B
     }
 
-    val evictNotSent = !state.s_evict
-    val wbNotSent    = !state.s_wb
+    val evictNotSent     = !state.s_evict
+    val wbNotSent        = !state.s_wb
+    val getValidReplResp = io.replResp_s3.fire && !io.replResp_s3.bits.retry && valid
     io.status.valid     := valid
     io.status.willFree  := willFree
     io.status.set       := req.set
@@ -811,6 +834,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.replGotDirty := replGotDirty
+    io.status.isChannelA   := req.isChannelA
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))

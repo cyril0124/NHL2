@@ -27,7 +27,7 @@ local req = ([[
 local freeCnt = dut.u_ReplayStation.io_freeCnt:chdl()
 local replayStation = dut.u_ReplayStation
 
-local nrReplayEntry = 4
+local nrReplayEntry = 8
 
 local test_basic_replay = env.register_test_case "test_basic_replay" {
     function ()
