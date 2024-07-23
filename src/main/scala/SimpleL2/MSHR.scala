@@ -778,10 +778,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
          */
         val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
         assert(
-            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack) && hasNestedSnoop || !hasNestedSnoop,
-            "w_compdbid:%d, w_evict_comp:%d",
+            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack) && hasNestedSnoop || !hasNestedSnoop || req.channel === L2Channel.ChannelB,
+            "w_compdbid:%d, w_evict_comp:%d, s_grant:%d, s_accessack:%d",
             state.w_compdbid,
-            state.w_evict_comp
+            state.w_evict_comp,
+            state.s_grant,
+            state.s_accessack
         )
     }
 
@@ -838,7 +840,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_rprobeack  := state.w_rprobeack
     io.status.w_evict_comp := state.w_evict_comp
     io.status.w_compdbid   := state.w_compdbid
-    io.status.w_comp_first := state.w_compdat_first
+    io.status.w_comp_first := state.w_compdat_first && state.w_comp
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.replGotDirty := replGotDirty

@@ -139,7 +139,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
      * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
      */
-    io.toTempDS.write.valid     := io.c.fire && last && isProbeAckData && respDataToTempDS // TODO: io.c.fire
+    io.toTempDS.write.valid     := io.c.fire && last && hasData && respDataToTempDS
     io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 

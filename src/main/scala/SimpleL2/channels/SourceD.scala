@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, SkidBuffer, LeakChecker}
+import Utils.{GenerateVerilog, SkidBuffer, LeakChecker, IDPoolAlloc}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import freechips.rocketchip.tilelink._
@@ -18,7 +18,8 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val data_s2        = Flipped(DecoupledIO(UInt(dataBits.W)))
         val task_s6s7      = Flipped(DecoupledIO(new TaskBundle))
         val data_s6s7      = Flipped(DecoupledIO(UInt(dataBits.W)))
-        val allocRespSinkE = ValidIO(new AllocRespSinkE)
+        val allocGrantMap  = DecoupledIO(new AllocGrantMap)                        // to SinkE
+        val sinkIdAlloc    = Flipped(new IDPoolAlloc(log2Ceil(nrExtraSinkId + 1))) // to sinkIDPool
         val nonDataRespCnt = Output(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
     })
 
@@ -71,6 +72,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     val deqData      = Mux(choseNonData, 0.U, skidBuffer.io.deq.bits.data)
     val deqNeedData  = needData(deqTask.opcode)
     val beatCnt      = RegInit(0.U(log2Ceil(nrBeat).W))
+    val first        = beatCnt === 0.U
     val last         = beatCnt === (nrBeat - 1).U
 
     /**
@@ -104,23 +106,35 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         }
     }
 
+    val sinkId = io.sinkIdAlloc.idOut
+    io.sinkIdAlloc.valid := io.d.fire && (io.d.bits.opcode === GrantData && first || io.d.bits.opcode === Grant) && !deqTask.isMshrTask
+
     io.d              <> DontCare
-    io.d.valid        := deqValid
+    io.d.valid        := deqValid && io.allocGrantMap.ready
     io.d.bits.corrupt := DontCare
     io.d.bits.opcode  := deqTask.opcode
     io.d.bits.param   := deqTask.param
-    io.d.bits.size    := Mux(needData(deqTask.opcode), 6.U, 5.U)       // TODO:
+    io.d.bits.size    := Mux(needData(deqTask.opcode), 6.U, 5.U) // TODO: parameterize
     io.d.bits.source  := deqTask.source
-    io.d.bits.sink    := deqTask.sink
-    io.d.bits.data    := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
+    io.d.bits.sink := Mux(
+        deqTask.isMshrTask,
+        deqTask.sink,
+        Mux(first, sinkId, RegEnable(sinkId, 0.U, first))
+    ) // If deqTask is a MSHR task, the sink id is used for the next incoming GrantAck to Address the matched MSHR, otherwise we should allocate an unique sink id which is not overlapped with mshr id to the Grant/GrantData.
+    io.d.bits.data := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
 
-    io.allocRespSinkE.valid     := io.d.fire && (io.d.bits.opcode === GrantData && last || io.d.bits.opcode === Grant) && deqTask.isMshrTask
-    io.allocRespSinkE.bits.sink := io.d.bits.sink
+    io.allocGrantMap.valid         := io.d.fire && (io.d.bits.opcode === GrantData && first || io.d.bits.opcode === Grant) // && deqTask.isMshrTask
+    io.allocGrantMap.bits.sink     := io.d.bits.sink
+    io.allocGrantMap.bits.mshrTask := deqTask.isMshrTask
+    io.allocGrantMap.bits.set      := deqTask.set
+    io.allocGrantMap.bits.tag      := deqTask.tag
 
-    nonDataRespQueue.io.deq.ready := choseNonData && io.d.ready
-    skidBuffer.io.deq.ready       := !choseNonData && io.d.ready && last
+    nonDataRespQueue.io.deq.ready := choseNonData && io.d.ready && io.allocGrantMap.ready
+    skidBuffer.io.deq.ready       := !choseNonData && io.d.ready && last && io.allocGrantMap.ready
 
     LeakChecker(io.d.valid, io.d.fire, Some("SourceD_io_d_valid"), maxCount = deadlockThreshold)
+
+    dontTouch(io)
 }
 
 object SourceD extends App {

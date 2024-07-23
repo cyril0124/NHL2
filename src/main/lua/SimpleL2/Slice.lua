@@ -1909,13 +1909,17 @@ local test_get_hit = env.register_test_case "test_get_hit" {
             }
 
             local source = 3 -- core 0 DCache
+            local sink = nil
             env.negedge(10)
                 tl_a:get(to_address(0x10, 0x20), source)
             env.negedge()
                 env.expect_happen_until(10, function () return tl_d:fire() end); tl_d:dump()
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+                sink = tl_d.bits.sink:get()
             env.negedge()
                 expect.equal(tl_d.bits.data:get()[1], 0xbeef); tl_d:dump()
+            env.negedge()
+                tl_e:grantack(sink)
         end
 
         env.posedge(100)
@@ -1925,42 +1929,55 @@ local test_get_hit = env.register_test_case "test_get_hit" {
             verilua "appendTasks" {
                 hit_latency = function ()
                     local s, e = 0, 0
-                    tl_a.valid:posedge(); env.negedge()
+                    env.expect_happen_until(10, function () return tl_a:fire() end)
                     s = env.cycles()
                     
-                    tl_d.valid:posedge(); env.negedge()
+                    env.expect_happen_until(10, function () return tl_d:fire() end)
                     e = env.cycles()
                     
                     print("AcquireBlock hit latency => " .. (e -s))
+                end,
+                check_no_alloc_mshr = function()
+                    env.expect_not_happen_until(10, function ()
+                        return mp.io_mshrAlloc_s3_valid:is(1)
+                    end)
                 end
             }
 
             local source = 28 -- core 1 DCache
+            local sink = nil
+            local address = to_address(0x10, 0x20)
             env.negedge()
-                tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source)
+                tl_a:acquire_block(address, TLParam.NtoT, source)
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return tl_d:fire() end)
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
+                sink = tl_d.bits.sink:get()
             env.negedge()
                 expect.equal(tl_d.bits.data:get()[1], 0xbeef)
+            env.negedge()
+                tl_e:grantack(sink)
+            env.negedge(20)
         end
 
         -- hit need probe
         do
             local source = 48 -- core 1 ICache
+            local address = to_address(0x10, 0x20)
+            print(("address: 0x%x"):format(address))
             env.negedge()
-                tl_a:get(to_address(0x10, 0x20), source)
-            env.posedge()
-                tl_b.valid:posedge(); env.negedge()
-                tl_b.bits.opcode:expect(TLOpcodeB.Probe); tl_b.bits.param:expect(TLParam.toB); tl_b.bits.address:expect(to_address(0x10, 0x20)); tl_b.bits.source:expect(16) -- source = 16 ==> Core 1
+                tl_a:get(address, source)
+            env.negedge()
+                env.expect_happen_until(10, function () return tl_b:fire() end)
+                tl_b.bits.opcode:expect(TLOpcodeB.Probe); tl_b.bits.param:expect(TLParam.toB); tl_b.bits.address:expect(address); tl_b.bits.source:expect(16) -- source = 16 ==> Core 1
             env.posedge(5)
         
             env.mux_case(case) {
                 probeack_data = function()
-                    tl_c:probeack_data(to_address(0x10, 0x20), TLParam.TtoB, "0xabab", "0xefef", 28) -- TODO: ProbeAck.TtoB
+                    tl_c:probeack_data(address, TLParam.TtoB, "0xabab", "0xefef", 28) -- TODO: ProbeAck.TtoB
                 end,
                 probeack = function()
-                    tl_c:probeack(to_address(0x10, 0x20), TLParam.TtoN, 28)
+                    tl_c:probeack(address, TLParam.TtoN, 28)
                 end
             }
             
@@ -1971,7 +1988,6 @@ local test_get_hit = env.register_test_case "test_get_hit" {
                             env.expect_happen_until(100, function ()
                                 return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(("0b10"):number()) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TD)
                             end)
-                            mp.io_dirWrite_s3_bits_meta_state:dump()
                         end
                     }
                     
@@ -4560,161 +4576,8 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
     end
 }
 
-local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
-    function ()
-        env.dut_reset()
-        resetFinish:posedge()
-
-        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
-
-        local function send_and_resp_request()
-            local source = 4
-            env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
-            env.posedge()
-                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
-            env.posedge()
-                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
-            env.posedge()
-                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
-        end
-
-        -- 
-        --             |   Snoop     Read   |
-        -- needs probe |    N         N     |
-        --             |    Y         N     |
-        --             |    Y         Y     |
-        --             |    N         Y     |
-        -- 
-
-        -- 
-        -- [1] Snoop needs MSHR
-        -- 
-        do
-            -- 
-            --   TC    I <-- AcquireBlock
-            --    \   / 
-            --     TTC
-            -- 
-            -- Snoop needs probe other core / Acquire needs probe other core
-            env.negedge()
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, ("0b10"):number())
-            local source = 4
-            env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, source)
-            
-
-        end
-
-
-        env.posedge(200)
-        env.TEST_SUCCESS()
-
-        -- 
-        -- [2] Snoop does not require MSHR
-        -- 
-        do
-            -- SnpShared + BC
-            env.negedge(20)
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
-            local source = 4
-            env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
-            env.posedge()
-                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
-                chi_txreq:dump()
-            
-            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
-            
-            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
-
-            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
-            chi_txrsp.bits.resp:expect(CHIResp.SC)
-
-            env.negedge()
-                chi_rxrsp:comp(0, 5) -- dbID = 5
-            env.negedge(10)
-                tl_e:grantack(0)
-            env.negedge(20)
-                mshrs[0].io_status_valid:expect(0)
-        end
-
-        do
-            -- SnpUnique + BC
-            env.negedge(20)
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
-            local source = 4
-            env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
-            env.posedge()
-                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
-                chi_txreq:dump()
-            
-            chi_rxsnp:snpunique(to_address(0x01, 0x01), 3, 0)
-
-            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
-            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
-            chi_txrsp.bits.resp:expect(CHIResp.I)
-
-            env.negedge()
-                chi_rxrsp:comp(0, 5) -- dbID = 5
-            env.negedge(10)
-                tl_e:grantack(0)
-            env.negedge(20)
-                mshrs[0].io_status_valid:expect(0)
-        end
-
-        do
-            -- 
-            --   BC     BC <--- AcquirePerm.BtoT
-            --     \    /
-            --       TD <--- SnpShared
-            -- 
-            env.negedge(20)
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, ("0b11"):number())
-            local source = 4
-            env.negedge()
-                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, source)
-            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
-            env.negedge()
-                chi_rxsnp.bits.txnID:set(3)
-                chi_rxsnp.bits.addr:set(bit.rshift(to_address(0x01, 0x01), 3), true)
-                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
-                chi_rxsnp.bits.retToSrc:set(0)
-                chi_rxsnp.valid:set(1)
-            env.posedge()
-                chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs Probe
-            env.negedge()
-                chi_rxsnp.valid:set(0)
-
-            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 17)
-
-            env.negedge(10)
-            chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs to wait grant ack
-            tl_e:grantack(0)
-
-            -- 
-            --    I     TC
-            --     \    /
-            --       TTD
-            -- 
-            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
-            env.expect_happen_until(10, function () return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_meta_state:is(MixedState.TTD) end)
-            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
-            tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoN, 0)
-            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end) 
-            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end)
-            env.negedge(20)
-            mshrs[0].io_status_valid:expect(0)
-        end
-
-
-        env.posedge(100)
-    end
-}
-
 -- TODO: nest: Release nest Probe, Snoop nest WriteBack/Evict
-local test_release_nested_probe = env.register_test_case "test_release_and_probe" {
+local test_release_nested_probe = env.register_test_case "test_release_nested_probe" {
     function ()
         env.dut_reset()
         resetFinish:posedge()
@@ -4875,8 +4738,8 @@ local test_release_nested_probe = env.register_test_case "test_release_and_probe
 
             verilua "appendTasks" {
                 function ()
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead2 end)
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef2 end)
+                    env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead2 end)
+                    env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef2 end)
                     env.negedge()
                     tl_e:grantack(0)
                 end
@@ -4952,6 +4815,237 @@ local test_multi_probe = env.register_test_case "test_multi_probe" {
     end
 }
 
+local test_grant_block_probe = env.register_test_case "test_grant_block_probe" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            local clientsOH = ("0b00"):number()
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+
+            local source = 4
+            local sink = nil
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) end)
+            env.negedge()
+                tl_d.valid:expect(1)
+                sink = tl_d.bits.sink:get()
+            
+            chi_rxsnp:snpunique(to_address(0x01, 0x01), 4, 0)
+            env.expect_not_happen_until(50, function () return tl_b:fire() end) -- Probe is blocked by the pending GrantAck
+            
+            env.negedge()
+                tl_e:grantack(sink)
+            env.expect_happen_until(10, function() return tl_b:fire() end)
+
+            env.dut_reset()
+        end
+
+        env.posedge(100)
+    end
+}
+
+
+local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function send_and_resp_request()
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            env.posedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        end
+
+        -- 
+        --             |   Snoop     Read   |
+        -- needs probe |    N         N     |
+        --             |    Y         N     |
+        --             |    Y         Y     |
+        --             |    N         Y     |
+        -- 
+
+        -- 
+        -- [1] Snoop needs MSHR
+        -- 
+        -- do
+        --     -- 
+        --     --   TC    I <-- AcquireBlock
+        --     --    \   / 
+        --     --     TTC
+        --     -- 
+        --     -- Snoop needs probe other core / Acquire needs probe other core
+        --     env.negedge()
+        --         write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, ("0b10"):number())
+        --     local source = 4
+        --     env.negedge()
+        --         tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, source)
+            
+
+        -- end
+
+        do
+            -- 
+            --  I    BC <- AcquireBlock.BtoT
+            --   \   /
+            --    BC 
+            --       <- SnpCleanInvalid
+            -- 
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b01"):number())
+            local source = 4
+            local address = to_address(0x01, 0x01)
+            env.negedge()
+                tl_a:acquire_block(address, TLParam.BtoT, source)
+            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+            
+            env.negedge()
+                chi_rxsnp.valid:set(1)
+                chi_rxsnp.bits.addr:set(bit.rshift(address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpCleanInvalid)
+                env.posedge()
+                chi_rxsnp.ready:expect(1) -- Snoop will not be blocked since the Acquire MSHR is scheduling MakeUnique and does not get Comp from next level cache.
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirResp_s3_bits_meta_clientsOH:is(1) end)
+            mp.io_mshrNested_snoop_toN:expect(0) -- Snoop cannot nest Acquire MSHR because the Snoop needs to Probe the upper level cache. The mshr nested action by Snoop will be deferred until the Snoop MSHR scheduling mainpipe task to update the directory meta.
+            
+            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+            tl_c:probeack(address, TLParam.BtoN, 0) -- TODO: ProbeAckData, ret2src = 1, SnpShared, SnpUnique
+            env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) end)
+            mp.io_mshrNested_snoop_toN:expect(1)
+            env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+
+            chi_rxrsp:comp(0, 0)
+            env.expect_happen_until(10, function() return tl_d:fire() end)
+            env.negedge()
+                tl_d.valid:expect(1)
+            env.negedge()
+                tl_e:grantack(0)
+            env.negedge(10)
+                mshrs[0].io_status_valid:expect(0)
+                mshrs[1].io_status_valid:expect(0)
+        end
+
+        -- env.posedge(200)
+        -- env.TEST_SUCCESS()
+
+        -- 
+        -- [2] Snoop does not require MSHR
+        -- 
+        do
+            -- SnpShared + BC
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                chi_txreq:dump()
+            
+            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
+            
+            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toB:is(1) end)
+
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+            chi_txrsp.bits.resp:expect(CHIResp.SC)
+
+            env.negedge()
+                chi_rxrsp:comp(0, 5) -- dbID = 5
+            env.negedge(10)
+                tl_e:grantack(0)
+            env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+        end
+
+        do
+            -- SnpUnique + BC
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                chi_txreq:dump()
+            
+            chi_rxsnp:snpunique(to_address(0x01, 0x01), 3, 0)
+
+            env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) end)
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
+            chi_txrsp.bits.resp:expect(CHIResp.I)
+
+            env.negedge()
+                chi_rxrsp:comp(0, 5) -- dbID = 5
+            env.negedge(10)
+                tl_e:grantack(0)
+            env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+        end
+
+        do
+            -- 
+            --   BC     BC <--- AcquirePerm.BtoT
+            --     \    /
+            --       TD <--- SnpShared
+            -- 
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, ("0b11"):number())
+            local source = 4
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, source)
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(to_address(0x01, 0x01), 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+            env.posedge()
+                chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs Probe
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+
+            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 17)
+
+            env.negedge(10)
+            chi_rxsnp.ready:expect(0) -- Snoop will be blocked beacuse Acquire MSHR needs to wait grant ack
+            tl_e:grantack(0)
+
+            -- 
+            --    I     TC
+            --     \    /
+            --       TTD
+            -- 
+            chi_rxsnp:snpshared(to_address(0x01, 0x01), 3, 0)
+            env.expect_happen_until(10, function () return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_meta_state:is(MixedState.TTD) end)
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+            tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoN, 0)
+            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end) 
+            env.expect_happen_until(20, function () return chi_txdat:fire() and chi_txdat.bits.resp:is(CHIResp.SC_PD) end)
+            env.negedge(20)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5021,6 +5115,7 @@ verilua "mainTask" { function ()
 
     test_multi_probe()
     test_release_nested_probe()
+    test_grant_block_probe()
     end
 
    

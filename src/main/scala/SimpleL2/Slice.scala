@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.GenerateVerilog
+import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
@@ -22,13 +22,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
     io.chi         <> DontCare
     io.chiLinkCtrl <> DontCare
 
-    io.tl.e.ready := true.B
-
     /** TileLink side channels (upstream) */
     val sinkA   = Module(new SinkA)
     val sinkC   = Module(new SinkC)
     val sinkE   = Module(new SinkE)
     val sourceD = Module(new SourceD)
+    val sourceB = Module(new SourceB)
 
     /** CHI side channels (downstream) */
     val txreq = Module(new TXREQ)
@@ -47,6 +46,13 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val tempDS        = Module(new TempDataStorage)
     val missHandler   = Module(new MissHandler)
     val replayStation = Module(new ReplayStation)
+
+    val sinkIdPool = Module(new IDPool((nrMSHR until (nrMSHR + nrExtraSinkId)).toSet))
+
+    sinkIdPool.io.alloc.valid    := sourceD.io.sinkIdAlloc.valid
+    sourceD.io.sinkIdAlloc.idOut := sinkIdPool.io.alloc.idOut
+    sinkIdPool.io.free.valid     := sinkE.io.sinkIdFree.valid
+    sinkIdPool.io.free.idIn      := sinkE.io.sinkIdFree.idIn
 
     sinkA.io.a <> io.tl.a
     sinkC.io.c <> io.tl.c
@@ -116,7 +122,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
-    sourceD.io                 <> DontCare
     sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
     sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
@@ -126,17 +131,19 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s4 <> mainPipe.io.txrsp_s4
 
-    txdat.io                 <> DontCare
     txdat.io.task_s2         <> mainPipe.io.txdat_s2
     txdat.io.data_s2         <> tempDS.io.toTXDAT.data_s2
     txdat.io.task_s6s7       <> mainPipe.io.txdat_s6s7
     txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid
     txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data
 
-    sinkE.io.allocRespSinkE <> sourceD.io.allocRespSinkE
+    sinkE.io.allocGrantMap <> sourceD.io.allocGrantMap
+
+    sourceB.io.task           <> missHandler.io.tasks.sourceb
+    sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
 
     io.tl.d      <> sourceD.io.d
-    io.tl.b      <> missHandler.io.tasks.sourceb
+    io.tl.b      <> sourceB.io.b
     io.chi.txreq <> txreq.io.out
     io.chi.txrsp <> txrsp.io.out
     io.chi.txdat <> txdat.io.out

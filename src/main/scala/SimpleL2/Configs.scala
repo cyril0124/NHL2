@@ -30,6 +30,7 @@ case class L2Param(
     nrClients: Int = 2, // number of L1 DCache
     enableClockGate: Boolean = true,
     nrMSHR: Int = 16,
+    nrExtraSinkId: Int = 16, // extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
     metaSramBank: Int = 4,
@@ -67,6 +68,8 @@ trait HasL2Param {
     val sliceBits     = bankBits
     val tagBits       = l2param.addressBits - setBits - bankBits - offsetBits
     val nrMSHR        = l2param.nrMSHR
+    val nrExtraSinkId = l2param.nrExtraSinkId
+    val nrGrantMap    = nrMSHR
     val mshrBits      = log2Ceil(l2param.nrMSHR)
     val nrReplayEntry = l2param.nrReplayEntry
     val metaSramBank  = l2param.metaSramBank // TODO: remove this

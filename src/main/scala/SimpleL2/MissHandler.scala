@@ -115,19 +115,20 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     }
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
+    val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt
     val nestedSetMatchVec     = VecInit(mshrs.map(_.io.status.set === io.mshrNested.set)).asUInt
     val nestedReqTagMatchVec  = VecInit(mshrs.map(m => m.io.status.reqTag === io.mshrNested.tag)).asUInt
     val nestedMetaTagMatchVec = VecInit(mshrs.map(m => m.io.status.metaTag === io.mshrNested.tag && m.io.status.lockWay)).asUInt
     val hasNestedActions      = VecInit(io.mshrNested.snoop.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.mshrNested.release.elements.map(_._2).toSeq).asUInt.orR
     assert(
-        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedReqTagMatchVec & mshrValidVec) > 1.U),
+        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedReqTagMatchVec & mshrValidNestedVec) > 1.U),
         "nested set and reqTag should be unique, %b",
-        nestedSetMatchVec & nestedReqTagMatchVec & mshrValidVec
+        nestedSetMatchVec & nestedReqTagMatchVec & mshrValidNestedVec
     )
     assert(
-        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidVec) > 1.U),
+        !(hasNestedActions && PopCount(nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidNestedVec) > 1.U),
         "nested set and metaTag should be unique, %b",
-        nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidVec
+        nestedSetMatchVec & nestedMetaTagMatchVec & mshrValidNestedVec
     )
 
     val mshrCount = PopCount(mshrValidVec)

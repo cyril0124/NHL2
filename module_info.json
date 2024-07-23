@@ -90,6 +90,11 @@
     },
     {
         "package": "SimpleL2",
+        "target": "SinkE",
+        "unit_test": true
+    },
+    {
+        "package": "SimpleL2",
         "target": "ReplayStation",
         "unit_test": true
     },
@@ -106,6 +111,11 @@
     {
         "package": "Utils",
         "target": "SkidBuffer",
+        "unit_test": true
+    },
+    {
+        "package": "Utils",
+        "target": "IDPool",
         "unit_test": true
     },
     {
