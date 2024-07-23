@@ -3,8 +3,6 @@ package Utils
 import chisel3._
 import chisel3.util._
 import Utils.GenerateVerilog
-import freechips.rocketchip.diplomacy.BufferParams.pipe
-import chiseltest.Region
 
 class SkidBuffer[T <: Data](gen: T, overrideName: Boolean = true) extends Module {
     override def desiredName = if (overrideName) {
