@@ -130,6 +130,8 @@ class MshrNestedRelease()(implicit p: Parameters) extends L2Bundle {
 class MshrNestedWriteback()(implicit p: Parameters) extends L2Bundle {
     val set     = UInt(setBits.W)
     val tag     = UInt(tagBits.W)
+    val isMshr  = Bool()
+    val mshrId  = UInt(mshrBits.W)
     val snoop   = new MshrNestedSnoop
     val release = new MshrNestedRelease
 }
@@ -736,8 +738,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      *  (1) If a WriteBackFull/Evict is nested my downstream Snoop(sam address), the [[MainPipe]] should ack the Snoop first and notify the nested [[MSHR]] at Stage 3 to update the directory meta.
      *  (2) ...
      */
-    val nestedMatch    = valid && !meta.isInvalid && req.set === io.nested.set && meta.tag === io.nested.tag && state.w_replResp
-    val nedtedHitMatch = valid && dirResp.hit && req.set === io.nested.set && meta.tag === io.nested.tag
+    val nestedMatch    = valid && !meta.isInvalid && req.set === io.nested.set && meta.tag === io.nested.tag && state.w_replResp && !(io.nested.isMshr && io.nested.mshrId === io.id)
+    val nedtedHitMatch = valid && dirResp.hit && req.set === io.nested.set && meta.tag === io.nested.tag && !(io.nested.isMshr && io.nested.mshrId === io.id)
     when(nestedMatch) {
         val nested = io.nested.snoop
         // when(nested.cleanDirty) {

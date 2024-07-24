@@ -365,7 +365,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     // }
 }
 
-class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0)(implicit p: Parameters) extends LazyModule {
+class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
     def createDCacheNode(name: String, sources: Int) = {
@@ -442,15 +442,33 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0)(i
         // l2.module.io.chiLinkCtrl <> DontCare
         l2.module.io.nodeID := nodeID.U
 
-        val endpoint = Module(new SimpleEndpointCHI)
-        endpoint.io.chi                  <> l2.module.io.chi
-        endpoint.io.chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
-        endpoint.io.chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
-        endpoint.io.chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
-        endpoint.io.chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
-        endpoint.io.chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
-        endpoint.io.chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
-        dontTouch(endpoint.io)
+        if (hasEndpoint) {
+            val endpoint = Module(new SimpleEndpointCHI)
+            endpoint.io.chi                  <> l2.module.io.chi
+            endpoint.io.chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
+            endpoint.io.chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
+            endpoint.io.chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
+            endpoint.io.chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
+            endpoint.io.chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
+            endpoint.io.chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
+            dontTouch(endpoint.io)
+        } else {
+            val l2_chi                  = IO(l2.module.io.chi.cloneType)
+            val l2_chi_rx_linkactiveack = IO(l2.module.io.chi_rx_linkactiveack.cloneType)
+            val l2_chi_rx_linkactivereq = IO(Flipped(l2.module.io.chi_rx_linkactivereq.cloneType))
+            val l2_chi_tx_linkactiveack = IO(Flipped(l2.module.io.chi_tx_linkactiveack.cloneType))
+            val l2_chi_tx_linkactivereq = IO(l2.module.io.chi_tx_linkactivereq.cloneType)
+            val l2_chi_tx_rxsactive     = IO(Flipped(l2.module.io.chi_tx_rxsactive.cloneType))
+            val l2_chi_tx_txsactive     = IO(l2.module.io.chi_tx_txsactive.cloneType)
+            l2_chi                  <> l2.module.io.chi
+            l2_chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
+            l2_chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
+            l2_chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
+            l2_chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
+            l2_chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
+            l2_chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
+        }
+
         dontTouch(l2.module.io)
     }
 }
@@ -461,7 +479,7 @@ object SimpleL2Cache extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
-    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12)(p)))(config)
+    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12, hasEndpoint = true)(p)))(config)
 
     GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", split = false)
 }

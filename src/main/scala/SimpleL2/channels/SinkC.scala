@@ -178,7 +178,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2
     // -----------------------------------------------------------------------------------------
-    io.dsWrite_s2.valid      := RegNext(fire_s1, false.B)
+    io.dsWrite_s2.valid      := RegNext(dsWrite_s1.valid, false.B)
     io.dsWrite_s2.bits.data  := RegEnable(dsWrite_s1.bits.data, 0.U, fire_s1)
     io.dsWrite_s2.bits.set   := RegEnable(dsWrite_s1.bits.set, 0.U, fire_s1)
     io.dsWrite_s2.bits.wayOH := RegEnable(dsWrite_s1.bits.wayOH, 0.U, fire_s1) // For ReleaseData, wayOH is provided in MainPipe stage 3

@@ -3,6 +3,7 @@ package Utils
 import chisel3._
 import chisel3.util._
 import Utils.GenerateVerilog
+import chisel3.experimental.{SourceInfo, SourceLine}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class IDPoolAlloc(idBits: Int) extends Bundle {
@@ -15,7 +16,7 @@ class IDPoolFree(idBits: Int) extends Bundle {
     val idIn  = Input(UInt(idBits.W))
 }
 
-class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
+class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000)(implicit s: SourceInfo) extends Module {
     val idBits    = log2Ceil(ids.toSeq.max) + 1
     val sortedIds = ids.toSeq.sorted(Ordering[Int])
     val nrIds     = sortedIds.size
@@ -28,7 +29,11 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
         val freeCnt = Output((UInt(log2Ceil(nrIds + 1).W)))
     })
 
-    println(s"[${this.getClass().toString()}] create IDPool with ids:${sortedIds}")
+    val debugInfo = s match {
+        case SourceLine(filename, line, col) => s"($filename:$line:$col)"
+        case _                               => ""
+    }
+    println(s"[${this.getClass().toString()}] create IDPool with ids:${sortedIds} at ${debugInfo}")
 
     val allocIdx = RegInit(0.U(log2Ceil(nrIds).W))
     val freeIdx  = RegInit(0.U(log2Ceil(nrIds).W))
@@ -48,11 +53,11 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
     when(io.alloc.valid) {
         allocIdx := Mux(allocIdx === (nrIds - 1).U, 0.U, allocIdx + 1.U)
 
-        val allocVec = VecInit(validIds.map(_ === io.alloc.idOut)).reverse
-        allocVec.zip(allocatedList.reverse).foreach { case (alloc, idBit) =>
+        val allocVec = VecInit(validIds.map(_ === io.alloc.idOut)).reverse.asUInt
+        allocVec.asBools.zip(allocatedList.reverse).foreach { case (alloc, idBit) =>
             idBit := idBit | alloc
             when(alloc) {
-                assert(!idBit, "idOut: %d allocVec:%b", io.alloc.idOut, allocVec.asUInt)
+                assert(!idBit, "idOut: %d allocVec:%b", io.alloc.idOut, allocVec)
             }
         }
     }

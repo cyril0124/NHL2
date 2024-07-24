@@ -128,9 +128,28 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         (PopCount(mshrSameSetVec) + sameSet_s2 + sameSet_s3) >= ways.U
     }
 
-    def setConflict(set: UInt): Bool = {
-        val sameSet_s2 = valid_s2 && (task_s2.isChannelA || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
-        val sameSet_s3 = RegNext(valid_s2 && (task_s2.isChannelA || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
+    def setConflict(channel: String, set: UInt, tag: UInt): Bool = {
+        // setConflict for channel tasks
+        // ! This function only covers stage2 and stage3. Other stages should be covered by other signals.
+        // TODO: optimize this
+        if (channel == "A") {
+            val sameSet_s2 = valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
+            val sameSet_s3 = RegNext(valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
+            sameSet_s2 || sameSet_s3
+        } else if (channel == "B") {
+            val sameSet_s2 = valid_s2 && (!task_s2.isMshrTask && task_s2.tag === tag || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
+            val sameSet_s3 = RegNext(valid_s2 && (!task_s2.isMshrTask && task_s2.tag === tag || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
+            sameSet_s2 || sameSet_s3
+        } else {
+            assert(false, "invalid channel => " + channel)
+            false.B
+        }
+    }
+
+    def setConflict_forRepl(set: UInt): Bool = {
+        // MSHR repl task should be blocked if stage2 and stage3 have channel tasks since channel tasks will update the directory info; otherwise, repl task will get outdated directory info.
+        val sameSet_s2 = valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
+        val sameSet_s3 = RegNext(valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
         sameSet_s2 || sameSet_s3
     }
 
@@ -145,8 +164,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_replay_s1_dup       = WireInit(false.B)
     val noFreeWay_forSinkA            = noFreeWay(io.taskSinkA_s1.bits.set)
     val noFreeWay_forReplay           = noFreeWay(io.taskReplay_s1.bits.set)
-    val setConflict_forSinkA          = setConflict(io.taskSinkA_s1.bits.set)
-    val setConflict_forReplay         = setConflict(io.taskReplay_s1.bits.set)
+    val setConflict_forSinkA          = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
+    val setConflict_forReplay         = setConflict("A", io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
     val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrMatchVec_forSinkA.orR
     val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrMatchVec_forReplay.orR
     val blockA_mayReadDS_forSinkA =
@@ -187,11 +206,12 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mshrBlockSnp_forSnoop  = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
     val mshrBlockSnp_forReplay = mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR
 
-    val blockB_mayReadDS     = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
-    val setConflict_forSnoop = setConflict(io.taskSnoop_s1.bits.set)
+    val blockB_mayReadDS       = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
+    val setConflict_forSnoop   = setConflict("B", io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
+    val setConflict_b_forSnoop = setConflict("B", io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
 
     blockB_s1           := reqBlockSnp_forSnoop || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
-    blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp_forReplay || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forReplay
+    blockB_forReplay_s1 := reqBlockSnp_forReplay || mshrBlockSnp_forReplay || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_b_forSnoop
 
     val noSpaceForNonDataResp = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U // No space for ReleaseAck to send out to SourceD
 
@@ -253,11 +273,12 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     mayReadDS_a_s1_dup      := mayReadDS_a_s1
     mayReadDS_replay_s1_dup := mayReadDS_replay_s1
 
-    val dsReady_s1     = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2
-    val tempDsReady_s1 = io.tempDsRead_s1.ready && (tempDsToDs_s1 && dsReady_s1 || !tempDsToDs_s1)
+    val dsReady_s1             = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2
+    val tempDsReady_s1         = io.tempDsRead_s1.ready && (tempDsToDs_s1 && dsReady_s1 || !tempDsToDs_s1)
+    val setConflict_forRepl_s1 = setConflict_forRepl(mshrTask_s1.set)
     val mshrTaskReady_s1 = Mux(
         mshrTask_s1.isReplTask,
-        io.dirRead_s1.ready,
+        io.dirRead_s1.ready && !setConflict_forRepl_s1, // MSHR repl task should be blocked if stage2 and stage3 have channel tasks since channel tasks will update the directory info; otherwise, repl task will get outdated directory info.
         (mshrTask_s1.readTempDs && tempDsReady_s1 || !mshrTask_s1.readTempDs) && (mayReadDS_mshr_s1 && dsReady_s1 || !mayReadDS_mshr_s1)
     )
     io.toSinkC.mayReadDS_s1    := mshrTaskFull_s1 && mayReadDS_mshr_s1

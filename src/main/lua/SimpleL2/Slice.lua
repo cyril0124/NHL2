@@ -2576,6 +2576,7 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
                     end)
                 end
             }
+            env.negedge(20)
         end
 
         do
@@ -2607,10 +2608,8 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
                     end)
                 end
             }
+            env.negedge(20)
         end
-
-        env.negedge(10)
-
 
         -- 
         -- SnpShared to I => I
@@ -5046,10 +5045,60 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
     end
 }
 
+local test_acquire_BtoT_miss = env.register_test_case "test_acquire_BtoT_miss" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            -- AcquireBlock
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, ("0b00"):number())
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            
+            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+            chi_rxdat:compdat(0, "0xdead22", "0xbeef22", 5, CHIResp.UC)
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.CompAck) end)
+            
+            env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(0) and tl_d.bits.data:get()[1] == 0xdead22 end)
+            env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(0) and tl_d.bits.data:get()[1] == 0xbeef22 end)
+            local sink = tl_d.bits.sink:get()
+
+            tl_e:grantack(sink)
+        end
+
+        do
+            -- AcquirePerm
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, ("0b00"):number())
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            
+            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+            chi_rxdat:compdat(0, "0xdead22", "0xbeef22", 5, CHIResp.UC)
+            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.CompAck) end)
+            
+            env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(0) and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+            local sink = tl_d.bits.sink:get()
+            env.negedge()
+            env.expect_not_happen_until(20, function () return tl_d:fire() end)
+
+            tl_e:grantack(sink)
+        end
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
 -- TODO: CHI retry
+
+-- TODO: Grant at MainPipe should block Probe with same address
 
  
 jit.off()
@@ -5116,6 +5165,7 @@ verilua "mainTask" { function ()
     test_multi_probe()
     test_release_nested_probe()
     test_grant_block_probe()
+    test_acquire_BtoT_miss()
     end
 
    

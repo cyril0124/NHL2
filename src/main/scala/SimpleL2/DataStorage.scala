@@ -260,7 +260,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     }
 
     assert(!(ren_s7 && readToSourceD_s7 && readToTXDAT_s7))
-    LeakChecker(ren_s7, !ren_s7, Some("ren_s7"), maxCount = 2000)
+    LeakChecker(ren_s7, !ren_s7, Some("ren_s7"), maxCount = deadlockThreshold)
 
     io.toTXDAT.dsResp_s6s7.valid     := ren_s6 && readToTXDAT_s6 || ren_s7 && readToTXDAT_s7
     io.toTXDAT.dsResp_s6s7.bits.data := Mux(readToTXDAT_s7 && ren_s7, rdData_s7, rdData_s6)

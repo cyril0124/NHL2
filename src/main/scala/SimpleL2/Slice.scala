@@ -141,6 +141,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sourceB.io.task           <> missHandler.io.tasks.sourceb
     sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
+    sourceB.io.mpStatus       <> mainPipe.io.status
 
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> sourceB.io.b
