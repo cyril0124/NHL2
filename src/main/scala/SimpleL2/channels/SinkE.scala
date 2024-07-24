@@ -67,6 +67,10 @@ class SinkE()(implicit p: Parameters) extends L2Module {
                 assert(!entry.valid, "entry is already valid!")
             }
         }
+
+        val allocMatchVec = VecInit(grantMap.map(e => e.valid && e.sink === io.allocGrantMap.bits.sink)).asUInt
+        val hasDuplicate  = allocMatchVec.orR
+        assert(!hasDuplicate, "allocGrantMap has duplicate entry! sink:%d allocMatchVec:%b", io.allocGrantMap.bits.sink, allocMatchVec)
     }
 
     when(io.e.fire) {

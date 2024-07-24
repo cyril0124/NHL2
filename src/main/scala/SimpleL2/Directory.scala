@@ -22,13 +22,13 @@ object MixedState {
     val width = 3
 
     /** [[MixedState]]: MSB <-- | Meta[1:0] | Dirty | --> LSB */
-    val I   = "b000".U(width.W) // Invalid
-    val BC  = "b010".U(width.W) // Branch Clean
-    val BD  = "b011".U(width.W) // Branch Dirty
-    val TTC = "b100".U(width.W) // Trunk Clean
-    val TTD = "b101".U(width.W) // Trunk Dirty
-    val TC  = "b110".U(width.W) // Tip Clean
-    val TD  = "b111".U(width.W) // Tip Dirty
+    val I   = "b000".U(width.W) // 0  Invalid
+    val BC  = "b010".U(width.W) // 2  Branch Clean
+    val BD  = "b011".U(width.W) // 3  Branch Dirty
+    val TTC = "b100".U(width.W) // 4  Trunk Clean
+    val TTD = "b101".U(width.W) // 5  Trunk Dirty
+    val TC  = "b110".U(width.W) // 6  Tip Clean
+    val TD  = "b111".U(width.W) // 7  Tip Dirty
 
     def apply(dirty: Bool, state: UInt) = {
         require(state.getWidth == 2, s"widht is ${state.getWidth}")

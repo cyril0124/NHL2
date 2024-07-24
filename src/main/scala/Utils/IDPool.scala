@@ -35,7 +35,6 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
 
     val validIds = VecInit(sortedIds.map(_.U))
     val freeList = RegInit(validIds)
-    val freeCnt  = RegInit(nrIds.U(log2Ceil(nrIds + 1).W))
 
     val allocatedList = RegInit(VecInit(Seq.fill(nrIds)(false.B))) // Register for tracking allocated IDs
 
@@ -48,7 +47,6 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
      */
     when(io.alloc.valid) {
         allocIdx := Mux(allocIdx === (nrIds - 1).U, 0.U, allocIdx + 1.U)
-        freeCnt  := freeCnt - 1.U
 
         val allocVec = VecInit(validIds.map(_ === io.alloc.idOut)).reverse
         allocVec.zip(allocatedList.reverse).foreach { case (alloc, idBit) =>
@@ -57,7 +55,6 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
                 assert(!idBit, "idOut: %d allocVec:%b", io.alloc.idOut, allocVec.asUInt)
             }
         }
-        assert(freeCnt =/= 0.U, "alloc asserted when pool is full!")
     }
 
     /** Release logic
@@ -68,7 +65,6 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
     when(io.free.valid) {
         freeList(freeIdx) := io.free.idIn
         freeIdx           := Mux(freeIdx === (nrIds - 1).U, 0.U, freeIdx + 1.U)
-        freeCnt           := freeCnt + 1.U
 
         // Update allocatedList to mark the ID as free
         val allocatedMatchOH = VecInit(validIds.map(_ === io.free.idIn))
@@ -80,9 +76,17 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000) extends Module {
         }
         // Ensure only one match and valid ID
         assert(PopCount(allocatedMatchOH) <= 1.U)
-        assert(freeCnt <= nrIds.U)
         assert(VecInit(validIds.map(_ === io.free.idIn)).asUInt.orR, s"idIn is not a valid ID, io.idIn:%d, validIds:${sortedIds}", io.free.idIn)
     }
+
+    val freeCnt = RegInit(nrIds.U(log2Ceil(nrIds + 1).W))
+    when(io.alloc.valid && !io.free.valid) {
+        freeCnt := freeCnt - 1.U
+        assert(freeCnt =/= 0.U, "alloc asserted when pool is full!")
+    }.elsewhen(!io.alloc.valid && io.free.valid) {
+        freeCnt := freeCnt + 1.U
+        assert(freeCnt <= nrIds.U, s"freeCnt:%d nrIds:${nrIds}", freeCnt)
+    } // otherwise freeCnt remians unchanged
 
     /** Leak checker to monitor allocated IDs for potential leaks
      * @param allocated Allocated flag for each ID

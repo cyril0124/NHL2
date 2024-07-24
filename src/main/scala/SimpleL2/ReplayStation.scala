@@ -117,8 +117,8 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
                     entry.bits.enqIdx.inc()
                 }
             }
-            assert(!entry.valid)
-            assert(!subEntry.valid)
+            assert(!entry.valid, "entry should be invalid, freeIdx:%d, freeVec:%b, freeOH:%b", freeIdx, freeVec, freeOH)
+            assert(!subEntry.valid, "subEntry should be invalid, freeIdx:%d, freeVec:%b, freeOH:%b", freeIdx, freeVec, freeOH)
         }
     }
 
@@ -127,7 +127,6 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         val entry    = entries(i)
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
         val subEntry = Mux1H(deqOH, entry.bits.subEntries)
-        // val subEntry = entry.bits.subEntries(entry.bits.deqIdx.value)
         in.valid             := entry.valid && subEntry.valid
         in.bits              := DontCare
         in.bits.set          := entry.bits.set
@@ -142,8 +141,10 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         in.bits.isReplayTask := true.B
         in.bits.aliasOpt.foreach(_ := subEntry.bits.aliasOpt.get)
         when(in.fire) {
+            val conflictWithInput = io.replay_s4.fire && hasMatch && matchVec(i)
+
             entry.bits.deqIdx.inc()
-            when(PopCount(entry.bits.subValidVec) === 1.U) {
+            when(PopCount(entry.bits.subValidVec) === 1.U && !conflictWithInput) {
                 entry.valid := false.B
             }
 

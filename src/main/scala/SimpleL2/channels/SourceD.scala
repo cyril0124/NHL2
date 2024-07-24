@@ -43,16 +43,21 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.task_s2.ready   := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready)
     io.task_s6s7.ready := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && !io.task_s2.valid
 
+    val sinkId = io.sinkIdAlloc.idOut
+    io.sinkIdAlloc.valid := (io.task_s2.fire || io.task_s6s7.fire) && (task.opcode === GrantData || task.opcode === Grant) && !task.isMshrTask
+
     io.data_s2.ready   := skidBuffer.io.enq.ready
     io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode) && !io.data_s2.valid
 
-    nonDataRespQueue.io.enq.valid     := (io.task_s2.valid || io.task_s6s7.valid) && !needData(task.opcode)
-    nonDataRespQueue.io.enq.bits.task := task
+    nonDataRespQueue.io.enq.valid          := (io.task_s2.valid || io.task_s6s7.valid) && !needData(task.opcode)
+    nonDataRespQueue.io.enq.bits.task      := task
+    nonDataRespQueue.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
 
-    skidBuffer.io.enq           <> DontCare
-    skidBuffer.io.enq.valid     := (io.task_s2.valid || io.task_s6s7.valid) && needData(task.opcode)
-    skidBuffer.io.enq.bits.task := task
-    skidBuffer.io.enq.bits.data := Mux(io.task_s2.valid, io.data_s2.bits, io.data_s6s7.bits)
+    skidBuffer.io.enq                <> DontCare
+    skidBuffer.io.enq.valid          := (io.task_s2.valid || io.task_s6s7.valid) && needData(task.opcode)
+    skidBuffer.io.enq.bits.task      := task
+    skidBuffer.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
+    skidBuffer.io.enq.bits.data      := Mux(io.task_s2.valid, io.data_s2.bits, io.data_s6s7.bits)
 
     assert(!(io.task_s2.fire && needData(task.opcode) && !io.data_s2.fire), "data should arrive with task!")
     assert(!(io.data_s2.fire && needData(task.opcode) && !io.task_s2.fire), "task should arrive with data!")
@@ -80,7 +85,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
       * the non-data response will be chosen to be sent out.
       */
     val stallCnt = RegInit(0.U(8.W))
-    when(stallCnt >= 255.U && nonDataRespQueue.io.deq.valid) {
+    when(stallCnt >= 255.U && nonDataRespQueue.io.deq.valid && first) { // TODO: parameterize
         select   := NonDataReq
         stallCnt := 0.U
     }.elsewhen(select === HasDataReq && io.d.valid && !io.d.ready) {
@@ -106,28 +111,22 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    val sinkId = io.sinkIdAlloc.idOut
-    io.sinkIdAlloc.valid := io.d.fire && (io.d.bits.opcode === GrantData && first || io.d.bits.opcode === Grant) && !deqTask.isMshrTask
-
     io.d              <> DontCare
     io.d.valid        := deqValid && io.allocGrantMap.ready
     io.d.bits.corrupt := DontCare
     io.d.bits.opcode  := deqTask.opcode
     io.d.bits.param   := deqTask.param
-    io.d.bits.size    := Mux(needData(deqTask.opcode), 6.U, 5.U) // TODO: parameterize
+    io.d.bits.size    := Mux(needData(deqTask.opcode), 6.U, 5.U)       // TODO: parameterize
     io.d.bits.source  := deqTask.source
-    io.d.bits.sink := Mux(
-        deqTask.isMshrTask,
-        deqTask.sink,
-        Mux(first, sinkId, RegEnable(sinkId, 0.U, first))
-    ) // If deqTask is a MSHR task, the sink id is used for the next incoming GrantAck to Address the matched MSHR, otherwise we should allocate an unique sink id which is not overlapped with mshr id to the Grant/GrantData.
-    io.d.bits.data := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
+    io.d.bits.sink    := deqTask.sink                                  // If deqTask is a MSHR task, the sink id is used for the next incoming GrantAck to Address the matched MSHR, otherwise we should allocate an unique sink id which is not overlapped with mshr id to the Grant/GrantData.
+    io.d.bits.data    := Mux(last, deqData(511, 256), deqData(255, 0)) // TODO: parameterize
 
-    io.allocGrantMap.valid         := io.d.fire && (io.d.bits.opcode === GrantData && first || io.d.bits.opcode === Grant) // && deqTask.isMshrTask
-    io.allocGrantMap.bits.sink     := io.d.bits.sink
-    io.allocGrantMap.bits.mshrTask := deqTask.isMshrTask
-    io.allocGrantMap.bits.set      := deqTask.set
-    io.allocGrantMap.bits.tag      := deqTask.tag
+    // TODO: consider requests in stage6 and stage7
+    io.allocGrantMap.valid         := (io.task_s2.fire || io.task_s6s7.fire) && (task.opcode === GrantData || task.opcode === Grant)
+    io.allocGrantMap.bits.sink     := Mux(task.isMshrTask, task.sink, sinkId)
+    io.allocGrantMap.bits.mshrTask := task.isMshrTask
+    io.allocGrantMap.bits.set      := task.set
+    io.allocGrantMap.bits.tag      := task.tag
 
     nonDataRespQueue.io.deq.ready := choseNonData && io.d.ready && io.allocGrantMap.ready
     skidBuffer.io.deq.ready       := !choseNonData && io.d.ready && last && io.allocGrantMap.ready

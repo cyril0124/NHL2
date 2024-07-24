@@ -280,6 +280,35 @@ local test_repl_resp = env.register_test_case "test_repl_resp" {
     end
 }
 
+local test_continuous_read_write = env.register_test_case "test_continuous_read_write" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+        
+        env.negedge()
+            dirWrite_s3.valid:set(1)
+            dirWrite_s3.bits.set:set(0x10)
+            dirWrite_s3.bits.meta_tag:set(0x21)
+            dirWrite_s3.bits.meta_state:set(MixedState.TC)
+            dirWrite_s3.bits.wayOH:set(0x01)
+        env.negedge()
+            dirWrite_s3.valid:set(0)
+            dirRead_s1.valid:set(1)
+            dirRead_s1.bits.set:set(0x10)
+            dirRead_s1.bits.tag:set(0x21)
+            dirRead_s1.bits.replTask:set(0)
+        env.negedge()
+            dirRead_s1.valid:set(0)
+        env.negedge()
+            dirResp_s3:dump()
+            dirResp_s3.valid:expect(1)
+            dirResp_s3.bits.meta_tag:expect(0x21)
+            dirResp_s3.bits.meta_state:expect(MixedState.TC)
+
+        env.posedge(10)
+    end
+}
+
 -- TODO: local test_repl_policy
 
 verilua "mainTask" {
@@ -293,6 +322,7 @@ verilua "mainTask" {
         test_miss_use_inv_way()
         test_miss_filter_occupied_way()
         test_repl_resp()
+        test_continuous_read_write()
 
         env.posedge(100)        
         env.TEST_SUCCESS()
