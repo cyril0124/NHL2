@@ -46,8 +46,8 @@ class BankedSRAM[T <: Data](
                 holdRead = holdRead,
                 singlePort = true,
                 bypassWrite = bypassWrite,
-                hasClkGate = hasClkGate,
-                clk_div_by_2 = clk_div_by_2
+                // clk_div_by_2 = clk_div_by_2
+                multicycle = if(clk_div_by_2) 2 else 1
             )
         )
         sram.io.r.req.valid := io.r.req.valid && ren

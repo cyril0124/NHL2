@@ -81,7 +81,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
                     singlePort = true,
                     // hasMbist = false /* TODO */,
                     // hasShareBus = false /* TDOO */,
-                    hasClkGate = enableClockGate
+                    // hasClkGate = enableClockGate
                     // parentName = parentName + "ds_" /* TODO */
                 )
             )
