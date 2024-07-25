@@ -3673,7 +3673,7 @@ local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
 
         chi_txrsp.ready:set(0)
         mp.io_txrsp_s4_ready:set_force(0)
-        mp.io_willFull_txrsp:set_force(1)
+        mp.io_txrspCnt:set_force(4)
 
         env.negedge()
         write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, 0x00)
@@ -3693,7 +3693,7 @@ local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
         end
 
         mp.io_txrsp_s4_ready:set_release()
-        mp.io_willFull_txrsp:set_release()
+        mp.io_txrspCnt:set_release()
 
         env.expect_happen_until(10, function ()
             return chi_txrsp.valid:is(1) and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp)
@@ -5093,6 +5093,72 @@ local test_acquire_BtoT_miss = env.register_test_case "test_acquire_BtoT_miss" {
     end
 }
 
+local test_grant_on_stage4 = env.register_test_case "test_grant_on_stage4" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            -- basic AcquirePerm
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, ("0b00"):number())
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0x01) end)
+            env.expect_happen_until(10, function() return mp.io_sourceD_s4_valid:is(1) end)
+            verilua "appendTasks" {
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_sourceD_s6s7_valid:is(1) end)
+                end,
+                function ()
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                    env.negedge()
+                    env.expect_not_happen_until(10, function() return tl_d:fire() end)
+                    local sink = tl_d.bits.sink()
+                    env.negedge()
+                    tl_e:grantack(sink)
+                end
+            }
+        end
+
+        do
+            -- replay
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, ("0b00"):number())
+                mp.io_nonDataRespCnt:set_force(3)
+                mp.io_sourceD_s4_valid:set_force(0)
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            env.expect_happen_until(10, function() return mp.io_replay_s4_valid:is(1) end)
+
+            env.negedge(10)
+                mp.io_nonDataRespCnt:set_release()
+                mp.io_sourceD_s4_valid:set_release()
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0x01) end)
+                end
+            }
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+            env.negedge()
+            env.expect_not_happen_until(10, function() return tl_d:fire() end)
+            local sink = tl_d.bits.sink()
+            env.negedge()
+            tl_e:grantack(sink)
+        end
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5166,6 +5232,7 @@ verilua "mainTask" { function ()
     test_release_nested_probe()
     test_grant_block_probe()
     test_acquire_BtoT_miss()
+    test_grant_on_stage4()
     end
 
    

@@ -181,7 +181,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val finishedProbes  = RegInit(0.U(nrClients.W))
     assert(
         !(!state.s_aprobe && !req.isAliasTask && PopCount(probeClients) === 0.U),
-        "Acquir Probe has no probe clients! probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b dirHit:%b isAliasTask:%b addr:%x",
+        "Acquire Probe has no probe clients! probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b dirHit:%b isAliasTask:%b addr:%x",
         probeClients,
         reqClientOH,
         meta.clientsOH,

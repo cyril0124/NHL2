@@ -18,6 +18,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val sliceId     = Input(UInt(bankBits.W))
     })
 
+    println(s"[${this.getClass().toString()}] TaskBundle bits:${(new TaskBundle).getWidth}")
+
     io.tl          <> DontCare
     io.chi         <> DontCare
     io.chiLinkCtrl <> DontCare
@@ -60,10 +62,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     reqBuf.io.taskIn <> sinkA.io.task
 
-    reqArb.io                          <> DontCare
+    reqArb.io                          <> DontCare // TODO: remove
     reqArb.io.taskMSHR_s0              <> missHandler.io.tasks.mpTask
     reqArb.io.taskReplay_s1            <> replayStation.io.req_s1
-    reqArb.io.taskSinkA_s1             <> reqBuf.io.taskOut // sinkA.io.task
+    reqArb.io.taskSinkA_s1             <> reqBuf.io.taskOut
     reqArb.io.taskSinkC_s1             <> sinkC.io.task
     reqArb.io.taskSnoop_s1             <> rxsnp.io.task
     reqArb.io.dirRead_s1               <> dir.io.dirRead_s1
@@ -75,13 +77,13 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
     reqArb.io.fromSinkC.willWriteDS_s2 := sinkC.io.toReqArb.willWriteDS_s2
 
-    mainPipe.io                <> DontCare
     mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
     mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
     mainPipe.io.mshrFreeOH_s3  := missHandler.io.mshrFreeOH_s3
     mainPipe.io.replay_s4      <> replayStation.io.replay_s4
-    mainPipe.io.willFull_txrsp := txrsp.io.willFull
+    mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCnt
+    mainPipe.io.txrspCnt       := txrsp.io.txrspCnt
 
     val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire && mainPipe.io.retryTasks.stage2.bits.isRetry_s2
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
@@ -124,6 +126,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
+    sourceD.io.task_s4         <> mainPipe.io.sourceD_s4
     sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
     sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid
     sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data

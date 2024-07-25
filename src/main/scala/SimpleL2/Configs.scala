@@ -33,10 +33,10 @@ case class L2Param(
     nrExtraSinkId: Int = 16, // extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
+    nrTXRSPEntry: Int = 4,
     metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
-    rdQueueEntries: Int = 2,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
     rxdatCreditMAX: Int = 2,
@@ -81,7 +81,7 @@ trait HasL2Param {
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry
     val nrNonDataSourceDEntry = l2param.nrNonDataSourceDEntry
-    val rdQueueEntries        = l2param.rdQueueEntries
+    val nrTXRSPEntry          = l2param.nrTXRSPEntry
 
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX
