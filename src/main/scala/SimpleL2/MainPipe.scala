@@ -16,10 +16,10 @@ import SimpleL2.chi.CHIOpcodeSNP._
 import SimpleL2.chi.CHIOpcodeRSP._
 
 class MpStageInfo(implicit p: Parameters) extends L2Bundle {
-    val valid   = Bool()
-    val isGrant = Bool()
-    val set     = UInt(setBits.W)
-    val tag     = UInt(tagBits.W)
+    val valid    = Bool()
+    val isRefill = Bool()
+    val set      = UInt(setBits.W)
+    val tag      = UInt(tagBits.W)
 }
 
 class MpStatus()(implicit p: Parameters) extends L2Bundle {
@@ -69,7 +69,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val txdat_s6s7   = DecoupledIO(new CHIBundleDAT(chiBundleParams))
 
         /** Other status signals */
-        val status         = Output(new MpStatus)
+        val status         = Output(new MpStatus) // to SoruceB + ReqArb
         val retryTasks     = new MpMshrRetryTasks
         val nonDataRespCnt = Input(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
         val txrspCnt       = Input(UInt(log2Ceil(nrTXRSPEntry + 1).W))
@@ -109,6 +109,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     val sourcedStall_s2 = io.sourceD_s2.valid && !io.sourceD_s2.ready
     val txdatStall_s2   = io.txdat_s2.valid && !io.txdat_s2.ready
+    val hasRetry_s2     = io.retryTasks.stage2.valid && io.retryTasks.stage2.bits.isRetry_s2
     io.retryTasks.mshrId_s2                := task_s2.mshrId
     io.retryTasks.stage2.valid             := (isMshrSourceD_s2 || isTXDAT_s2) && valid_s2
     io.retryTasks.stage2.bits.isRetry_s2   := sourcedStall_s2 || txdatStall_s2
@@ -120,12 +121,13 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 3
     // -----------------------------------------------------------------------------------------
-    val dirResp_s3 = io.dirResp_s3.bits
-    val task_s3    = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
-    val valid_s3   = RegNext(valid_s2, false.B)
-    val hit_s3     = dirResp_s3.hit
-    val meta_s3    = dirResp_s3.meta
-    val state_s3   = meta_s3.state
+    val dirResp_s3  = io.dirResp_s3.bits
+    val task_s3     = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
+    val hasRetry_s3 = RegEnable(hasRetry_s2, valid_s2)
+    val valid_s3    = RegNext(valid_s2, false.B)
+    val hit_s3      = dirResp_s3.hit
+    val meta_s3     = dirResp_s3.meta
+    val state_s3    = meta_s3.state
     assert(!(valid_s3 && !task_s3.isMshrTask && !io.dirResp_s3.fire), "Directory response should be valid!")
 
     val reqNeedT_s3           = needT(task_s3.opcode, task_s3.param)
@@ -144,7 +146,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isSnpOnceX_s3     = CHIOpcodeSNP.isSnpOnceX(task_s3.opcode) && task_s3.isChannelB
     val isSnoop_s3        = isSnpToB_s3 || isSnpToN_s3 || isSnpOnceX_s3                                                                     // TODO: Other opcode
     val isFwdSnoop_s3     = CHIOpcodeSNP.isSnpXFwd(task_s3.opcode)
-    val isRelease_s3      = (task_s3.opcode === Release || task_s3.opcode === ReleaseData) && task_s3.isChannelC
+    val isReleaseData_s3  = task_s3.opcode === ReleaseData && task_s3.isChannelC
+    val isRelease_s3      = task_s3.opcode === Release && task_s3.isChannelC
 
     val mpTask_snpresp_s3 = valid_s3 && task_s3.isMshrTask && task_s3.isCHIOpcode && (task_s3.opcode === SnpResp || task_s3.opcode === SnpRespData)
 
@@ -252,8 +255,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrNested.snoop.toN        := (isSnpToN_s3 && !mshrAlloc_s3 && hit_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
     io.mshrNested.snoop.toB        := (isSnpToB_s3 && !mshrAlloc_s3 && hit_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
     io.mshrNested.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData
-    io.mshrNested.release.TtoN     := isRelease_s3 && task_s3.param === TtoN
-    io.mshrNested.release.BtoN     := isRelease_s3 && task_s3.param === BtoN
+    io.mshrNested.release.TtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoN
+    io.mshrNested.release.BtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === BtoN
 
     /** coherency check */
     when(valid_s3) {
@@ -271,9 +274,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             addr
         )
 
-        // assert(!(task_s3.isChannelC && isRelease_s3 && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
-        assert(!(isRelease_s3 && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB
-        assert(!(isRelease_s3 && task_s3.param === NtoN), "Unsupported Release.NtoN")
+        // assert(!(task_s3.isChannelC && (isRelease_s3 || isReleaseData_s3) && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
+        assert(!((isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB
+        assert(!((isRelease_s3 || isReleaseData_s3) && task_s3.param === NtoN), "Unsupported Release.NtoN")
     }
 
     /** Deal with snoop requests */
@@ -304,7 +307,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
      *     => Prefetch only change the L2 state and not response upwards to L1
      */
     val snpNotUpdateDir_s3 = dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && task_s3.opcode === SnpShared || !dirResp_s3.hit || task_s3.snpHitWriteBack
-    val dirWen_mshr_s3     = task_s3.isMshrTask && task_s3.updateDir
+    val dirWen_mshr_s3     = task_s3.isMshrTask && task_s3.updateDir && !hasRetry_s3                                   // if stage2 has retry task, we should not update directory info.
     val dirWen_a_s3        = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3 && !acquireReplay_s3
     val dirWen_b_s3        = task_s3.isChannelB && !mshrAlloc_s3 && isSnoop_s3 && !snpNotUpdateDir_s3 && !snpReplay_s3 // TODO: Snoop
     val dirWen_c_s3        = task_s3.isChannelC && hit_s3
@@ -334,16 +337,16 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         state = MuxCase(
             MixedState.I,
             Seq(
-                (task_s3.param === TtoN && meta_s3.state === MixedState.TTC) -> MixedState.TD, // TODO: TTC?
-                (task_s3.param === TtoN && meta_s3.state === MixedState.TTD) -> MixedState.TD,
-                (task_s3.param === TtoB && meta_s3.state === MixedState.TTC) -> MixedState.TC,
-                (task_s3.param === TtoB && meta_s3.state === MixedState.TTD) -> MixedState.TD,
-                (task_s3.param === TtoB && meta_s3.state === MixedState.TC)  -> MixedState.TC,
-                (task_s3.param === TtoB && meta_s3.state === MixedState.TD)  -> MixedState.TD,
-                (task_s3.param === BtoN && meta_s3.state === MixedState.TC)  -> MixedState.TC,
-                (task_s3.param === BtoN && meta_s3.state === MixedState.TD)  -> MixedState.TD,
-                (task_s3.param === BtoN && meta_s3.state === MixedState.BC)  -> MixedState.BC,
-                (task_s3.param === BtoN && meta_s3.state === MixedState.BD)  -> MixedState.BD
+                (task_s3.param === TtoN && meta_s3.isDirty)                      -> MixedState.TD,
+                (task_s3.param === TtoN && !meta_s3.isDirty && isReleaseData_s3) -> MixedState.TD,
+                (task_s3.param === TtoN && !meta_s3.isDirty && isRelease_s3)     -> MixedState.TC,
+                (task_s3.param === TtoB && meta_s3.isDirty)                      -> MixedState.TD,
+                (task_s3.param === TtoB && !meta_s3.isDirty && isReleaseData_s3) -> MixedState.TD,
+                (task_s3.param === TtoB && !meta_s3.isDirty && isRelease_s3)     -> MixedState.TC,
+                (task_s3.param === BtoN && meta_s3.state === MixedState.TC)      -> MixedState.TC,
+                (task_s3.param === BtoN && meta_s3.state === MixedState.TD)      -> MixedState.TD,
+                (task_s3.param === BtoN && meta_s3.state === MixedState.BC)      -> MixedState.BC,
+                (task_s3.param === BtoN && meta_s3.state === MixedState.BD)      -> MixedState.BD
             )
         ),
         tag = meta_s3.tag,
@@ -419,12 +422,12 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     respOpcode_s3 := MuxCase( // TODO:
         DontCare,
         Seq(
-            isAcquireBlock_s3                 -> GrantData,     // to SourceD
-            isAcquirePerm_s3                  -> Grant,         // to SourceD
-            isGet_s3                          -> AccessAckData, // to SourceD
-            isRelease_s3                      -> ReleaseAck,    // to SourceD
-            (isSnoop_s3 && !snpNeedData_b_s3) -> SnpResp,       // toTXRSP
-            (isSnoop_s3 && snpNeedData_b_s3)  -> SnpRespData    // toTXDAT
+            isAcquireBlock_s3                  -> GrantData,     // to SourceD
+            isAcquirePerm_s3                   -> Grant,         // to SourceD
+            isGet_s3                           -> AccessAckData, // to SourceD
+            (isRelease_s3 || isReleaseData_s3) -> ReleaseAck,    // to SourceD
+            (isSnoop_s3 && !snpNeedData_b_s3)  -> SnpResp,       // toTXRSP
+            (isSnoop_s3 && snpNeedData_b_s3)   -> SnpRespData    // toTXDAT
         )
     )
 
@@ -611,25 +614,25 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
      * Output status info for [[SourceB]] or other modules.
      * The [[SourceB]] may use this info to decide whether to block an Probe from L2Cache to upstream cache.(Probe request should not be issued until pending Grant has received GrantAck according to TileLink spec.) 
      */
-    io.status.stage4.valid   := valid_s4
-    io.status.stage4.set     := task_s4.set
-    io.status.stage4.tag     := task_s4.tag
-    io.status.stage4.isGrant := !task_s4.isCHIOpcode && (task_s4.opcode === Grant || task_s4.opcode === GrantData) && valid_refill_s4
+    io.status.stage4.valid    := valid_s4
+    io.status.stage4.set      := task_s4.set
+    io.status.stage4.tag      := task_s4.tag
+    io.status.stage4.isRefill := !task_s4.isCHIOpcode && (task_s4.opcode === Grant || task_s4.opcode === GrantData || task_s4.opcode === AccessAckData) && valid_refill_s4
 
-    io.status.stage5.valid   := valid_s5
-    io.status.stage5.set     := task_s5.set
-    io.status.stage5.tag     := task_s5.tag
-    io.status.stage5.isGrant := !task_s5.isCHIOpcode && (task_s5.opcode === Grant || task_s5.opcode === GrantData)
+    io.status.stage5.valid    := valid_s5
+    io.status.stage5.set      := task_s5.set
+    io.status.stage5.tag      := task_s5.tag
+    io.status.stage5.isRefill := !task_s5.isCHIOpcode && (task_s5.opcode === Grant || task_s5.opcode === GrantData || task_s4.opcode === AccessAckData)
 
-    io.status.stage6.valid   := valid_s6
-    io.status.stage6.set     := task_s6.set
-    io.status.stage6.tag     := task_s6.tag
-    io.status.stage6.isGrant := isSourceD_s6 && (task_s6.opcode === Grant || task_s6.opcode === GrantData)
+    io.status.stage6.valid    := valid_s6
+    io.status.stage6.set      := task_s6.set
+    io.status.stage6.tag      := task_s6.tag
+    io.status.stage6.isRefill := isSourceD_s6 && (task_s6.opcode === Grant || task_s6.opcode === GrantData || task_s4.opcode === AccessAckData)
 
-    io.status.stage7.valid   := valid_s7
-    io.status.stage7.set     := task_s7.set
-    io.status.stage7.tag     := task_s7.tag
-    io.status.stage7.isGrant := isSourceD_s7 && (task_s7.opcode === Grant || task_s7.opcode === GrantData)
+    io.status.stage7.valid    := valid_s7
+    io.status.stage7.set      := task_s7.set
+    io.status.stage7.tag      := task_s7.tag
+    io.status.stage7.isRefill := isSourceD_s7 && (task_s7.opcode === Grant || task_s7.opcode === GrantData || task_s4.opcode === AccessAckData)
 
     /**
      * Debug signals.

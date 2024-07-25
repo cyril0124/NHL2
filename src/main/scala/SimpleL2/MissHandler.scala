@@ -146,7 +146,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
     lfsrArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
     lfsrArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
-    lfsrArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
+    fastArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
     lfsrArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
 
     dontTouch(io)

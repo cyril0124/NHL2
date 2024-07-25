@@ -1128,7 +1128,7 @@ local test_release_hit = env.register_test_case "test_release_hit" {
                 mp.io_dirResp_s3_valid:expect(1)
                 mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
                 mp.io_dirResp_s3_bits_hit:expect(1)
-                mp.isRelease_s3:expect(1)
+                mp.isReleaseData_s3:expect(1)
                 mp.valid_s3:expect(1)
                 mp.io_dirWrite_s3_valid:expect(1)
                 mp.io_dirWrite_s3_bits_meta_tag:expect(0)

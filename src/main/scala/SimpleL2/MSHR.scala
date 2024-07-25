@@ -364,7 +364,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         state = Mux(
             reqIsGet,
             Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
-            Mux(reqPromoteT || reqNeedT, Mux(reqIsPrefetch, TIP, TRUNK), Mux(reqNeedB && meta.isTrunk, TIP, BRANCH))
+            Mux(reqPromoteT || reqNeedT, Mux(reqIsPrefetch, TIP, TRUNK), Mux(reqNeedB && meta.isTrunk && dirResp.hit, TIP, BRANCH))
         ),
         alias = Mux(
             reqIsGet || reqIsPrefetch,

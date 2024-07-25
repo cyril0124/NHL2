@@ -24,7 +24,7 @@ class SourceB()(implicit p: Parameters) extends L2Module {
     assert(!(io.b.fire && PopCount(matchVec_sinke) > 1.U), "matchVec_sinke:%b", matchVec_sinke)
 
     val matchVec_mp = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
-        stage.valid && stage.isGrant && stage.set === set && stage.tag === tag
+        stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
     }.toSeq).asUInt
     val shouldBlock_mp = matchVec_mp.orR
     assert(!(io.b.fire && PopCount(shouldBlock_mp) > 1.U), "shouldBlock_mp:%b", shouldBlock_mp)

@@ -108,17 +108,17 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     ready_s1 := !mshrTaskFull_s1
 
-    def addrMatchVec(set: UInt, tag: UInt): UInt = {
-        VecInit(io.mshrStatus.map { case s =>
+    def addrConflict(set: UInt, tag: UInt): Bool = {
+        val mshrAddrConflict = VecInit(io.mshrStatus.map { case s =>
             // s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag)
             s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
-        }).asUInt
-    }
+        }).asUInt.orR
 
-    def addrMatchVec_reqTag(set: UInt, tag: UInt): UInt = {
-        VecInit(io.mshrStatus.map { case s =>
-            s.valid && s.set === set && s.reqTag === tag
-        }).asUInt
+        // val mpAddrConflict = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
+        //     stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
+        // }.toSeq).asUInt.orR
+
+        mshrAddrConflict // || mpAddrConflict
     }
 
     def noFreeWay(set: UInt): Bool = {
@@ -153,11 +153,9 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         sameSet_s2 || sameSet_s3
     }
 
-    val addrMatchVec_forSinkA         = addrMatchVec(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
-    val addrMatchVec_forReplay        = addrMatchVec(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
-    val addrMatchVec_forSnoop         = addrMatchVec(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
-    val addrMatchVec_reqTag_forSnoop  = addrMatchVec_reqTag(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
-    val addrMatchVec_reqTag_forReplay = addrMatchVec_reqTag(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
+    val addrConflict_forSinkA  = addrConflict(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
+    val addrConflict_forReplay = addrConflict(io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
+    val addrConflict_forSnoop  = addrConflict(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
 
     // TODO: set block in stage 2 and stage 3 in replace of noFreeWay
     val mayReadDS_a_s1_dup            = WireInit(false.B)
@@ -166,8 +164,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val noFreeWay_forReplay           = noFreeWay(io.taskReplay_s1.bits.set)
     val setConflict_forSinkA          = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
     val setConflict_forReplay         = setConflict("A", io.taskReplay_s1.bits.set, io.taskReplay_s1.bits.tag)
-    val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrMatchVec_forSinkA.orR
-    val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrMatchVec_forReplay.orR
+    val blockA_addrConflict           = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
+    val blockA_addrConflict_forReplay = (io.taskReplay_s1.bits.set === task_s2.set && io.taskReplay_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskReplay_s1.bits.set === set_s3 && io.taskReplay_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forReplay
     val blockA_mayReadDS_forSinkA =
         mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
     val blockA_mayReadDS_forReplay = mayReadDS_replay_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2)
