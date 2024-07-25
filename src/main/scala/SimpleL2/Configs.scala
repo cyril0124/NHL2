@@ -40,7 +40,7 @@ case class L2Param(
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
     rxdatCreditMAX: Int = 2,
-    replacementPolicy: String = "plru",
+    replacementPolicy: String = "random",
     useDiplomacy: Boolean = false // If use diplomacy, EdgeInKey should be passed in
 ) {
     require(dataBits == 64 * 8)
