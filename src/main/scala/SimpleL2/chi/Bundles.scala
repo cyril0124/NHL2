@@ -42,22 +42,21 @@ class CHIBundleREQ(params: CHIBundleParameters) extends Bundle {
     val qos           = UInt(4.W)                 // TODO: not use?
     val tgtID         = UInt(params.nodeIdBits.W) // TODO: not use?
     val srcID         = UInt(params.nodeIdBits.W)
-    val txnID         = UInt(12.W)
+    val txnID         = UInt(8.W)
     val returnNID     = UInt(params.nodeIdBits.W) // TODO: not use?
-    val stashNIDValid = Bool()
     val returnTxnID   = UInt(8.W)
-    val opcode        = UInt(7.W)
+    val opcode        = UInt(6.W)
     val size          = UInt(3.W)
     val addr          = UInt(params.addressBits.W)
     val ns            = Bool()                    // TODO: not use?
-    val likelyshared  = Bool()
+    val likelyShared  = Bool()
     val allowRetry    = Bool()
     val order         = UInt(2.W)
     val pCrdType      = UInt(4.W)
     val memAttr       = new MemAttr
     val snpAttr       = UInt(1.W)
-    val lpID          = UInt(4.W)
-    val snoopMe       = Bool()
+    val lpID          = UInt(5.W)
+    val excl          = Bool()
     val expCompAck    = Bool()
     val traceTag      = Bool()
     val rsvdc         = UInt(4.W)
@@ -69,12 +68,12 @@ class CHIBundleRSP(params: CHIBundleParameters) extends Bundle {
     val qos      = UInt(4.W)                 // TODO: not use?
     val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
     val srcID    = UInt(params.nodeIdBits.W)
-    val txnID    = UInt(12.W)
-    val opcode   = UInt(5.W)
+    val txnID    = UInt(8.W)
+    val opcode   = UInt(4.W)
     val respErr  = UInt(2.W)
     val resp     = UInt(3.W)
     val fwdState = UInt(3.W)
-    val dbID     = UInt(12.W)
+    val dbID     = UInt(8.W)
     val pCrdType = UInt(4.W)
     val traceTag = Bool()
 }
@@ -84,13 +83,15 @@ class CHIBundleSNP(params: CHIBundleParameters) extends Bundle {
 
     val qos         = UInt(4.W)                 // TODO: not use?
     val srcID       = UInt(params.nodeIdBits.W)
-    val txnID       = UInt(12.W)
+    val txnID       = UInt(8.W)
     val fwdNID      = UInt(params.nodeIdBits.W) // TODO: not use?
-    val fwdTxnID    = UInt(12.W)                // TODO: not use?
+    val fwdTxnID    = UInt(8.W)                 // TODO: not use?
     val opcode      = UInt(5.W)
     val addr        = UInt((params.addressBits - 3).W)
+    val ns          = Bool()
     val doNotGoToSD = Bool()
     val retToSrc    = Bool()
+    val traceTag    = Bool()
 }
 
 class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
@@ -99,13 +100,13 @@ class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
     val qos       = UInt(4.W)                 // TODO: not use?
     val tgtID     = UInt(params.nodeIdBits.W) // TODO: not use?
     val srcID     = UInt(params.nodeIdBits.W)
-    val txnID     = UInt(12.W)
+    val txnID     = UInt(8.W)
     val homeNID   = UInt(params.nodeIdBits.W) // TODO: not use?
-    val opcode    = UInt(4.W)
+    val opcode    = UInt(3.W)
     val respErr   = UInt(2.W)
     val resp      = UInt(3.W)
     val fwdState  = UInt(3.W)
-    val dbID      = UInt(12.W)
+    val dbID      = UInt(8.W)
     val ccID      = UInt(2.W)                 // TODO: not use?
     val dataID    = UInt(2.W)
     val traceTag  = Bool()
