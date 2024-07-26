@@ -61,7 +61,7 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
     val implOpcodeMatchVec = VecInit(Seq.fill(implOpcodes.length)(opcode).zip(implOpcodes).map(x => x._1 === x._2)).asUInt
     assert(!(io.rxsnp.fire && !implOpcodeMatchVec.orR), "Snp opcode: 0x%x is not implemented", opcode)
 
-    LeakChecker(io.rxsnp.valid, io.rxsnp.fire, Some("RXSNP_valid"), maxCount = deadlockThreshold)
+    LeakChecker(io.rxsnp.valid, io.rxsnp.fire, Some("RXSNP_valid"), maxCount = deadlockThreshold - 200)
 }
 
 object RXSNP extends App {

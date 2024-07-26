@@ -915,7 +915,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_rprobeack  := state.w_rprobeack
     io.status.w_evict_comp := state.w_evict_comp
     io.status.w_compdbid   := state.w_compdbid
-    io.status.w_comp_first := state.w_compdat_first && state.w_comp
+    io.status.w_comp_first := state.w_compdat_first && state.w_comp && state.w_compdbid
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.replGotDirty := replGotDirty
