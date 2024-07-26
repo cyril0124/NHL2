@@ -12,8 +12,9 @@ class SkidBuffer[T <: Data](gen: T, overrideName: Boolean = true) extends Module
     }
 
     val io = IO(new Bundle {
-        val enq = Flipped(Decoupled(gen))
-        val deq = Decoupled(gen)
+        val enq  = Flipped(Decoupled(gen))
+        val deq  = Decoupled(gen)
+        val full = Output(Bool())
     })
 
     val buffer = RegInit(0.U.asTypeOf(gen))
@@ -31,6 +32,8 @@ class SkidBuffer[T <: Data](gen: T, overrideName: Boolean = true) extends Module
 
     io.deq.valid := full || io.enq.valid
     io.deq.bits  := Mux(full, buffer, io.enq.bits)
+
+    io.full := full
 }
 
 // object SkidBuffer {

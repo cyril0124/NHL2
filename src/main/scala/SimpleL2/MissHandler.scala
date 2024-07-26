@@ -103,6 +103,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.retryTasks.stage2.bits.grant_s2     := retry_s2.bits.grant_s2
         mshr.io.retryTasks.stage4.valid             := retry_s4.fire && retryTasksMatchOH_s4(i)
         mshr.io.retryTasks.stage4.bits.isRetry_s4   := retry_s4.bits.isRetry_s4
+        mshr.io.retryTasks.stage4.bits.grant_s4     := retry_s4.bits.grant_s4
+        mshr.io.retryTasks.stage4.bits.accessack_s4 := retry_s4.bits.accessack_s4
         mshr.io.retryTasks.stage4.bits.snpresp_s4   := retry_s4.bits.snpresp_s4
         mshr.io.retryTasks.stage4.bits.cbwrdata_s4  := retry_s4.bits.cbwrdata_s4
 
@@ -110,6 +112,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.nested.mshrId  := io.mshrNested.mshrId
         mshr.io.nested.set     := io.mshrNested.set
         mshr.io.nested.tag     := io.mshrNested.tag
+        mshr.io.nested.source  := io.mshrNested.source
         mshr.io.nested.snoop   := io.mshrNested.snoop
         mshr.io.nested.release := io.mshrNested.release
 

@@ -11,6 +11,14 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 
 // TODO: ReleaseAck on SourceB ?
+
+class BufferStatusSourceD(implicit p: Parameters) extends L2Bundle {
+    // SkidBuffer status for RequestArbiter to block the same address SinkA request.
+    val valid = Bool()
+    val set   = UInt(setBits.W)
+    val tag   = UInt(tagBits.W)
+}
+
 class SourceD()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val d              = DecoupledIO(new TLBundleD(tlBundleParams))
@@ -22,6 +30,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val allocGrantMap  = DecoupledIO(new AllocGrantMap)                        // to SinkE
         val sinkIdAlloc    = Flipped(new IDPoolAlloc(log2Ceil(nrExtraSinkId + 1))) // to sinkIDPool
         val nonDataRespCnt = Output(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
+        val bufferStatus   = Output(new BufferStatusSourceD)
     })
 
     val nonDataRespQueue = Module(
@@ -66,6 +75,11 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     skidBuffer.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
     skidBuffer.io.enq.bits.data      := Mux(io.task_s2.valid, io.data_s2.bits, io.data_s6s7.bits)
     assert(!(io.task_s4.fire && !io.task_s6s7.valid && io.data_s6s7.fire), "task_s4 should arrive with data_s6s7!")
+
+    /** Extra buffer status signals for [[RequestArbiter]] */
+    io.bufferStatus.valid := skidBuffer.io.full
+    io.bufferStatus.set   := RegEnable(skidBuffer.io.enq.bits.task.set, skidBuffer.io.enq.fire)
+    io.bufferStatus.tag   := RegEnable(skidBuffer.io.enq.bits.task.tag, skidBuffer.io.enq.fire)
 
     assert(!(io.task_s2.fire && needData(task.opcode) && !io.data_s2.fire), "data should arrive with task!")
     assert(!(io.data_s2.fire && needData(task.opcode) && !io.task_s2.fire), "task should arrive with data!")

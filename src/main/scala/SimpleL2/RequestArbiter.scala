@@ -53,6 +53,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val replayFreeCnt  = Input(UInt((log2Ceil(nrReplayEntry) + 1).W))
         val nonDataRespCnt = Input(UInt((log2Ceil(nrNonDataSourceDEntry) + 1).W))
         val mpStatus       = Input(new MpStatus)
+        val bufferStatus   = Input(new BufferStatusSourceD) // from SourceD
         val resetFinish    = Input(Bool())
     })
 
@@ -110,15 +111,16 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     def addrConflict(set: UInt, tag: UInt): Bool = {
         val mshrAddrConflict = VecInit(io.mshrStatus.map { case s =>
-            // s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag)
             s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
         }).asUInt.orR
 
-        // val mpAddrConflict = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
-        //     stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
-        // }.toSeq).asUInt.orR
+        val mpAddrConflict = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
+            stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
+        }.toSeq).asUInt.orR
 
-        mshrAddrConflict // || mpAddrConflict
+        val bufferAddrConflict = io.bufferStatus.valid && io.bufferStatus.set === set && io.bufferStatus.tag === tag
+
+        mshrAddrConflict || mpAddrConflict || bufferAddrConflict
     }
 
     def noFreeWay(set: UInt): Bool = {
@@ -266,7 +268,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val tempDsToDs_s1       = (io.tempDsRead_s1.bits.dest & DataDestination.DataStorage).orR
     val mayReadDS_a_s1      = io.taskSinkA_s1.bits.opcode === AcquireBlock || io.taskSinkA_s1.bits.opcode === Get || io.taskSinkA_s1.bits.opcode === AcquirePerm
     val mayReadDS_b_s1      = task_s1.isChannelB
-    val mayReadDS_mshr_s1   = mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT
+    val mayReadDS_mshr_s1   = (mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT) || (!mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === GrantData || mshrTask_s1.opcode === AccessAckData))
     val mayReadDS_replay_s1 = io.taskReplay_s1.bits.opcode === AcquireBlock || io.taskReplay_s1.bits.opcode === Get || io.taskReplay_s1.bits.opcode === AcquirePerm
     mayReadDS_a_s1_dup      := mayReadDS_a_s1
     mayReadDS_replay_s1_dup := mayReadDS_replay_s1
@@ -306,7 +308,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val tempDsToDs_s2     = (task_s2.tempDsDest & DataDestination.DataStorage).orR && task_s2.isMshrTask && task_s2.readTempDs
     val mayReadDS_a_s2    = task_s2.isChannelA && (task_s2.opcode === AcquireBlock || task_s2.opcode === Get || task_s2.opcode === AcquirePerm /* AcqurirePerm and hit may read DS data into TempDS */ )
     val mayReadDS_b_s2    = task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */
-    val mayReadDS_mshr_s2 = task_s2.isMshrTask && !task_s2.readTempDs && !task_s2.isReplTask && task_s2.channel === CHIChannel.TXDAT
+    val mayReadDS_mshr_s2 = task_s2.isMshrTask && !task_s2.readTempDs && !task_s2.isReplTask && (task_s2.channel === CHIChannel.TXDAT || (!task_s2.isCHIOpcode && (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData)))
 
     mayReadDS_s2    := valid_s2 && (mayReadDS_a_s2 || mayReadDS_b_s2 || mayReadDS_mshr_s2)
     willRefillDS_s2 := valid_s2 && tempDsToDs_s2
