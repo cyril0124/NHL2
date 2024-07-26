@@ -148,7 +148,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MshrRetryTasks)
         val nested        = Input(new MshrNestedWriteback)
-        val respMapCancel = Output(Bool())
+        val respMapCancel = DecoupledIO(UInt(mshrBits.W))
         val id            = Input(UInt(mshrBits.W))
     })
 
@@ -390,7 +390,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     (reqIsGet)                 -> Mux(dirResp.hit, meta.clientsOH, Fill(nrClients, false.B)),
                     (reqIsPrefetch)            -> meta.clientsOH,
                     (reqIsAcquire && reqNeedT) -> reqClientOH,
-                    (reqIsAcquire && reqNeedB) -> (meta.clientsOH | reqClientOH)
+                    (reqIsAcquire && reqNeedB) -> Mux(dirResp.hit, meta.clientsOH | reqClientOH, reqClientOH)
                 )
             )
         ),                           // TODO:
@@ -880,11 +880,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      */
     when(io.alloc_s3.fire) {
         respMapCancel := false.B
-    }.elsewhen(io.respMapCancel) {
+    }.elsewhen(io.respMapCancel.fire) {
         respMapCancel := false.B
     }
-    io.respMapCancel := respMapCancel
-    assert(!(io.respMapCancel && !valid))
+    io.respMapCancel.valid := respMapCancel || io.status.valid && io.status.willFree
+    io.respMapCancel.bits  := io.id
+    assert(!(io.respMapCancel.fire && !valid))
 
     /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
@@ -893,7 +894,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val noWait     = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("w_")) => signal }.toSeq).asUInt.andR
     val noSchedule = VecInit(state.elements.collect { case (name, signal) if (name.startsWith("s_")) => signal }.toSeq).asUInt.andR
     val willFree   = noWait && noSchedule
-    when(valid && willFree) {
+    when(valid && willFree && io.respMapCancel.ready) {
         valid := false.B
     }
 

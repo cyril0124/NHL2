@@ -27,7 +27,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         /**
          * [[MSHR]] is permitted to cancel the unfired probe, hence the corresponding respDestMap entry should be freed as well. 
          */
-        val respMapCancel = Flipped(ValidIO(UInt(mshrBits.W))) // from MissHandler
+        val respMapCancel = Flipped(DecoupledIO(UInt(mshrBits.W))) // from MissHandler
 
         /** 
          * Interact with [[MainPipe]], [[MainPipe]] will specify the ProbeAckData destination. 
@@ -107,28 +107,29 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         // assert(!entry.valid, "respDestMap[%d] is already valid! addr:0x%x", io.respDest_s4.bits.mshrId, Cat(io.respDest_s4.bits.tag, io.respDest_s4.bits.set, 0.U(6.W)))
     }
     respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
-        when(io.c.fire && !isRelease && hasData && last && en) {
-            destMap.valid := false.B
-            assert(respHasMatch, "ProbeAckData does not match any entry of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-            assert(
-                PopCount(respMatchOH) <= 1.U,
-                "ProbeAckData match multiple entries of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x respMatchOH: 0b%b",
-                io.c.bits.address,
-                set,
-                tag,
-                respMatchOH
-            )
-            assert(destMap.valid, s"ProbeAckData match an empty entry! entry_idx => ${i} addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-        }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
-            destMap.valid := false.B
-        }
+        // when(io.c.fire && !isRelease && hasData && last && en) {
+        //     destMap.valid := false.B
+        //     assert(respHasMatch, "ProbeAckData does not match any entry of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
+        //     assert(
+        //         PopCount(respMatchOH) <= 1.U,
+        //         "ProbeAckData match multiple entries of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x respMatchOH: 0b%b",
+        //         io.c.bits.address,
+        //         set,
+        //         tag,
+        //         respMatchOH
+        //     )
+        //     assert(destMap.valid, s"ProbeAckData match an empty entry! entry_idx => ${i} addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
+        // }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
+        //     destMap.valid := false.B
+        // }
     }
 
+    io.respMapCancel.ready := true.B
     when(io.respMapCancel.fire) {
         val entry = respDestMap(io.respMapCancel.bits)
         entry.valid := false.B
 
-        assert(entry.valid)
+        // assert(entry.valid)
         assert(!(io.respDest_s4.fire && io.respMapCancel.bits === io.respDest_s4.bits.mshrId), "conflict between alloc and cancel!")
     }
 

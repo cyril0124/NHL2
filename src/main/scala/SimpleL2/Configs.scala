@@ -200,21 +200,21 @@ trait HasL2Param {
         (tag, set(setBits - 1, 0), offset(offsetBits - 1, 0))
     }
 
-    def fastArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def fastArb[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
     }
 
-    def lfsrArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def lfsrArb[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new Utils.LFSRArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
     }
 
-    def arbTask[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def arbTask[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }

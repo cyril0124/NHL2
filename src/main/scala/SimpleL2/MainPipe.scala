@@ -134,8 +134,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     val reqNeedT_s3           = needT(task_s3.opcode, task_s3.param)
     val reqClientOH_s3        = getClientBitOH(task_s3.source)
+    val noClients_s3          = !meta_s3.clientsOH.orR
+    val hasOtherClients_s3    = (meta_s3.clientsOH & ~reqClientOH_s3).orR
     val isReqClient_s3        = (reqClientOH_s3 & meta_s3.clientsOH).orR // whether the request is from the same client
-    val sinkRespPromoteT_a_s3 = hit_s3 && meta_s3.isTip
+    val sinkRespPromoteT_a_s3 = hit_s3 && meta_s3.isTip && noClients_s3
 
     val isGet_s3          = task_s3.opcode === Get && task_s3.isChannelA
     val isAcquireBlock_s3 = task_s3.opcode === AcquireBlock && task_s3.isChannelA
@@ -163,7 +165,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             reqNeedT_s3,
 
             /** Acquire.NtoT / Acquire.BtoT */
-            meta_s3.isTrunk || meta_s3.isTip && PopCount(meta_s3.clientsOH) > 1.U,
+            meta_s3.isTrunk || meta_s3.isTip && hasOtherClients_s3,
 
             /** Acquire.NtoB */
             meta_s3.isTrunk
@@ -377,6 +379,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             dirWen_c_s3    -> newMeta_c_s3
         )
     )
+    assert(
+        !(io.dirWrite_s3.fire && io.dirWrite_s3.bits.meta.isTrunk && PopCount(io.dirWrite_s3.bits.meta.clientsOH) > 1.U),
+        "Trunk should only have one client! addr: 0x%x",
+        Cat(task_s3.tag, task_s3.set, 0.U(6.W))
+    )
 
     val replRespValid_s3      = io.replResp_s3.fire && !io.replResp_s3.bits.retry
     val replRespNeedProbe_s3  = replRespValid_s3 && io.replResp_s3.bits.meta.clientsOH.orR
@@ -384,7 +391,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val replRespWayOH_s3      = io.replResp_s3.bits.wayOH
     val allocMshrIdx_s3       = OHToUInt(io.mshrFreeOH_s3)                                                      // TODO: consider OneHot?
     val needAllocDestSinkC_s3 = (needProbeOnHit_a_s3 || needProbe_b_s3) && mshrAlloc_s3 || replRespNeedProbe_s3 // TODO: Snoop
-    val sinkDataToTempDS_s3   = needProbe_b_s3 || (isGet_s3 || isAcquireBlock_s3) && needProbeOnHit_a_s3        // AcquireBlock need GrantData response, nested ReleaseData will be saved into the TempDataStorage
+    val sinkDataToTempDS_s3   = needProbe_b_s3 || (isGet_s3 || isAcquire_s3) && needProbeOnHit_a_s3             // AcquireBlock need GrantData response, nested ReleaseData will be saved into the TempDataStorage
 
     /**
      *  If L2 is TRUNK, L1 migh owns a dirty cacheline, any dirty data should be updated in L2. GrantData must contain clean cacheline data.

@@ -105,7 +105,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     tempDS.io.fromReqArb.dsWrSet_s1   := reqArb.io.dsWrSet_s1
     tempDS.io.fromReqArb.dsWrWayOH_s1 := reqArb.io.dsWrWayOH_s1
 
-    sinkC.io.respMapCancel              := missHandler.io.respMapCancel
+    sinkC.io.respMapCancel              <> missHandler.io.respMapCancel
     sinkC.io.respDest_s4                := mainPipe.io.allocDestSinkC_s4
     sinkC.io.fromReqArb.mayReadDS_s1    := reqArb.io.toSinkC.mayReadDS_s1
     sinkC.io.fromReqArb.willRefillDS_s1 := reqArb.io.toSinkC.willRefillDS_s1

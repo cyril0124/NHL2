@@ -27,7 +27,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MpMshrRetryTasks)
         val mshrNested    = Input(new MshrNestedWriteback)
-        val respMapCancel = ValidIO(UInt(mshrBits.W)) // to SinkC
+        val respMapCancel = DecoupledIO(UInt(mshrBits.W)) // to SinkC
     })
 
     io <> DontCare
@@ -121,8 +121,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     }
 
     /** Cancle respMap entry at [[SinkC]](no ProbeAck is needed) */
-    io.respMapCancel.valid := VecInit(mshrs.map(_.io.respMapCancel)).asUInt.orR
-    io.respMapCancel.bits  := OHToUInt(VecInit(mshrs.map(_.io.respMapCancel)).asUInt)
+    arbTask(mshrs.map(_.io.respMapCancel), io.respMapCancel)
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
     val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt
@@ -152,11 +151,10 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    // TODO: consider fastArb
-    lfsrArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
-    lfsrArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
+    fastArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
+    fastArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
     fastArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
-    lfsrArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
+    fastArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
 
     dontTouch(io)
 }
