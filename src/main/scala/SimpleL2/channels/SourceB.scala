@@ -15,6 +15,7 @@ class SourceB()(implicit p: Parameters) extends L2Module {
         val task           = Flipped(DecoupledIO(new TLBundleB(tlBundleParams)))
         val grantMapStatus = Input(Vec(nrMSHR, new GrantMapStatus)) // from SinkE
         val mpStatus       = Input(new MpStatus)                    // from MainPipe
+        val bufferStatus   = Input(new BufferStatusSourceD)         // from SourceD
     })
 
     val (tag, set, offset) = parseAddress(io.task.bits.address)
@@ -29,7 +30,9 @@ class SourceB()(implicit p: Parameters) extends L2Module {
     val shouldBlock_mp = matchVec_mp.orR
     assert(!(io.b.fire && PopCount(shouldBlock_mp) > 1.U), "shouldBlock_mp:%b", shouldBlock_mp)
 
+    val shouldBlock_buffer = io.bufferStatus.valid && io.bufferStatus.set === set && io.bufferStatus.tag === tag
+
     io.b          <> io.task
-    io.task.ready := io.b.ready && !shouldBlock_sinke && !shouldBlock_mp
-    io.b.valid    := io.task.valid && !shouldBlock_sinke && !shouldBlock_mp
+    io.task.ready := io.b.ready && !shouldBlock_sinke && !shouldBlock_mp && !shouldBlock_buffer
+    io.b.valid    := io.task.valid && !shouldBlock_sinke && !shouldBlock_mp && !shouldBlock_buffer
 }
