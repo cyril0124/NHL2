@@ -347,6 +347,8 @@ chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
         chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
         chi_rxsnp.bits.retToSrc:set(ret2src)
         chi_rxsnp.valid:set(1)
+        env.posedge()
+        chi_rxsnp.ready:expect(1)
     env.negedge()
         chi_rxsnp.valid:set(0)
 end
@@ -4100,6 +4102,30 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
 
             tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+
+            local req_address = to_address(0x01, 0x05)
+            send_and_resp_request() -- address is to_address(0x01, 0x05)
+            chi_txreq.ready:set(0)
+
+            env.expect_not_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            
+            env.negedge()
+                chi_rxsnp:snpunique(req_address, 3, 0) -- Snoop should not be stalled since WriteBackFull is not fired! (commit: b3719d099be22dc1a55394ca9c96e4dc9baf735a)
+            mshrs[0].state_w_compdat_first:expect(1)
+            mshrs[0].state_w_comp:expect(1)
+            
+            env.dut_reset()
         end
 
         env.posedge(100)
