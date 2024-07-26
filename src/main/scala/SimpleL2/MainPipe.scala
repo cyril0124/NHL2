@@ -249,6 +249,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrAlloc_s3.bits.req             := task_s3
     io.mshrAlloc_s3.bits.req.isAliasTask := cacheAlias_s3
 
+    val snpReplay_dup_s3 = WireInit(false.B)
     io.mshrNested        <> DontCare
     io.mshrNested.isMshr := task_s3.isMshrTask
     io.mshrNested.mshrId := task_s3.mshrId
@@ -256,8 +257,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrNested.tag    := task_s3.tag
     io.mshrNested.source := task_s3.source
     // io.mshrNested.snoop.cleanDirty :=
-    io.mshrNested.snoop.toN        := (isSnpToN_s3 && !mshrAlloc_s3 && hit_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
-    io.mshrNested.snoop.toB        := (isSnpToB_s3 && !mshrAlloc_s3 && hit_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
+    io.mshrNested.snoop.toN        := (isSnpToN_s3 && !mshrAlloc_s3 && hit_s3 && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
+    io.mshrNested.snoop.toB        := (isSnpToB_s3 && !mshrAlloc_s3 && hit_s3 && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
     io.mshrNested.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData && valid_s3
     io.mshrNested.release.TtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoN && valid_s3
     io.mshrNested.release.BtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === BtoN && valid_s3
@@ -295,6 +296,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val snpChnlReqOK_s3     = !task_s3.isMshrTask && isSnoop_s3 && task_s3.isChannelB && !mshrAlloc_s3 && valid_s3 // Can ack snoop request without allocating MSHR, Snoop miss did not need mshr, response with SnpResp_I
     val snpReplay_s3        = task_s3.isChannelB && !mshrAlloc_s3 && (!snpNeedData_b_s3 && txrspWillFull_s3 || snpNeedData_b_s3 && !hasValidDataBuf_s6s7) && valid_s3
     val snpRetry_s3         = task_s3.isMshrTask && snpNeedData_mshr_s3 && !hasValidDataBuf_s6s7 && valid_s3
+    snpReplay_dup_s3 := snpReplay_s3
 
     /** Deal with acquire/get reqeuests */
     val noSpaceForNonDataResp_s3 = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U                                                                                      // No space for ReleaseAck to send out to SourceD
