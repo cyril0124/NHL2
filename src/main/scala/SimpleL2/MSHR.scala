@@ -148,7 +148,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MshrRetryTasks)
         val nested        = Input(new MshrNestedWriteback)
-        val respMapCancle = Output(Bool())
+        val respMapCancel = Output(Bool())
         val id            = Input(UInt(mshrBits.W))
     })
 
@@ -788,10 +788,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             meta.state := MixedState.I
         }
 
-        // If WriteBackFull/Evict is not fired, snoop will cancle the WriteBackFull/Evict under certain conditions.
+        // If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions.
         // TODO:
 
-        // Snoop is permitted to cancle the unfired Probe under certain conditions.
+        // Snoop is permitted to cancel the unfired Probe under certain conditions.
         // TODO:
 
         assert(!(nested.toB && nested.toN), s"nested toB and toN at the same time")
@@ -822,7 +822,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         )
     }
 
-    val respMapCancle = RegInit(false.B)
+    val respMapCancel = RegInit(false.B)
     when(nestedMatch) {
         val nested = io.nested.release
 
@@ -855,36 +855,36 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     state.s_sprobe          := true.B
                     state.w_sprobeack       := true.B
                     state.w_sprobeack_first := true.B
-                    respMapCancle           := true.B
+                    respMapCancel           := true.B
                 }
 
                 when(!state.s_aprobe) {
                     state.s_aprobe          := true.B
                     state.w_aprobeack       := true.B
                     state.w_aprobeack_first := true.B
-                    respMapCancle           := true.B
+                    respMapCancel           := true.B
                 }
 
                 when(!state.s_rprobe) {
                     state.s_rprobe          := true.B
                     state.w_rprobeack       := true.B
                     state.w_rprobeack_first := true.B
-                    respMapCancle           := true.B
+                    respMapCancel           := true.B
                 }
             }
         }
     }
 
     /**
-     * [[MSHR]] is permitted to cancle the unfired probe, hence the corresponding respDestMap(at [[SinkC]]) entry should be freed as well. 
+     * [[MSHR]] is permitted to cancel the unfired probe, hence the corresponding respDestMap(at [[SinkC]]) entry should be freed as well. 
      */
     when(io.alloc_s3.fire) {
-        respMapCancle := false.B
-    }.elsewhen(io.respMapCancle) {
-        respMapCancle := false.B
+        respMapCancel := false.B
+    }.elsewhen(io.respMapCancel) {
+        respMapCancel := false.B
     }
-    io.respMapCancle := respMapCancle
-    assert(!(io.respMapCancle && !valid))
+    io.respMapCancel := respMapCancel
+    assert(!(io.respMapCancel && !valid))
 
     /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
