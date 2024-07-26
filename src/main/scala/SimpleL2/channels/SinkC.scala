@@ -24,11 +24,16 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         val task = DecoupledIO(new TaskBundle)
         val resp = ValidIO(new TLRespBundle(tlBundleParams))
 
-        /** 
-         * Interact with [[MissHandler]], [[MissHandler]] will specify the ProbeAckData destination. 
-         * ProbeAckData cannot be received without the resp data destination info sent from [[MissHandler]].
+        /**
+         * [[MSHR]] is permitted to cancle the unfired probe, hence the corresponding respDestMap entry should be freed as well. 
          */
-        val respDest_s4 = Flipped(ValidIO(new RespDataDestSinkC))
+        val respMapCancle = Flipped(ValidIO(UInt(mshrBits.W))) // from MissHandler
+
+        /** 
+         * Interact with [[MainPipe]], [[MainPipe]] will specify the ProbeAckData destination. 
+         * ProbeAckData cannot be received without the resp data destination info sent from [[MainPipe]].
+         */
+        val respDest_s4 = Flipped(ValidIO(new RespDataDestSinkC)) // from MainPipe // TODO: Unify signal naming...
 
         /** Interact with [[DataStorage]] (for ReleaseData / ProbeAckData) */
         val dsWrite_s2 = DecoupledIO(new DSWrite)
@@ -98,7 +103,8 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         entry.wayOH    := io.respDest_s4.bits.wayOH
         entry.isTempDS := io.respDest_s4.bits.isTempDS
         entry.isDS     := io.respDest_s4.bits.isDS
-        assert(!entry.valid, "respDestMap[%d] is already valid!", io.respDest_s4.bits.mshrId)
+        // ! If then probe has been canclled by Release, this entry will still be valid.
+        // assert(!entry.valid, "respDestMap[%d] is already valid! addr:0x%x", io.respDest_s4.bits.mshrId, Cat(io.respDest_s4.bits.tag, io.respDest_s4.bits.set, 0.U(6.W)))
     }
     respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
         when(io.c.fire && !isRelease && hasData && last && en) {
@@ -116,6 +122,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
             destMap.valid := false.B
         }
+    }
+
+    when(io.respMapCancle.fire) {
+        val entry = respDestMap(io.respMapCancle.bits)
+        entry.valid := false.B
+
+        assert(entry.valid)
+        assert(!(io.respDest_s4.fire && io.respMapCancle.bits === io.respDest_s4.bits.mshrId), "conflict between alloc and cancle!")
     }
 
     /**

@@ -27,6 +27,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MpMshrRetryTasks)
         val mshrNested    = Input(new MshrNestedWriteback)
+        val respMapCancle = ValidIO(UInt(mshrBits.W)) // to SinkC
     })
 
     io <> DontCare
@@ -118,6 +119,10 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
         io.mshrStatus(i) := mshr.io.status
     }
+
+    /** Cancle respMap entry at [[SinkC]](no ProbeAck is needed) */
+    io.respMapCancle.valid := VecInit(mshrs.map(_.io.respMapCancle)).asUInt.orR
+    io.respMapCancle.bits  := OHToUInt(VecInit(mshrs.map(_.io.respMapCancle)).asUInt)
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
     val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt

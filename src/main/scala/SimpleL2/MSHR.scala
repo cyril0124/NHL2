@@ -141,14 +141,15 @@ class MshrNestedWriteback()(implicit p: Parameters) extends L2Bundle {
 
 class MSHR()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val alloc_s3    = Flipped(ValidIO(new MshrAllocBundle))
-        val replResp_s3 = Flipped(ValidIO(new DirReplResp))
-        val status      = Output(new MshrStatus)
-        val tasks       = new MshrTasks
-        val resps       = new MshrResps
-        val retryTasks  = Flipped(new MshrRetryTasks)
-        val nested      = Input(new MshrNestedWriteback)
-        val id          = Input(UInt(mshrBits.W))
+        val alloc_s3      = Flipped(ValidIO(new MshrAllocBundle))
+        val replResp_s3   = Flipped(ValidIO(new DirReplResp))
+        val status        = Output(new MshrStatus)
+        val tasks         = new MshrTasks
+        val resps         = new MshrResps
+        val retryTasks    = Flipped(new MshrRetryTasks)
+        val nested        = Input(new MshrNestedWriteback)
+        val respMapCancle = Output(Bool())
+        val id            = Input(UInt(mshrBits.W))
     })
 
     val valid   = RegInit(false.B)
@@ -821,6 +822,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         )
     }
 
+    val respMapCancle = RegInit(false.B)
     when(nestedMatch) {
         val nested = io.nested.release
 
@@ -841,13 +843,48 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             }
         }
 
-        // TODO:
-        // when(nested.TtoN) {
-        //     val releaseClientOH = getClientBitOH(io.nested.source)
-        //     meta.clientsOH := meta.clientsOH & ~releaseClientOH
-        //     nestedRelease  := true.B
-        // }
+        when(nested.TtoN) {
+            val releaseClientOH = getClientBitOH(io.nested.source)
+            val noProbeRequired = !(probeClients & ~releaseClientOH).orR
+            meta.clientsOH  := meta.clientsOH & ~releaseClientOH
+            probeAckClients := probeAckClients & ~releaseClientOH
+            nestedRelease   := true.B
+
+            when(noProbeRequired && !io.tasks.sourceb.fire) {
+                when(!state.s_sprobe) {
+                    state.s_sprobe          := true.B
+                    state.w_sprobeack       := true.B
+                    state.w_sprobeack_first := true.B
+                    respMapCancle           := true.B
+                }
+
+                when(!state.s_aprobe) {
+                    state.s_aprobe          := true.B
+                    state.w_aprobeack       := true.B
+                    state.w_aprobeack_first := true.B
+                    respMapCancle           := true.B
+                }
+
+                when(!state.s_rprobe) {
+                    state.s_rprobe          := true.B
+                    state.w_rprobeack       := true.B
+                    state.w_rprobeack_first := true.B
+                    respMapCancle           := true.B
+                }
+            }
+        }
     }
+
+    /**
+     * [[MSHR]] is permitted to cancle the unfired probe, hence the corresponding respDestMap(at [[SinkC]]) entry should be freed as well. 
+     */
+    when(io.alloc_s3.fire) {
+        respMapCancle := false.B
+    }.elsewhen(io.respMapCancle) {
+        respMapCancle := false.B
+    }
+    io.respMapCancle := respMapCancle
+    assert(!(io.respMapCancle && !valid))
 
     /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
