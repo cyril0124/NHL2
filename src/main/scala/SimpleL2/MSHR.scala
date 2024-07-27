@@ -175,7 +175,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val dbid            = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
     val gotDirty        = RegInit(false.B)
     val gotT            = RegInit(false.B)
-    val replGotDirty    = RegInit(false.B)                                                                             // gotDirty for replacement cache line
+    val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
     val needProbe       = RegInit(false.B)
     val needPromote     = RegInit(false.B)
     val nestedRelease   = RegInit(false.B)
@@ -183,7 +183,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
-    val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
+    val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack || req.isAliasTask, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
     val finishedProbes  = RegInit(0.U(nrClients.W))
     assert(
         !(!state.s_aprobe && !req.isAliasTask && !nestedRelease && PopCount(probeClients) === 0.U), // It is possible that probeClients is 0 if mshr is nested by Relase.
@@ -300,7 +300,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.sourceb.bits.corrupt := DontCare
     io.tasks.sourceb.bits.source  := clientOHToSource(probeSource)
     when(io.tasks.sourceb.fire) {
-        assert(probeClients.orR, "probeClients:0b%b should not be empty", probeClients)
+        assert(
+            probeClients.orR,
+            "probeClients:0b%b should not be empty s_aprobe:%d s_sprobe:%d s_rprobe:%d",
+            probeClients,
+            state.s_aprobe,
+            state.s_sprobe,
+            state.s_rprobe
+        )
 
         val nextFinishedProbes = finishedProbes | getClientBitOH(io.tasks.sourceb.bits.source)
         finishedProbes := nextFinishedProbes
@@ -461,10 +468,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
     mpTask_snpresp.bits.txnID       := req.txnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
-    mpTask_snpresp.bits.opcode      := Mux(gotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
+    mpTask_snpresp.bits.opcode      := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
-    mpTask_snpresp.bits.channel     := Mux(gotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
-    mpTask_snpresp.bits.readTempDs  := gotDirty || req.retToSrc && !replGotDirty
+    mpTask_snpresp.bits.channel     := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
+    mpTask_snpresp.bits.readTempDs  := probeGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
     mpTask_snpresp.bits.updateDir   := hasValidProbeAck                                                    // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(

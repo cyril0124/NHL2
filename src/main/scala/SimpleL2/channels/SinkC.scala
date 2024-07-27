@@ -107,21 +107,21 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         // assert(!entry.valid, "respDestMap[%d] is already valid! addr:0x%x", io.respDest_s4.bits.mshrId, Cat(io.respDest_s4.bits.tag, io.respDest_s4.bits.set, 0.U(6.W)))
     }
     respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
-        // when(io.c.fire && !isRelease && hasData && last && en) {
-        //     destMap.valid := false.B
-        //     assert(respHasMatch, "ProbeAckData does not match any entry of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-        //     assert(
-        //         PopCount(respMatchOH) <= 1.U,
-        //         "ProbeAckData match multiple entries of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x respMatchOH: 0b%b",
-        //         io.c.bits.address,
-        //         set,
-        //         tag,
-        //         respMatchOH
-        //     )
-        //     assert(destMap.valid, s"ProbeAckData match an empty entry! entry_idx => ${i} addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-        // }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
-        //     destMap.valid := false.B
-        // }
+    // when(io.c.fire && !isRelease && hasData && last && en) {
+    //     destMap.valid := false.B
+    //     assert(respHasMatch, "ProbeAckData does not match any entry of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
+    //     assert(
+    //         PopCount(respMatchOH) <= 1.U,
+    //         "ProbeAckData match multiple entries of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x respMatchOH: 0b%b",
+    //         io.c.bits.address,
+    //         set,
+    //         tag,
+    //         respMatchOH
+    //     )
+    //     assert(destMap.valid, s"ProbeAckData match an empty entry! entry_idx => ${i} addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
+    // }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
+    //     destMap.valid := false.B
+    // }
     }
 
     io.respMapCancel.ready := true.B

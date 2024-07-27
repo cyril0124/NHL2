@@ -140,7 +140,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             sameSet_s2 || sameSet_s3
         } else if (channel == "B") {
             val sameSet_s2 = valid_s2 && (!task_s2.isMshrTask && task_s2.tag === tag || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
-            val sameSet_s3 = RegNext(valid_s2 && (!task_s2.isMshrTask && task_s2.tag === tag || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
+            val sameSet_s3 = RegNext(valid_s2, false.B) && RegEnable(task_s2.set, valid_s2) === set && Mux(RegNext(!task_s2.isMshrTask, false.B), RegEnable(task_s2.tag, valid_s2) === tag, RegNext(task_s2.isReplTask, false.B))
             sameSet_s2 || sameSet_s3
         } else {
             assert(false, "invalid channel => " + channel)

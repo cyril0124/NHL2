@@ -165,7 +165,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             reqNeedT_s3,
 
             /** Acquire.NtoT / Acquire.BtoT */
-            meta_s3.isTrunk || meta_s3.isTip && hasOtherClients_s3,
+            meta_s3.isTrunk || (meta_s3.isTip || meta_s3.isBranch) && hasOtherClients_s3,
 
             /** Acquire.NtoB */
             meta_s3.isTrunk
@@ -657,17 +657,17 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.status.stage5.valid    := valid_s5
     io.status.stage5.set      := task_s5.set
     io.status.stage5.tag      := task_s5.tag
-    io.status.stage5.isRefill := !task_s5.isCHIOpcode && (task_s5.opcode === Grant || task_s5.opcode === GrantData || task_s4.opcode === AccessAckData)
+    io.status.stage5.isRefill := !task_s5.isCHIOpcode && (task_s5.opcode === Grant || task_s5.opcode === GrantData || task_s5.opcode === AccessAckData)
 
     io.status.stage6.valid    := valid_s6
     io.status.stage6.set      := task_s6.set
     io.status.stage6.tag      := task_s6.tag
-    io.status.stage6.isRefill := isSourceD_s6 && (task_s6.opcode === Grant || task_s6.opcode === GrantData || task_s4.opcode === AccessAckData)
+    io.status.stage6.isRefill := isSourceD_s6 && (task_s6.opcode === Grant || task_s6.opcode === GrantData || task_s6.opcode === AccessAckData)
 
     io.status.stage7.valid    := valid_s7
     io.status.stage7.set      := task_s7.set
     io.status.stage7.tag      := task_s7.tag
-    io.status.stage7.isRefill := isSourceD_s7 && (task_s7.opcode === Grant || task_s7.opcode === GrantData || task_s4.opcode === AccessAckData)
+    io.status.stage7.isRefill := isSourceD_s7 && (task_s7.opcode === Grant || task_s7.opcode === GrantData || task_s7.opcode === AccessAckData)
 
     /**
      * Debug signals.
