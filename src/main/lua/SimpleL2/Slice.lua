@@ -99,6 +99,24 @@ tl_a.acquire_block = function (this, addr, param, source)
     env.negedge()
 end
 
+tl_a.acquire_block_alias = function (this, addr, param, source, alias)
+    assert(addr ~= nil)
+    assert(param ~= nil)
+
+    env.negedge()
+        this.ready:expect(1)
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeA.AcquireBlock)
+        this.bits.address:set(addr, true)
+        this.bits.param:set(param)
+        this.bits.source:set(source or 0)
+        this.bits.user_alias:set(alias or 0)
+        this.bits.size:set(6) -- 2^6 == 64
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
+end
+
 tl_a.acquire_perm_1 = function (this, addr, param, source)
     assert(addr ~= nil)
     assert(param ~= nil)
@@ -5345,6 +5363,62 @@ local test_cancel_sinkC_respMap = env.register_test_case "test_cancel_sinkC_resp
     end
 }
 
+local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        -- 
+        -- CacheAlias means that the two cachelines with different alias bits are the same in phisical address space. 
+        -- As L2Cache, we should make sure that there is only one copy in the L1Cache.
+        --
+        local function do_alias(core)
+            print("single_core_alias core => " .. core)
+            local address = to_address(0x01, 0x01)
+            local alias = 1
+            local source = 0
+            local clientsOH = 0
+            if core == 0 then
+                source = 0
+                clientsOH = 0x01
+            elseif core == 1 then
+                source = 16
+                clientsOH = 0x02
+            end
+
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+            env.negedge()
+                tl_a:acquire_block_alias(address, TLParam.NtoT, source, alias)
+            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(0) end)
+            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(source) end)
+            env.negedge(5)
+            tl_c:probeack_data(address, TLParam.TtoN, "0xabcd", "0xabbb", source)
+            verilua "appendTasks" {
+                function()
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabcd end)
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabbb end)
+                    env.negedge()
+                    tl_e:grantack(0)
+                    env.negedge(5)
+                    mshrs[0].io_status_valid:expect(0)
+                end,
+                function()
+                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTD) and mp.io_dirWrite_s3_bits_meta_aliasOpt:is(1) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(clientsOH) end)
+                end,
+            }
+            env.negedge(20)
+        end
+
+        do_alias(0)
+        do_alias(1)
+        
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5421,6 +5495,7 @@ verilua "mainTask" { function ()
     test_grant_on_stage4()
     test_release_nest_get()
     test_cancel_sinkC_respMap()
+    test_sinkA_alias()
     end
 
    
