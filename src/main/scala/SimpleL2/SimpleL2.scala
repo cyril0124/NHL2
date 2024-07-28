@@ -422,8 +422,8 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0, h
     val l1xbar = TLXbar()
 
     (0 until nrCore).foreach { i =>
-        l1xbar := TLBuffer.chainNode(2) := TLDelayer(0.3) := l1d_nodes(i)
-        l1xbar := TLBuffer.chainNode(2) := TLDelayer(0.3) := l1i_nodes(i)
+        l1xbar := TLBuffer.chainNode(2) := l1d_nodes(i)
+        l1xbar := TLBuffer.chainNode(2) := l1i_nodes(i)
     }
 
     l2.sinkNodes.foreach { node =>
@@ -479,6 +479,7 @@ object SimpleL2Cache extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
+    // TODO: 4 core
     val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12, hasEndpoint = true)(p)))(config)
 
     GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", split = false)
