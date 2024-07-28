@@ -229,10 +229,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Send [[TXREQ]] task
      * -------------------------------------------------------
      */
+    val willCancelEvict = WireInit(false.B)
+    val willCancelWb    = WireInit(false.B)
     io.tasks.txreq <> DontCare
     io.tasks.txreq.valid := !state.s_read ||
         !state.s_makeunique ||
-        (!state.s_evict || !state.s_wb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
+        (!state.s_evict && !willCancelEvict || !state.s_wb && !willCancelWb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
     io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
@@ -795,11 +797,52 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             meta.state := MixedState.I
         }
 
-        // If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions.
-            // TODO:
+        when(nested.toN) {
 
-        // Snoop is permitted to cancel the unfired Probe under certain conditions.
-        // TODO:
+            /** If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions. */
+            when(!state.s_wb) {
+                willCancelWb     := true.B
+                state.s_wb       := true.B
+                state.w_compdbid := true.B
+                state.s_cbwrdata := true.B
+                assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull")
+            }
+
+            when(!state.s_evict) {
+                willCancelEvict    := true.B
+                state.s_evict      := true.B
+                state.w_evict_comp := true.B
+                // assert(false.B, "TODO: Check! Snoop.toN cancel Evict") // Already checked
+            }
+
+            /** Snoop is permitted to cancel the unfired Probe under certain conditions. */
+            when(!state.s_aprobe) {
+                state.s_aprobe          := true.B
+                state.w_aprobeack       := true.B
+                state.w_aprobeack_first := true.B
+                assert(false.B, "TODO: Check! Snoop.toN cancel sProbe")
+            }
+
+            when(!state.s_sprobe) {
+                state.s_sprobe          := true.B
+                state.w_sprobeack       := true.B
+                state.w_sprobeack_first := true.B
+                assert(false.B, "TODO: Check! Snoop.toN cancel aProbe")
+            }
+
+            when(!state.s_rprobe) {
+                state.s_rprobe          := true.B
+                state.w_rprobeack       := true.B
+                state.w_rprobeack_first := true.B
+                assert(false.B, "TODO: Check! Snoop.toN cancel rProbe")
+            }
+        }
+
+        when(nested.toB) {
+
+            /** Snoop is permitted to cancel the unfired Probe under certain conditions. */
+            // TODO:
+        }
 
         assert(!(nested.toB && nested.toN), s"nested toB and toN at the same time")
 
@@ -857,6 +900,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             probeAckClients := probeAckClients & ~releaseClientOH
             nestedRelease   := true.B
 
+            /** Any unfired probe transactions will be canceled. */
             when(noProbeRequired && !io.tasks.sourceb.fire) {
                 when(!state.s_sprobe) {
                     state.s_sprobe          := true.B
