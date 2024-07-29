@@ -50,27 +50,30 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     }))
 
     // Priority: task_s4 > task_s2 > task_s6s7
-    val task      = Mux(io.task_s4.valid, io.task_s4.bits, Mux(io.task_s2.valid, io.task_s2.bits, io.task_s6s7.bits))
-    val taskValid = io.task_s2.valid || io.task_s4.valid || io.task_s6s7.valid
-    val taskFire  = io.task_s2.fire || io.task_s4.fire || io.task_s6s7.fire
-    io.task_s4.ready   := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && Mux(!task.isMshrTask, io.allocGrantMap.ready, true.B)
-    io.task_s2.ready   := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && Mux(!task.isMshrTask, io.allocGrantMap.ready, true.B) && !io.task_s4.valid
-    io.task_s6s7.ready := Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready) && Mux(!task.isMshrTask, io.allocGrantMap.ready, true.B) && !io.task_s4.valid && !io.task_s2.valid
+    val task          = Mux(io.task_s4.valid, io.task_s4.bits, Mux(io.task_s2.valid, io.task_s2.bits, io.task_s6s7.bits))
+    val taskValid     = io.task_s2.valid || io.task_s4.valid || io.task_s6s7.valid
+    val taskFire      = io.task_s2.fire || io.task_s4.fire || io.task_s6s7.fire
+    val bufferReady   = Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready)
+    val grantMapReady = Mux(task.opcode === GrantData || task.opcode === Grant, io.allocGrantMap.ready, true.B)
+    io.task_s4.ready   := bufferReady && grantMapReady
+    io.task_s2.ready   := bufferReady && grantMapReady && !io.task_s4.valid
+    io.task_s6s7.ready := bufferReady && grantMapReady && !io.task_s4.valid && !io.task_s2.valid
     assert(PopCount(VecInit(Seq(io.task_s2.fire, io.task_s4.fire, io.task_s6s7.fire))) <= 1.U, "only one task can be valid at the same time")
     assert(!(io.task_s4.fire && needData(io.task_s4.bits.opcode)), "task_s4 is not for data resp")
+    assert(!(taskFire && (task.opcode === GrantData || task.opcode === Grant) && !io.allocGrantMap.fire), "need to allocate grantMap entry!")
 
     val sinkId = io.sinkIdAlloc.idOut
     io.sinkIdAlloc.valid := taskFire && (task.opcode === GrantData || task.opcode === Grant) && !task.isMshrTask
 
-    io.data_s2.ready   := skidBuffer.io.enq.ready
-    io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode) && !io.data_s2.valid
+    io.data_s2.ready   := skidBuffer.io.enq.ready && needData(task.opcode) && grantMapReady
+    io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode) && grantMapReady && !io.data_s2.valid
 
-    nonDataRespQueue.io.enq.valid          := taskValid && !needData(task.opcode)
+    nonDataRespQueue.io.enq.valid          := taskFire && !needData(task.opcode)
     nonDataRespQueue.io.enq.bits.task      := task
     nonDataRespQueue.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
 
     skidBuffer.io.enq                <> DontCare
-    skidBuffer.io.enq.valid          := taskValid && needData(task.opcode)
+    skidBuffer.io.enq.valid          := taskFire && needData(task.opcode)
     skidBuffer.io.enq.bits.task      := task
     skidBuffer.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
     skidBuffer.io.enq.bits.data      := Mux(io.task_s2.valid, io.data_s2.bits, io.data_s6s7.bits)
