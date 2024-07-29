@@ -49,6 +49,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val missHandler   = Module(new MissHandler)
     val replayStation = Module(new ReplayStation)
 
+    // TODO: sinkIdPool backpressure when full
     val sinkIdPool = Module(new IDPool((nrMSHR until (nrMSHR + nrExtraSinkId)).toSet))
 
     sinkIdPool.io.alloc.valid    := sourceD.io.sinkIdAlloc.valid
