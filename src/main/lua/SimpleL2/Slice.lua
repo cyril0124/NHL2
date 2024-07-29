@@ -1837,9 +1837,10 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             }
 
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
-                tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xabab)
+                env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.source:is(source) end)
+                expect.equal(tl_d.bits.data:get()[1], 0xabab)
             env.negedge()
+                tl_d.valid:expect(1)
                 expect.equal(tl_d.bits.data:get()[1], 0xefef)
             local sink = tl_d.bits.sink:get()
 
@@ -4138,8 +4139,20 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
 
             env.expect_not_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
             
+            -- env.negedge()
+            --     chi_rxsnp:snpunique(req_address, 3, 0) -- Snoop should not be stalled since WriteBackFull is not fired! (commit: b3719d099be22dc1a55394ca9c96e4dc9baf735a)
             env.negedge()
-                chi_rxsnp:snpunique(req_address, 3, 0) -- Snoop should not be stalled since WriteBackFull is not fired! (commit: b3719d099be22dc1a55394ca9c96e4dc9baf735a)
+                chi_rxsnp.ready:expect(1)
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(req_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+                env.posedge()
+                chi_rxsnp.ready:expect(0) -- Snoop should be blocked beacuse cacheline of the req_address is already get comp/compdata. If we permitted to process incoming the Snoop, we may lost the cacheline data.
+            env.negedge(10)
+                chi_rxsnp.ready:expect(0)
+                chi_rxsnp.valid:set(0)
             mshrs[0].state_w_compdat_first:expect(1)
             mshrs[0].state_w_comp:expect(1)
             
@@ -5419,6 +5432,112 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
     end
 }
 
+local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
+    function()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            -- Snoop cancel Evict
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+
+            env.negedge()
+                env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+            env.negedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.negedge()
+                env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+            env.negedge()
+                env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
+            chi_txreq.ready:set(0)
+            mshrs[0].io_tasks_txreq_ready:set_force(0)
+            env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            local set = mshrs[0].req_set:get()
+            local tag = mshrs[0].dirResp_meta_tag:get()
+            mshrs[0].state_s_evict:expect(0)
+            mshrs[0].state_w_evict_comp:expect(0)
+            mp:force_all()
+                env.negedge()
+                    mp.io_mshrNested_isMshr:set(1)
+                    mp.io_mshrNested_mshrId:set(3)
+                    mp.io_mshrNested_snoop_toN:set(1)
+                    mp.io_mshrNested_set:set(set)
+                    mp.io_mshrNested_tag:set(tag)
+                env.negedge()
+            mp:release_all()
+            mshrs[0].state_s_evict:expect(1)
+            mshrs[0].state_w_evict_comp:expect(1)
+            mshrs[0].io_tasks_txreq_ready:set_release()
+
+            env.dut_reset()
+            resetFinish:posedge()
+            chi_txreq.ready:set(1)
+        end
+
+        -- TODO:
+        -- do
+        --     -- Snoop cancel WriteBackFull
+        --     local clientsOH = ("0b00"):number()
+        --     env.negedge()
+        --         write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+        --     local source = 4
+        --     env.negedge()
+        --         tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+
+        --     env.negedge()
+        --         env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+        --     env.negedge()
+        --         chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        --     env.negedge()
+        --         env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        --     env.negedge()
+        --         env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
+        --     chi_txreq.ready:set(0)
+        --     mshrs[0].io_tasks_txreq_ready:set_force(0)
+        --     env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+        --     local set = mshrs[0].req_set:get()
+        --     local tag = mshrs[0].dirResp_meta_tag:get()
+        --     mshrs[0].state_s_wb:expect(0)
+        --     mshrs[0].state_w_compdbid:expect(0)
+        --     mshrs[0].state_s_cbwrdata:expect(0)
+        --     mp:force_all()
+        --         env.negedge()
+        --             mp.io_mshrNested_isMshr:set(1)
+        --             mp.io_mshrNested_mshrId:set(3)
+        --             mp.io_mshrNested_snoop_toN:set(1)
+        --             mp.io_mshrNested_set:set(set)
+        --             mp.io_mshrNested_tag:set(tag)
+        --         env.negedge()
+        --     mp:release_all()
+        --     mshrs[0].state_s_wb:expect(1)
+        --     mshrs[0].state_w_compdibd:expect(1)
+        --     mshrs[0].state_s_cbwrdata:expect(1)
+        --     mshrs[0].io_tasks_txreq_ready:set_release()
+
+        --     env.dut_reset()
+        --     resetFinish:posedge()
+        --     chi_txreq.ready:set(1)
+        -- end
+
+        -- TODO: cancel probes
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5435,6 +5554,7 @@ verilua "mainTask" { function ()
     local test_all = true
 
     -- test_snoop_nested_read() -- TODO: 
+    test_nested_cancel_req() -- TODO:
 
     -- 
     -- normal test cases
