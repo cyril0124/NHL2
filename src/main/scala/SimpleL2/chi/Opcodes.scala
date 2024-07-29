@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 object CHIOpcodeREQ {
-    val width = 6
+    val width = 6 // TODO: issueE has opcode bits of 7
 
     val ReqLCrdReturn = 0x00.U(width.W)
     val ReadShared    = 0x01.U(width.W)

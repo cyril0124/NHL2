@@ -27,6 +27,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MpMshrRetryTasks)
         val mshrNested    = Input(new MshrNestedWriteback)
+        val respMapCancel = DecoupledIO(UInt(mshrBits.W)) // to SinkC
     })
 
     io <> DontCare
@@ -103,6 +104,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.retryTasks.stage2.bits.grant_s2     := retry_s2.bits.grant_s2
         mshr.io.retryTasks.stage4.valid             := retry_s4.fire && retryTasksMatchOH_s4(i)
         mshr.io.retryTasks.stage4.bits.isRetry_s4   := retry_s4.bits.isRetry_s4
+        mshr.io.retryTasks.stage4.bits.grant_s4     := retry_s4.bits.grant_s4
+        mshr.io.retryTasks.stage4.bits.accessack_s4 := retry_s4.bits.accessack_s4
         mshr.io.retryTasks.stage4.bits.snpresp_s4   := retry_s4.bits.snpresp_s4
         mshr.io.retryTasks.stage4.bits.cbwrdata_s4  := retry_s4.bits.cbwrdata_s4
 
@@ -110,11 +113,15 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.nested.mshrId  := io.mshrNested.mshrId
         mshr.io.nested.set     := io.mshrNested.set
         mshr.io.nested.tag     := io.mshrNested.tag
+        mshr.io.nested.source  := io.mshrNested.source
         mshr.io.nested.snoop   := io.mshrNested.snoop
         mshr.io.nested.release := io.mshrNested.release
 
         io.mshrStatus(i) := mshr.io.status
     }
+
+    /** Cancle respMap entry at [[SinkC]](no ProbeAck is needed) */
+    arbTask(mshrs.map(_.io.respMapCancel), io.respMapCancel)
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
     val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt
@@ -144,10 +151,10 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         )
     )
 
-    lfsrArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
-    lfsrArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
-    lfsrArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
-    lfsrArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
+    fastArb(mshrs.map(_.io.tasks.txreq), io.tasks.txreq)
+    fastArb(mshrs.map(_.io.tasks.txrsp), io.tasks.txrsp)
+    fastArb(mshrs.map(_.io.tasks.sourceb), io.tasks.sourceb)
+    fastArb(mshrs.map(_.io.tasks.mpTask), io.tasks.mpTask)
 
     dontTouch(io)
 }

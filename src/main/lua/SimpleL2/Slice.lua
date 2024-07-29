@@ -99,6 +99,24 @@ tl_a.acquire_block = function (this, addr, param, source)
     env.negedge()
 end
 
+tl_a.acquire_block_alias = function (this, addr, param, source, alias)
+    assert(addr ~= nil)
+    assert(param ~= nil)
+
+    env.negedge()
+        this.ready:expect(1)
+        this.valid:set(1)
+        this.bits.opcode:set(TLOpcodeA.AcquireBlock)
+        this.bits.address:set(addr, true)
+        this.bits.param:set(param)
+        this.bits.source:set(source or 0)
+        this.bits.user_alias:set(alias or 0)
+        this.bits.size:set(6) -- 2^6 == 64
+    env.negedge()
+        this.valid:set(0)
+    env.negedge()
+end
+
 tl_a.acquire_perm_1 = function (this, addr, param, source)
     assert(addr ~= nil)
     assert(param ~= nil)
@@ -347,6 +365,8 @@ chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
         chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
         chi_rxsnp.bits.retToSrc:set(ret2src)
         chi_rxsnp.valid:set(1)
+        env.posedge()
+        chi_rxsnp.ready:expect(1)
     env.negedge()
         chi_rxsnp.valid:set(0)
 end
@@ -1128,7 +1148,7 @@ local test_release_hit = env.register_test_case "test_release_hit" {
                 mp.io_dirResp_s3_valid:expect(1)
                 mp.io_dirResp_s3_bits_meta_clientsOH:expect(0x01)
                 mp.io_dirResp_s3_bits_hit:expect(1)
-                mp.isRelease_s3:expect(1)
+                mp.isReleaseData_s3:expect(1)
                 mp.valid_s3:expect(1)
                 mp.io_dirWrite_s3_valid:expect(1)
                 mp.io_dirWrite_s3_bits_meta_tag:expect(0)
@@ -1593,10 +1613,7 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
         env.dut_reset()
         resetFinish:posedge()
 
-        tl_b.ready:set(1)
-        tl_d.ready:set(1)
-        chi_txrsp.ready:set(1)
-        chi_txreq.ready:set(1)
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_rxsnp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
         -- TODO: AcquirePerm trig Probe and the ProbeAckData response will be saved in DataStorage.
 
         do
@@ -1628,17 +1645,18 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
                 end,
 
                 function ()
-                    env.expect_happen_until(20, function ()
-                        return tl_d:fire() and tl_d.bits.source:is(source) and tl_d.bits.opcode:is(TLOpcodeD.Grant)
-                    end)
-                    tl_d:dump()
+                    env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(source) and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                    tl_d.bits.sink:expect(0)
                     local sink = tl_d.bits.sink:get()
+                    env.negedge()
+                    env.expect_not_happen_until(10, function() return tl_d:fire() end)
         
                     tl_e:grantack(sink)
                 end
             }
 
-            env.negedge(200)
+            env.negedge(20)
+            mshrs[0].io_status_valid:expect(0)
         end
 
         env.negedge(200)
@@ -1648,22 +1666,17 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source)
 
             -- wait Probe.toN
-            env.expect_happen_until(20, function ()
-                return tl_b:fire() and tl_b.bits.address:is(to_address(0x10, 0x20)) and tl_b.bits.opcode:is(TLOpcodeB.Probe) and tl_b.bits.param:is(TLParam.toN)
-            end)
+            env.expect_happen_until(20, function () return tl_b:fire() and tl_b.bits.address:is(to_address(0x10, 0x20)) and tl_b.bits.opcode:is(TLOpcodeB.Probe) and tl_b.bits.param:is(TLParam.toN) end)
             tl_b:dump()
 
             verilua "appendTasks" {
                 function ()
-                    env.expect_happen_until(20, function ()
-                        return sinkC.io_toTempDS_write_valid:is(1)
-                    end)
+                    env.expect_happen_until(20, function () return sinkC.io_toTempDS_write_valid:is(1) end)
                 end,
                 function ()
-                    env.expect_happen_until(10, function ()
-                        return sinkC.io_dsWrite_s2_valid:is(1) -- ProbeAckData is written into DataStorage
-                    end)
-                end,
+                    env.expect_happen_until(20, function () return ds.io_refillWrite_s2_valid:is(1) end)
+                    expect.equal(ds.io_refillWrite_s2_bits_data:get_str(HexStr), "000000000000000000000000000000000000000000000000000000000000efef000000000000000000000000000000000000000000000000000000000000abab")
+                end
             }
             
             -- send ProbeAckData.TtoN(data is modified in core 0)
@@ -1693,6 +1706,36 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
             tl_e:grantack(sink)
 
             env.negedge(10)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        do
+            env.negedge()
+                write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TTC, 0x01)
+                write_ds(0x00, utils.uint_to_onehot(0), utils.bitpat_to_hexstr({
+                    {s = 0,   e = 63, v = 0xdead1},
+                    {s = 256, e = 256 + 63, v = 0xbeef1}
+                }, 512))
+            env.negedge()
+                chi_rxsnp:snpshared(to_address(0x00, 0x01), 3, 0)
+            
+            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+            
+            verilua "appendTasks" {
+                refill_tempDS = function ()
+                    env.expect_happen_until(10, function() return ds.io_refillWrite_s2_valid:is(1) and ds.io_refillWrite_s2_bits_data:get_str(HexStr) == "00000000000000000000000000000000000000000000000000000000000056780000000000000000000000000000000000000000000000000000000000001234" end)
+                end,
+                function ()
+                    env.expect_happen_until(10, function() return sinkC.io_toTempDS_write_valid:is(1) end)
+                end
+            }
+            
+            tl_c:probeack_data(to_address(0x00, 0x01), TLParam.TtoB, "0x1234", "0x5678", 0)
+
+            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.data:get()[1] == 0x1234 end)
+            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.data:get()[1] == 0x5678 end)
+
+            env.negedge(5)
             mshrs[0].io_status_valid:expect(0)
         end
 
@@ -1794,9 +1837,10 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             }
 
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
-                tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xabab)
+                env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.source:is(source) end)
+                expect.equal(tl_d.bits.data:get()[1], 0xabab)
             env.negedge()
+                tl_d.valid:expect(1)
                 expect.equal(tl_d.bits.data:get()[1], 0xefef)
             local sink = tl_d.bits.sink:get()
 
@@ -3673,7 +3717,7 @@ local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
 
         chi_txrsp.ready:set(0)
         mp.io_txrsp_s4_ready:set_force(0)
-        mp.io_willFull_txrsp:set_force(1)
+        mp.io_txrspCnt:set_force(4)
 
         env.negedge()
         write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, 0x00)
@@ -3693,7 +3737,7 @@ local test_txrsp_mp_replay = env.register_test_case "test_txrsp_mp_replay" {
         end
 
         mp.io_txrsp_s4_ready:set_release()
-        mp.io_willFull_txrsp:set_release()
+        mp.io_txrspCnt:set_release()
 
         env.expect_happen_until(10, function ()
             return chi_txrsp.valid:is(1) and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp)
@@ -4077,6 +4121,42 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
 
             tl_e:grantack(0)  
+        end
+
+        env.negedge(20)
+
+        do
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+
+            local req_address = to_address(0x01, 0x05)
+            send_and_resp_request() -- address is to_address(0x01, 0x05)
+            chi_txreq.ready:set(0)
+
+            env.expect_not_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+            
+            -- env.negedge()
+            --     chi_rxsnp:snpunique(req_address, 3, 0) -- Snoop should not be stalled since WriteBackFull is not fired! (commit: b3719d099be22dc1a55394ca9c96e4dc9baf735a)
+            env.negedge()
+                chi_rxsnp.ready:expect(1)
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(req_address, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+                env.posedge()
+                chi_rxsnp.ready:expect(0) -- Snoop should be blocked beacuse cacheline of the req_address is already get comp/compdata. If we permitted to process incoming the Snoop, we may lost the cacheline data.
+            env.negedge(10)
+                chi_rxsnp.ready:expect(0)
+                chi_rxsnp.valid:set(0)
+            mshrs[0].state_w_compdat_first:expect(1)
+            mshrs[0].state_w_comp:expect(1)
+            
+            env.dut_reset()
         end
 
         env.posedge(100)
@@ -5093,6 +5173,371 @@ local test_acquire_BtoT_miss = env.register_test_case "test_acquire_BtoT_miss" {
     end
 }
 
+local test_grant_on_stage4 = env.register_test_case "test_grant_on_stage4" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            -- basic AcquirePerm
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, ("0b00"):number())
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0x01) end)
+            env.expect_happen_until(10, function() return mp.io_sourceD_s4_valid:is(1) end)
+            verilua "appendTasks" {
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_sourceD_s6s7_valid:is(1) end)
+                end,
+                function ()
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                    env.negedge()
+                    env.expect_not_happen_until(10, function() return tl_d:fire() end)
+                    local sink = tl_d.bits.sink()
+                    env.negedge()
+                    tl_e:grantack(sink)
+                end
+            }
+        end
+
+        do
+            -- replay
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, ("0b00"):number())
+                mp.io_nonDataRespCnt:set_force(3)
+                mp.io_sourceD_s4_valid:set_force(0)
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
+            
+            verilua "appendTasks" {
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            env.expect_happen_until(10, function() return mp.io_replay_s4_valid:is(1) end)
+
+            env.negedge(10)
+                mp.io_nonDataRespCnt:set_release()
+                mp.io_sourceD_s4_valid:set_release()
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0x01) end)
+                end
+            }
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+            env.negedge()
+            env.expect_not_happen_until(10, function() return tl_d:fire() end)
+            local sink = tl_d.bits.sink()
+            env.negedge()
+            tl_e:grantack(sink)
+        end
+
+        env.posedge(100)
+    end
+}
+
+local test_release_nest_get = env.register_test_case "test_release_nest_get" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function get_and_probeack_NtoN_nested_relasedata(core)
+            local clientsOH = nil
+            local release_source = 0
+            local probe_source = 0
+            local get_source =33 -- ICache 0
+            if core == 0 then
+                print("core => " .. core)
+                clientsOH = ("0b01"):number()
+                probe_source = 0
+                release_source = 0
+            elseif core == 1 then
+                print("core => " .. core)
+                clientsOH = ("0b10"):number()
+                probe_source = 16
+                release_source = 18
+            else
+                assert(false)
+            end
+
+            assert(clientsOH ~= nil)
+
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+                write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                    {s = 0,   e = 63, v = 0x1111},
+                    {s = 256, e = 256 + 63, v = 0x2222}
+                }, 512))
+            local address = to_address(0x01, 0x01)
+            env.negedge()
+                tl_a:get(address, get_source)
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+                    tl_b.bits.source:expect(probe_source)
+                end,
+                function ()
+                    env.expect_happen_until(10, function() return mshrs[0].io_nested_release_TtoN:is(1) end)
+                end,
+                check_release_data = function()
+                    env.expect_happen_until(10, function() return sinkC.io_dsWrite_s2_valid:is(1) end)
+                end,
+            }
+            env.expect_happen_until(10, function() return mp.io_allocDestSinkC_s4_valid:is(1) and mp.io_allocDestSinkC_s4_bits_isTempDS:is(1) and mp.io_allocDestSinkC_s4_bits_isDS:is(0) end)
+            tl_c:release_data(address, TLParam.TtoN, release_source, "0xabcd", "0xefef")
+            
+            env.negedge(5)
+            tl_c:probeack(address, TLParam.NtoN, release_source)
+            
+            env.expect_happen_until(10, function() return mp.io_toDS_dsRead_s3_valid:is(1) and mp.valid_s3:is(1) end)
+            mshrs[0].reqClientOH:expect(0)
+            mshrs[0].nestedRelease:expect(1)
+            mshrs[0].dirResp_hit:expect(1)
+            mshrs[0].dirResp_meta_clientsOH:expect(0x00)
+            mp.io_dirWrite_s3_valid:expect(1)
+            mp.io_dirWrite_s3_bits_meta_clientsOH:expect(0x00) -- mshr is nested by ReleaseData, hence the corresponding clientsOH has been cleared.
+            mp.io_dirWrite_s3_bits_meta_state:expect(MixedState.TD)
+            env.negedge()
+                mp.valid_s4:expect(1)
+                mp.task_s4_opcode:expect(1)
+                mp.task_s4_isMshrTask:expect(1)
+            env.negedge()
+                mp.valid_s5:expect(1)
+                mp.valid_refill_mp_s5:expect(1)
+                mp.task_s5_isMshrTask:expect(1)
+                mp.task_s5_opcode:expect(1)
+            env.negedge()
+                mp.valid_s6:expect(1)
+                mp.task_s6_isCHIOpcode:expect(0)
+                mp.task_s6_opcode:expect(1)
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.AccessAckData) end)
+            expect.equal(tl_d.bits.data:get()[1], 0xabcd)
+            env.negedge()
+            expect.equal(tl_d.bits.data:get()[1], 0xefef)
+            env.negedge(20)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        get_and_probeack_NtoN_nested_relasedata(0)
+        get_and_probeack_NtoN_nested_relasedata(1)
+
+        env.posedge(100)
+    end
+}
+
+local test_cancel_sinkC_respMap = env.register_test_case "test_cancel_sinkC_respMap" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+        tl_b.ready:set(0)
+
+        -- 
+        -- MSHR is permitted to cancel the unfired probe, hence the corresponding respDestMap(at SinkC) entry should be freed(canceled) as well. 
+        -- 
+        do
+            -- 
+            -- TD    I <-- AcquireBlock.NtoT
+            --   \  /
+            --    TTC
+            -- 
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, 0x01)
+            local address = to_address(0x01, 0x01)
+            env.negedge()
+                tl_a:acquire_block(address, TLParam.NtoT, 17) -- core 1
+            env.expect_happen_until(10, function() return tl_b.valid:is(1) and tl_b.bits.source:is(0) end) -- probe to core 0 while channel b is not ready
+            
+            tl_c:release_data(address, TLParam.TtoN, 0, "0xaabb", "0xccdd") -- core 0 release dirty data
+            env.expect_happen_until(10, function() return mshrs[0].io_nested_release_TtoN:is(1) and mshrs[0].nestedMatch:is(1) end)
+            mshrs[0].state_s_aprobe:expect(0)
+            env.negedge()
+                sinkC.io_respMapCancel_valid:expect(1)
+                sinkC.io_respMapCancel_bits:expect(0)
+            env.negedge()
+                mshrs[0].state_s_aprobe:expect(1)
+                tl_b.valid:expect(0) -- core 0 probe has been canceled
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xaabb end)
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xccdd end)
+            local sink = tl_d.bits.sink:get()
+            env.negedge()
+                tl_e:grantack(sink)
+            env.negedge(5)
+                mshrs[0].io_status_valid:expect(0)
+        end
+
+        env.posedge(100)
+    end
+}
+
+local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        -- 
+        -- CacheAlias means that the two cachelines with different alias bits are the same in phisical address space. 
+        -- As L2Cache, we should make sure that there is only one copy in the L1Cache.
+        --
+        local function do_alias(core)
+            print("single_core_alias core => " .. core)
+            local address = to_address(0x01, 0x01)
+            local alias = 1
+            local source = 0
+            local clientsOH = 0
+            if core == 0 then
+                source = 0
+                clientsOH = 0x01
+            elseif core == 1 then
+                source = 16
+                clientsOH = 0x02
+            end
+
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+            env.negedge()
+                tl_a:acquire_block_alias(address, TLParam.NtoT, source, alias)
+            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(0) end)
+            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(source) end)
+            env.negedge(5)
+            tl_c:probeack_data(address, TLParam.TtoN, "0xabcd", "0xabbb", source)
+            verilua "appendTasks" {
+                function()
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabcd end)
+                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabbb end)
+                    env.negedge()
+                    tl_e:grantack(0)
+                    env.negedge(5)
+                    mshrs[0].io_status_valid:expect(0)
+                end,
+                function()
+                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTD) and mp.io_dirWrite_s3_bits_meta_aliasOpt:is(1) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(clientsOH) end)
+                end,
+            }
+            env.negedge(20)
+        end
+
+        do_alias(0)
+        do_alias(1)
+        
+        env.posedge(100)
+    end
+}
+
+local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
+    function()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            -- Snoop cancel Evict
+            local clientsOH = ("0b00"):number()
+            env.negedge()
+                write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+
+            env.negedge()
+                env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+            env.negedge()
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+            env.negedge()
+                env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+            env.negedge()
+                env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
+            chi_txreq.ready:set(0)
+            mshrs[0].io_tasks_txreq_ready:set_force(0)
+            env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+            local set = mshrs[0].req_set:get()
+            local tag = mshrs[0].dirResp_meta_tag:get()
+            mshrs[0].state_s_evict:expect(0)
+            mshrs[0].state_w_evict_comp:expect(0)
+            mp:force_all()
+                env.negedge()
+                    mp.io_mshrNested_isMshr:set(1)
+                    mp.io_mshrNested_mshrId:set(3)
+                    mp.io_mshrNested_snoop_toN:set(1)
+                    mp.io_mshrNested_set:set(set)
+                    mp.io_mshrNested_tag:set(tag)
+                env.negedge()
+            mp:release_all()
+            mshrs[0].state_s_evict:expect(1)
+            mshrs[0].state_w_evict_comp:expect(1)
+            mshrs[0].io_tasks_txreq_ready:set_release()
+
+            env.dut_reset()
+            resetFinish:posedge()
+            chi_txreq.ready:set(1)
+        end
+
+        -- TODO:
+        -- do
+        --     -- Snoop cancel WriteBackFull
+        --     local clientsOH = ("0b00"):number()
+        --     env.negedge()
+        --         write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
+        --         write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
+        --     local source = 4
+        --     env.negedge()
+        --         tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
+
+        --     env.negedge()
+        --         env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+        --     env.negedge()
+        --         chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+        --     env.negedge()
+        --         env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+        --     env.negedge()
+        --         env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
+        --     chi_txreq.ready:set(0)
+        --     mshrs[0].io_tasks_txreq_ready:set_force(0)
+        --     env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+        --     local set = mshrs[0].req_set:get()
+        --     local tag = mshrs[0].dirResp_meta_tag:get()
+        --     mshrs[0].state_s_wb:expect(0)
+        --     mshrs[0].state_w_compdbid:expect(0)
+        --     mshrs[0].state_s_cbwrdata:expect(0)
+        --     mp:force_all()
+        --         env.negedge()
+        --             mp.io_mshrNested_isMshr:set(1)
+        --             mp.io_mshrNested_mshrId:set(3)
+        --             mp.io_mshrNested_snoop_toN:set(1)
+        --             mp.io_mshrNested_set:set(set)
+        --             mp.io_mshrNested_tag:set(tag)
+        --         env.negedge()
+        --     mp:release_all()
+        --     mshrs[0].state_s_wb:expect(1)
+        --     mshrs[0].state_w_compdibd:expect(1)
+        --     mshrs[0].state_s_cbwrdata:expect(1)
+        --     mshrs[0].io_tasks_txreq_ready:set_release()
+
+        --     env.dut_reset()
+        --     resetFinish:posedge()
+        --     chi_txreq.ready:set(1)
+        -- end
+
+        -- TODO: cancel probes
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5108,7 +5553,8 @@ verilua "mainTask" { function ()
     -- local test_all = false
     local test_all = true
 
-    -- test_snoop_nested_read()
+    -- test_snoop_nested_read() -- TODO: 
+    test_nested_cancel_req() -- TODO:
 
     -- 
     -- normal test cases
@@ -5166,6 +5612,10 @@ verilua "mainTask" { function ()
     test_release_nested_probe()
     test_grant_block_probe()
     test_acquire_BtoT_miss()
+    test_grant_on_stage4()
+    test_release_nest_get()
+    test_cancel_sinkC_respMap()
+    test_sinkA_alias()
     end
 
    

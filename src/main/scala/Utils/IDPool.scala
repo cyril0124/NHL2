@@ -60,6 +60,8 @@ class IDPool(ids: Set[Int], maxLeakCnt: Int = 10000)(implicit s: SourceInfo) ext
                 assert(!idBit, "idOut: %d allocVec:%b", io.alloc.idOut, allocVec)
             }
         }
+
+        assert(!io.full, "IDPool is full!")
     }
 
     /** Release logic

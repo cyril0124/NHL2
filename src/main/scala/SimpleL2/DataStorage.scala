@@ -237,7 +237,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     assert(!(fire_s5 && ren_s6), "stage 6 is full!")
     assert(!(ren_s6 && readToSourceD_s6 && readToTXDAT_s6))
-    LeakChecker(ren_s6, !ren_s6, Some("ren_s6"), maxCount = 2000)
+    LeakChecker(ren_s6, !ren_s6, Some("ren_s6"), maxCount = deadlockThreshold)
 
     // -----------------------------------------------------------------------------------------
     // Stage 7 (data output)

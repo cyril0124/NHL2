@@ -33,15 +33,15 @@ case class L2Param(
     nrExtraSinkId: Int = 16, // extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
+    nrTXRSPEntry: Int = 4,
     metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
-    rdQueueEntries: Int = 2,
     rxrspCreditMAX: Int = 4,
     rxsnpCreditMAX: Int = 4,
     rxdatCreditMAX: Int = 2,
-    replacementPolicy: String = "random",
-    useDiplomacy: Boolean = false // If use diplomacy, EdgeInKey should be passed in
+    replacementPolicy: String = "random", // TODO: plru
+    useDiplomacy: Boolean = false         // If use diplomacy, EdgeInKey should be passed in
 ) {
     require(dataBits == 64 * 8)
     require(nrSlice >= 1)
@@ -81,7 +81,7 @@ trait HasL2Param {
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry
     val nrNonDataSourceDEntry = l2param.nrNonDataSourceDEntry
-    val rdQueueEntries        = l2param.rdQueueEntries
+    val nrTXRSPEntry          = l2param.nrTXRSPEntry
 
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX
@@ -200,21 +200,21 @@ trait HasL2Param {
         (tag, set(setBits - 1, 0), offset(offsetBits - 1, 0))
     }
 
-    def fastArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def fastArb[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new FastArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
     }
 
-    def lfsrArb[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def lfsrArb[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new Utils.LFSRArbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
         out <> arb.io.out
     }
 
-    def arbTask[T <: Bundle](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
+    def arbTask[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {
         val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
         if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
         for ((a, req) <- arb.io.in.zip(in)) { a <> req }
