@@ -863,7 +863,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
          */
         val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
         assert(
-            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack) && hasNestedSnoop || !hasNestedSnoop || req.channel === L2Channel.ChannelB,
+            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack || io.status.willFree) && hasNestedSnoop || !hasNestedSnoop || req.channel === L2Channel.ChannelB,
             "w_compdbid:%d, w_evict_comp:%d, s_grant:%d, s_accessack:%d",
             state.w_compdbid,
             state.w_evict_comp,
