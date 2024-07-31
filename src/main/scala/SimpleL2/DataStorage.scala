@@ -13,13 +13,13 @@ import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class DSRead()(implicit p: Parameters) extends L2Bundle {
     val set   = UInt(setBits.W)
-    val wayOH = UInt(wayBits.W)
+    val wayOH = UInt(ways.W)
     val dest  = UInt(DataDestination.width.W)
 }
 
 class DSWrite()(implicit p: Parameters) extends L2Bundle {
     val set   = UInt(setBits.W)
-    val wayOH = UInt(wayBits.W)
+    val wayOH = UInt(ways.W)
     val data  = UInt(dataBits.W)
 }
 
