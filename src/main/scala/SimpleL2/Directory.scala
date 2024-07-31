@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.ReplacementPolicy
 import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, BankedSRAM, RandomPriorityEncoder}
+import Utils.{GenerateVerilog, RandomPriorityEncoder}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
@@ -213,10 +213,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
                 set = sets,
                 way = group,
                 singlePort = true,
-                // hasMbist = false /* TODO */,
-                // hasShareBus = false /* TDOO */,
-                hasClkGate = enableClockGate
-                // parentName = parentName + "ds_" /* TODO */
+                multicycle = 1,
             )
         )
     }
@@ -225,43 +222,43 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val repl = ReplacementPolicy.fromString(replacementPolicy, ways)
     
     // @formatter:off
-    val replacerSRAM_opt = if (replacementPolicy == "random") None else {
-            Some(
-                Module(
-                    new BankedSRAM( // TODO:
-                        gen = UInt(repl.nBits.W),
-                        sets = sets,
-                        ways = 1,
-                        nrBank = 4,
-                        singlePort = true,
-                        shouldReset = true,
-                        // hasMbist = false /* TODO */,
-                        // hasShareBus = false /* TODO */,
-                        hasClkGate = enableClockGate
-                        // parentName = parentName + "repl_"
-                    )
-                )
-            )
-        }
+    // val replacerSRAM_opt = if (replacementPolicy == "random") None else {
+    //         Some(
+    //             Module(
+    //                 new BankedSRAM( // TODO:
+    //                     gen = UInt(repl.nBits.W),
+    //                     sets = sets,
+    //                     ways = 1,
+    //                     nrBank = 4,
+    //                     singlePort = true,
+    //                     shouldReset = true,
+    //                     // hasMbist = false /* TODO */,
+    //                     // hasShareBus = false /* TODO */,
+    //                     hasClkGate = enableClockGate
+    //                     // parentName = parentName + "repl_"
+    //                 )
+    //             )
+    //         )
+    //     }
     // @formatter:on
 
     // TODO: when should we update replacer SRAM
-    replacerSRAM_opt.foreach { sram =>
-        sram.io <> DontCare
-        dontTouch(sram.io)
-    }
+    // replacerSRAM_opt.foreach { sram =>
+    //     sram.io <> DontCare
+    //     dontTouch(sram.io)
+    // }
     // ReplacerWen: updateHit || updateRepl(replace task)
 
-    replacerSRAM_opt.foreach { sram =>
-        sram.io.w(
-            valid = !io.resetFinish,
-            data = 0.U, // TODO: replacer SRAM init value
-            setIdx = resetIdx - 1.U,
-            waymask = 1.U
-        )
+    // replacerSRAM_opt.foreach { sram =>
+    //     sram.io.w(
+    //         valid = !io.resetFinish,
+    //         data = 0.U, // TODO: replacer SRAM init value
+    //         setIdx = resetIdx - 1.U,
+    //         waymask = 1.U
+    //     )
 
-        assert(!(!io.resetFinish && sram.io.w.req.valid && !sram.io.w.req.ready))
-    }
+    //     assert(!(!io.resetFinish && sram.io.w.req.valid && !sram.io.w.req.ready))
+    // }
 
     // -----------------------------------------------------------------------------------------
     // Stage 1(dir read) / Stage 3(dir write)

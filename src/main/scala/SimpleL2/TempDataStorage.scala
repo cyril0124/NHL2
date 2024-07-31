@@ -90,10 +90,7 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
                 set = nrMSHR,
                 way = 1,
                 singlePort = true,
-                // hasMbist = false /* TODO */,
-                // hasShareBus = false /* TDOO */,
-                hasClkGate = enableClockGate
-                // parentName = parentName + "ds_" /* TODO */
+                multicycle = 1,
             )
         )
     }
