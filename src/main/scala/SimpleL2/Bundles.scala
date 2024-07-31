@@ -36,6 +36,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
     val snpHitWriteBack = Bool() // for Snoop nested MSHR
     val snpGotDirty     = Bool() // for Snoop nested MSHR
+    val snpHitReq       = Bool()
+    val snpHitMshrId    = UInt(mshrBits.W)
 
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true

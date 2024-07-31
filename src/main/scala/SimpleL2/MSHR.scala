@@ -77,9 +77,11 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_compdbid   = Bool()
     val w_comp_first = Bool()
 
-    val waitProbeAck = Bool()
-    val replGotDirty = Bool()
-    val isChannelA   = Bool()
+    val waitProbeAck  = Bool()
+    val replGotDirty  = Bool()
+    val isChannelA    = Bool()
+    val reqAllowSnoop = Bool()
+    val gotCompData   = Bool()
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -172,11 +174,16 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reqNeedT      = needT(req.opcode, req.param)
     val reqNeedB      = needB(req.opcode, req.param)
 
-    val dbid            = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
+    val rspDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
+    val datDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
+    val isRealloc       = RegInit(false.B)
+    val reallocTxnID    = RegInit(0.U.asTypeOf(chiselTypeOf(req.txnID)))
+    val gotCompData     = RegInit(false.B)
     val gotDirty        = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
     val needProbe       = RegInit(false.B)
+    val needRead        = RegInit(false.B)
     val needPromote     = RegInit(false.B)
     val nestedRelease   = RegInit(false.B)
     val probeGotDirty   = RegInit(false.B)
@@ -202,7 +209,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val promoteT_alias  = dirResp.hit && req.isAliasTask && (meta.isTrunk || meta.isTip)
     val reqPromoteT     = (reqIsAcquire || reqIsGet || reqIsPrefetch) && (promoteT_normal || promoteT_l3 || promoteT_alias) // TODO:
 
-    when(io.alloc_s3.fire) {
+    when(io.alloc_s3.fire && !io.alloc_s3.bits.realloc) {
         val allocState = io.alloc_s3.bits.fsmState
 
         valid   := true.B
@@ -211,9 +218,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         state   := allocState
 
         needProbe   := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
+        needRead    := !allocState.s_read
         needPromote := !allocState.s_makeunique
 
-        dbid            := 0.U
+        rspDBID         := 0.U
+        datDBID         := 0.U
+        isRealloc       := false.B
+        gotCompData     := false.B
         gotT            := false.B
         gotDirty        := false.B
         replGotDirty    := false.B
@@ -224,6 +235,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         probeAckParams.foreach(_ := 0.U)
     }
 
+    when(io.alloc_s3.fire && io.alloc_s3.bits.realloc) {
+        val allocState = io.alloc_s3.bits.fsmState
+
+        isRealloc    := true.B
+        reallocTxnID := io.alloc_s3.bits.req.txnID
+
+        state.s_snpresp      := allocState.s_snpresp
+        state.w_snpresp_sent := allocState.w_snpresp_sent
+
+        assert(valid, "mshr should already be valid when reallocating")
+    }
+
     /**
      * ------------------------------------------------------- 
      * Send [[TXREQ]] task
@@ -232,9 +255,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val willCancelEvict = WireInit(false.B)
     val willCancelWb    = WireInit(false.B)
     io.tasks.txreq <> DontCare
-    io.tasks.txreq.valid := !state.s_read ||
+    io.tasks.txreq.valid := (!state.s_read ||
         !state.s_makeunique ||
-        (!state.s_evict && !willCancelEvict || !state.s_wb && !willCancelWb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
+        (!state.s_evict && !willCancelEvict || !state.s_wb && !willCancelWb) && state.w_rprobeack) && state.s_snpresp && state.w_snpresp_sent // Evict/WriteBackFull should wait for refill and probeack finish
     io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
@@ -276,7 +299,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.respErr  := RespErr.NormalOkay
     io.tasks.txrsp.bits.pCrdType := DontCare
-    io.tasks.txrsp.bits.txnID    := dbid // TODO:
+    io.tasks.txrsp.bits.txnID    := Mux(needRead, datDBID, rspDBID) // TODO:
     io.tasks.txrsp.bits.dbID     := DontCare
     io.tasks.txrsp.bits.srcID    := DontCare
     io.tasks.txrsp.bits.resp     := DontCare
@@ -413,8 +436,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     )
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
-    mpTask_wbdata.valid            := !state.s_cbwrdata && state.w_compdbid
-    mpTask_wbdata.bits.txnID       := dbid
+    mpTask_wbdata.valid            := !state.s_cbwrdata && state.s_snpresp && state.w_compdbid
+    mpTask_wbdata.bits.txnID       := rspDBID
     mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.opcode      := CopyBackWrData
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
@@ -468,12 +491,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpSharedX, BRANCH, INVALID))
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
-    mpTask_snpresp.bits.txnID       := req.txnID
+    mpTask_snpresp.bits.txnID       := Mux(isRealloc, reallocTxnID, req.txnID)
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
     mpTask_snpresp.bits.channel     := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
-    mpTask_snpresp.bits.readTempDs  := probeGotDirty
+    mpTask_snpresp.bits.readTempDs  := probeGotDirty || gotCompData
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
     mpTask_snpresp.bits.updateDir   := hasValidProbeAck                                                    // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
@@ -519,6 +542,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         when(mpTask_snpresp.valid) {
             state.s_snpresp := true.B
         }
+
+        assert(PopCount(Cat(mpTask_refill.valid, mpTask_wbdata.valid, mpTask_repl.valid, mpTask_snpresp.valid)) <= 1.U, "only one mpTask can fire at a time")
     }
 
     /** mpTask needs to be retried due to insufficent resources  */
@@ -614,9 +639,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_compdat := true.B
 
             when(rxdat.bits.chiOpcode === CompData) {
+                gotCompData := true.B
+
                 gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
-                gotDirty := gotDirty || rxdat.bits.resp === Resp.UC_PD
-                dbid     := rxdat.bits.dbID
+                gotDirty := rxdat.bits.resp === Resp.UC_PD
+                datDBID  := rxdat.bits.dbID
             }
         }.otherwise {
             state.w_compdat_first := true.B
@@ -627,7 +654,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
     when(rxrsp.fire && rxrsp.bits.last) {
-        dbid := rxrsp.bits.dbID
+        rspDBID := rxrsp.bits.dbID
 
         val opcode = rxrsp.bits.chiOpcode
         when(opcode === Comp) {
@@ -938,6 +965,56 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.respMapCancel.bits  := io.id
     assert(!(io.respMapCancel.fire && !valid))
 
+    /** 
+     * Read reissue:
+     *  If the [[MSHR]] is nested by the same address(request address) Snoop on certain conditions([[MSHR]] already gets Comp/CompData from downstream cache), 
+     *  the read reissue is required beacuse the data will be snooped back.
+     * Read resissue is work with reallocation which is triggered by the Snoop that cannot be handled by the TXDAT at stage 2.
+     */
+    val snoopMatchReqAddr = valid && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr && io.status.reqAllowSnoop
+    when(snoopMatchReqAddr) {
+        val nested = io.nested.snoop
+
+        when(nested.toN) {
+            when(needRead) {
+                state.s_read          := false.B
+                state.w_compdat       := false.B
+                state.w_compdat_first := false.B
+                state.s_compack       := false.B
+                assert(state.s_read)
+            }
+
+            when(needPromote) {
+                state.s_makeunique := false.B
+                state.w_comp       := false.B
+                state.s_compack    := false.B
+                assert(state.s_makeunique)
+            }
+        }
+
+        when(nested.toB) {
+            when(needRead) {
+                when(reqNeedT) {
+                    state.s_read          := false.B
+                    state.w_compdat       := false.B
+                    state.w_compdat_first := false.B
+                    state.s_compack       := false.B
+                    assert(state.s_read)
+                }
+                assert(state.s_read)
+            }
+
+            when(needPromote) {
+                state.s_makeunique := false.B
+                state.w_comp       := false.B
+                state.s_compack    := false.B
+                assert(state.s_makeunique)
+            }
+            // TODO: not verified
+            // assert(false.B, "TODO:")
+        }
+    }
+
     /**
      * Check if there is any request in the [[MSHR]] waiting for responses or waiting for sehcduling tasks.
      * If there is, then we cannot free the [[MSHR]].
@@ -972,6 +1049,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.replGotDirty := replGotDirty
     io.status.isChannelA   := req.isChannelA
+
+    // Allow Snoop nested request address. This operation will cause ReadReissue
+    io.status.reqAllowSnoop := state.w_compdat && state.w_comp && state.s_compack && // Already get CompData or Comp from downstream cache
+        state.w_replResp && (!state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent) && // Does not grant to upstream cache
+        state.s_rprobe && state.w_rprobeack &&                                                                          // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
+        (!state.w_compdbid || !state.w_evict_comp)                                                                      // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
+    io.status.gotCompData := gotCompData
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))
