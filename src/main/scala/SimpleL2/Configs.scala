@@ -34,7 +34,6 @@ case class L2Param(
     nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
     nrTXRSPEntry: Int = 4,
-    metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
     rxrspCreditMAX: Int = 2,
@@ -43,6 +42,8 @@ case class L2Param(
     replacementPolicy: String = "random", // TODO: plru
     useDiplomacy: Boolean = false         // If use diplomacy, EdgeInKey should be passed in
 ) {
+    require(isPow2(ways))
+    require(isPow2(sets))
     require(dataBits == 64 * 8)
     require(nrSlice >= 1)
     require(nrMSHR == nrTempDataEntry)
@@ -72,7 +73,6 @@ trait HasL2Param {
     val nrGrantMap    = nrMSHR
     val mshrBits      = log2Ceil(l2param.nrMSHR)
     val nrReplayEntry = l2param.nrReplayEntry
-    val metaSramBank  = l2param.metaSramBank // TODO: remove this
     val nrBeat        = l2param.blockBytes / l2param.beatBytes
     val idsAll        = 256
 

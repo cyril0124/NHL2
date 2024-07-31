@@ -205,19 +205,21 @@ class Directory()(implicit p: Parameters) extends L2Module {
 
     val resetIdx = RegInit(sets.U)
 
-    val metaSRAM = Module(
-        new BankedSRAM( // TODO: consider SRAMTemplate
-            gen = new DirectoryMetaEntry,
-            sets = sets,
-            ways = ways,
-            nrBank = metaSramBank,
-            singlePort = true,
-            // hasMbist = false /* TODO */,
-            // hasShareBus = false /* TDOO */,
-            hasClkGate = enableClockGate
-            // parentName = parentName + "meta_" /* TODO */
+    val group = 2 // Combine two directory entries into one SRAM bank
+    val metaSRAMs = Seq.fill(ways / group) {
+        Module(
+            new SRAMTemplate(
+                gen = new DirectoryMetaEntry,
+                set = sets,
+                way = group,
+                singlePort = true,
+                // hasMbist = false /* TODO */,
+                // hasShareBus = false /* TDOO */,
+                hasClkGate = enableClockGate
+                // parentName = parentName + "ds_" /* TODO */
+            )
         )
-    )
+    }
 
     // TODO: update replacer SRAM
     val repl = ReplacementPolicy.fromString(replacementPolicy, ways)
@@ -230,7 +232,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
                         gen = UInt(repl.nBits.W),
                         sets = sets,
                         ways = 1,
-                        nrBank = metaSramBank,
+                        nrBank = 4,
                         singlePort = true,
                         shouldReset = true,
                         // hasMbist = false /* TODO */,
@@ -242,8 +244,6 @@ class Directory()(implicit p: Parameters) extends L2Module {
             )
         }
     // @formatter:on
-
-    metaSRAM.io <> DontCare
 
     // TODO: when should we update replacer SRAM
     replacerSRAM_opt.foreach { sram =>
@@ -266,15 +266,20 @@ class Directory()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 1(dir read) / Stage 3(dir write)
     // -----------------------------------------------------------------------------------------
-    metaSRAM.io.r.req.valid       := io.dirRead_s1.fire
-    metaSRAM.io.r.req.bits.setIdx := io.dirRead_s1.bits.set
-    metaSRAM.io.w(
-        valid = !io.resetFinish || io.dirWrite_s3.fire,
-        data = Mux(io.resetFinish, io.dirWrite_s3.bits.meta, 0.U.asTypeOf(new DirectoryMetaEntry)),
-        setIdx = Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U),
-        waymask = Mux(io.resetFinish, io.dirWrite_s3.bits.wayOH, Fill(ways, "b1".U))
-    )
-    io.dirRead_s1.ready := io.resetFinish && metaSRAM.io.r.req.ready && !io.dirWrite_s3.fire
+    val sramRdReady = metaSRAMs.map(_.io.r.req.ready).reduce(_ & _)
+    metaSRAMs.zipWithIndex.foreach { case (sram, i) =>
+        sram.io.r.req.valid       := io.dirRead_s1.fire
+        sram.io.r.req.bits.setIdx := io.dirRead_s1.bits.set
+
+        val sramWayMask = io.dirWrite_s3.bits.wayOH(i * 2 + (group - 1), i * 2)
+        sram.io.w.req.valid       := !io.resetFinish || io.dirWrite_s3.fire
+        sram.io.w.req.bits.setIdx := Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U)
+        sram.io.w.req.bits.data   := VecInit(Seq.fill(group)(io.dirWrite_s3.bits.meta))
+        sram.io.w.req.bits.waymask.foreach(_ := Mux(io.resetFinish, sramWayMask, Fill(group, 1.U)))
+        assert(PopCount(sramWayMask) <= 1.U, "0b%b", sramWayMask)
+    }
+
+    io.dirRead_s1.ready := io.resetFinish && sramRdReady && !io.dirWrite_s3.fire
 
     // -----------------------------------------------------------------------------------------
     // Stage 2(dir read)
@@ -285,7 +290,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val mshrId_s2       = RegEnable(io.dirRead_s1.bits.mshrId, io.dirRead_s1.fire && io.dirRead_s1.bits.replTask)
     val reqTag_s2       = RegEnable(io.dirRead_s1.bits.tag, io.dirRead_s1.fire)
     val reqSet_s2       = RegEnable(io.dirRead_s1.bits.set, io.dirRead_s1.fire)
-    metaRead_s2 := metaSRAM.io.r.resp.data
+    metaRead_s2 := VecInit(metaSRAMs.map(_.io.r.resp.data)).asTypeOf(Vec(ways, new DirectoryMetaEntry()))
 
     // -----------------------------------------------------------------------------------------
     // Stage 3(dir read)
@@ -348,15 +353,18 @@ class Directory()(implicit p: Parameters) extends L2Module {
     io.resetFinish := resetIdx === 0.U && !reset.asBool
 
     when(io.resetFinish) {
-        val dirWriteReady_s3 = io.resetFinish && metaSRAM.io.w.req.ready
+        val sramWrReady      = metaSRAMs.map(_.io.w.req.ready).reduce(_ & _)
+        val dirWriteReady_s3 = io.resetFinish && sramWrReady
         assert(!(io.dirWrite_s3.valid && !dirWriteReady_s3))
-        assert(!(io.dirWrite_s3.valid && !metaSRAM.io.w.req.ready), "dirWrite_s3 while metaSRAM is not ready!")
+        assert(!(io.dirWrite_s3.valid && !sramWrReady), "dirWrite_s3 while metaSRAM is not ready!")
         assert(!(io.dirWrite_s3.valid && PopCount(io.dirWrite_s3.bits.wayOH) > 1.U))
     }
     when(!io.resetFinish) {
         assert(!io.dirRead_s1.fire, "cannot read directory while not reset finished!")
         assert(!io.dirWrite_s3.fire, "cannot write directory while not reset finished!")
-        assert(!(metaSRAM.io.w.req.valid && !metaSRAM.io.w.req.ready), "write metaSRAM should always be ready!")
+        metaSRAMs.foreach { sram =>
+            assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "write metaSRAM should always be ready!")
+        }
     }
 
     dontTouch(io)
