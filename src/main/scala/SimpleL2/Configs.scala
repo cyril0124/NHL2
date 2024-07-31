@@ -37,8 +37,8 @@ case class L2Param(
     metaSramBank: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
-    rxrspCreditMAX: Int = 4,
-    rxsnpCreditMAX: Int = 4,
+    rxrspCreditMAX: Int = 2,
+    rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
     replacementPolicy: String = "random", // TODO: plru
     useDiplomacy: Boolean = false         // If use diplomacy, EdgeInKey should be passed in
@@ -56,7 +56,7 @@ trait HasL2Param {
 
     val ways          = l2param.ways
     val sets          = l2param.sets
-    val wayBits       = log2Ceil(l2param.sets)
+    val wayBits       = log2Ceil(l2param.ways)
     val addressBits   = l2param.addressBits
     val dataBits      = l2param.dataBits
     val beatBytes     = l2param.beatBytes
