@@ -365,7 +365,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     // }
 }
 
-class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
+class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] = None, ways: Option[Int] = None, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
     def createDCacheNode(name: String, sources: Int) = {
@@ -414,6 +414,8 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0, h
 
     val l2 = LazyModule(new SimpleL2Cache()(p.alterPartial { case L2ParamKey =>
         L2Param(
+            ways = ways.getOrElse(L2Param().ways),
+            sets = sets.getOrElse(L2Param().sets),
             useDiplomacy = true,
             nrSlice = nrSlice,
             blockBytes = BlockSize
@@ -473,6 +475,7 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, nodeID: Int = 0, h
     }
 }
 
+// For integration test
 object SimpleL2Cache extends App {
     val config = new Config((_, _, _) => {
         case L2ParamKey      => L2Param()
@@ -483,4 +486,16 @@ object SimpleL2Cache extends App {
     val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12, hasEndpoint = true)(p)))(config)
 
     GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", split = false)
+}
+
+// For logic synthesis
+object SimpleL2CacheFinal extends App {
+    val config = new Config((_, _, _) => {
+        case L2ParamKey      => L2Param()
+        case DebugOptionsKey => DebugOptions()
+    })
+
+    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 1, nrSlice = 2, sets = Some(256), ways = Some(8), nodeID = 12, hasEndpoint = false)(p)))(config)
+
+    GenerateVerilog(args, () => top.module, release = true, name = "SimpleL2CacheFinal", split = true)
 }
