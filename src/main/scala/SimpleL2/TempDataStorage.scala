@@ -115,9 +115,13 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val dsWrWayOH_ts1 = io.fromReqArb.dsWrWayOH_s1
     val dsWrSet_ts1   = io.fromReqArb.dsWrSet_s1
 
-    io.fromReqArb.read_s1.ready := !wen_ts1
+    /**
+     * Priority:
+     *          fromDS.write_s5 > fromRXDAT.write > fromReqArb.read_s1 > fromSinkC.write
+     */
+    io.fromReqArb.read_s1.ready := !wen_ds_ts1 && !io.fromRXDAT.write.valid
     io.fromRXDAT.write.ready    := !wen_ds_ts1
-    io.fromSinkC.write.ready    := !wen_ds_ts1 && !io.fromRXDAT.write.valid
+    io.fromSinkC.write.ready    := !io.fromReqArb.read_s1.valid && !wen_ds_ts1 && !io.fromRXDAT.write.valid
 
     tempDataSRAMs.zipWithIndex.foreach { case (sram, i) =>
         sram.io.w.req.valid             := wen_ts1
