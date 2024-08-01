@@ -195,9 +195,9 @@ class LinkMonitor()(implicit p: Parameters) extends L2Module {
     Decoupled2LCredit(setSrcID(io.in.chi.txreq, io.nodeID), io.out.chi.txreq, txState, Some("txreq"))
     Decoupled2LCredit(setSrcID(io.in.chi.txrsp, io.nodeID), io.out.chi.txrsp, txState, Some("txrsp"))
     Decoupled2LCredit(setSrcID(io.in.chi.txdat, io.nodeID), io.out.chi.txdat, txState, Some("txdat"))
-    LCredit2Decoupled(io.out.chi.rxsnp, io.in.chi.rxsnp, rxState, rxsnpDeact, Some("rxsnp"))
-    LCredit2Decoupled(io.out.chi.rxrsp, io.in.chi.rxrsp, rxState, rxrspDeact, Some("rxrsp"))
-    LCredit2Decoupled(io.out.chi.rxdat, io.in.chi.rxdat, rxState, rxdatDeact, Some("rxdat"))
+    LCredit2Decoupled(io.out.chi.rxsnp, io.in.chi.rxsnp, rxState, rxsnpDeact, Some("rxsnp"), lcreditNum = rxsnpCreditMAX)
+    LCredit2Decoupled(io.out.chi.rxrsp, io.in.chi.rxrsp, rxState, rxrspDeact, Some("rxrsp"), lcreditNum = rxrspCreditMAX)
+    LCredit2Decoupled(io.out.chi.rxdat, io.in.chi.rxdat, rxState, rxdatDeact, Some("rxdat"), lcreditNum = rxdatCreditMAX)
 
     io.out.chiLinkCtrl.txsactive   := true.B // TODO:
     io.out.chiLinkCtrl.txactivereq := !reset.asBool

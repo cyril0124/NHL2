@@ -13,13 +13,13 @@ import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class DSRead()(implicit p: Parameters) extends L2Bundle {
     val set   = UInt(setBits.W)
-    val wayOH = UInt(wayBits.W)
+    val wayOH = UInt(ways.W)
     val dest  = UInt(DataDestination.width.W)
 }
 
 class DSWrite()(implicit p: Parameters) extends L2Bundle {
     val set   = UInt(setBits.W)
-    val wayOH = UInt(wayBits.W)
+    val wayOH = UInt(ways.W)
     val data  = UInt(dataBits.W)
 }
 
@@ -69,6 +69,18 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val sramReady   = WireInit(false.B)
     val wayConflict = WireInit(false.B)
 
+    /**
+     * Each cacheline(64-byte) should be seperated into groups of 16-byte(128-bit) beacuse SRAM provided by foundary is typically less than 144-bit wide. 
+     *                                   way_0                                                                            way_1                                         ...
+     *        SRAM_0            SRAM_1             SRAM_2             SRAM_3                 SRAM_4            SRAM_5             SRAM_6             SRAM_7             ...
+     * |---------------------------------------------------------------------------|  |---------------------------------------------------------------------------|        
+     * | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) |  | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) |     ...
+     * |---------------------------------------------------------------------------|  |---------------------------------------------------------------------------| 
+     *                                       .                                                                              .  
+     *                                       .                                                                              .
+     *                                       .                                                                              .
+     * 
+     */
     val groupBytes = 16                      // TODO: parameterize
     val group      = blockBytes / groupBytes // 64 / 16 = 4, each CacheLine is splited into 4 groups of data bytes
     val dataSRAMs = Seq.fill(ways) {
@@ -79,10 +91,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
                     set = sets,
                     way = 1,
                     singlePort = true,
-                    // hasMbist = false /* TODO */,
-                    // hasShareBus = false /* TDOO */,
-                    // hasClkGate = enableClockGate
-                    // parentName = parentName + "ds_" /* TODO */
+                    multicycle = 2
                 )
             )
         }

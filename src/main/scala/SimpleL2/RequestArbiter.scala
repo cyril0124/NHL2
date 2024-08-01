@@ -196,12 +196,20 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         matchVec
     }
 
+    def snpHitReq(set: UInt, tag: UInt): UInt = {
+        val matchVec = VecInit(io.mshrStatus.map { s =>
+            s.valid && s.set === set && s.reqTag === tag && !s.dirHit && s.w_replResp && s.reqAllowSnoop
+        }).asUInt
+        assert(PopCount(matchVec) <= 1.U)
+        matchVec
+    }
+
     /**
      * After MSHR receives the first beat of CompData, and before L2 receives GrantAck from L1, snoop of X should be **blocked**, 
      * because a slave should not issue a Probe if there is a pending GrantAck on the block according to TileLink spec.
      */
-    val reqBlockSnp_forSnoop  = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && s.w_comp_first }).asUInt.orR
-    val reqBlockSnp_forReplay = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskReplay_s1.set && s.reqTag === taskReplay_s1.tag && !s.willFree && s.w_comp_first }).asUInt.orR
+    val reqBlockSnp_forSnoop  = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && s.w_comp_first && !s.reqAllowSnoop }).asUInt.orR
+    val reqBlockSnp_forReplay = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskReplay_s1.set && s.reqTag === taskReplay_s1.tag && !s.willFree && s.w_comp_first && !s.reqAllowSnoop }).asUInt.orR
 
     val mshrBlockSnp_forSnoop  = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
     val mshrBlockSnp_forReplay = mshrBlockSnp(taskReplay_s1.set, taskReplay_s1.tag).orR
@@ -245,19 +253,24 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag).orR
     arbTaskSnoop.bits.snpGotDirty     := snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_s1 && !blockB_s1
-    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_s1 && !blockB_s1
+    arbTaskSnoop.bits.snpHitReq       := snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag).orR
+    arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag))
+    arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag), io.mshrStatus.map(_.gotCompData))
+    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
+    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
+    assert(!(arbTaskSnoop.valid && arbTaskSnoop.bits.snpHitWriteBack && arbTaskSnoop.bits.snpHitReq), "snpHitWriteBack and snpHitReq should not be both true")
 
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
 
+    // TODO: snpHitWriteBack, snpGotDirty for replay channel b
     arbTaskReplay.valid    := io.taskReplay_s1.valid && !blockReplay_s1
     io.taskReplay_s1.ready := arbTaskReplay.ready && !blockReplay_s1
 
     arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !noSpaceForReplay_s1 && !blockA_s1
     io.taskSinkA_s1.ready := arbTaskSinkA.ready && !noSpaceForReplay_s1 && !blockA_s1
 
-    chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && io.dirRead_s1.ready
+    chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && Mux(!chnlTask_s1.bits.snpHitReq, io.dirRead_s1.ready, true.B)
     task_s1 := Mux(
         mshrTaskFull_s1,
         mshrTask_s1,
@@ -286,15 +299,15 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     valid_s1                   := chnlTask_s1.valid || mshrTaskFull_s1
     fire_s1                    := mshrTaskFull_s1 && mshrTaskReady_s1 || chnlTask_s1.fire
 
-    io.dirRead_s1.valid         := fire_s1 && !task_s1.isMshrTask || fire_s1 && task_s1.isMshrTask && task_s1.isReplTask
+    io.dirRead_s1.valid         := fire_s1 && (!task_s1.isMshrTask || task_s1.isMshrTask && task_s1.isReplTask) && !task_s1.snpHitReq
     io.dirRead_s1.bits.set      := task_s1.set
     io.dirRead_s1.bits.tag      := task_s1.tag
     io.dirRead_s1.bits.mshrId   := task_s1.mshrId
     io.dirRead_s1.bits.replTask := task_s1.isMshrTask && task_s1.isReplTask
 
-    io.tempDsRead_s1.valid     := mshrTaskFull_s1 && task_s1.readTempDs && fire_s1
-    io.tempDsRead_s1.bits.idx  := task_s1.mshrId
-    io.tempDsRead_s1.bits.dest := task_s1.tempDsDest
+    io.tempDsRead_s1.valid     := (mshrTaskFull_s1 || task_s1.snpHitReq) && task_s1.readTempDs && fire_s1
+    io.tempDsRead_s1.bits.idx  := Mux(task_s1.snpHitReq, task_s1.snpHitMshrId, task_s1.mshrId)
+    io.tempDsRead_s1.bits.dest := Mux(task_s1.snpHitReq, DataDestination.TXDAT, task_s1.tempDsDest)
     io.dsWrSet_s1              := task_s1.set
     io.dsWrWayOH_s1            := task_s1.wayOH
 

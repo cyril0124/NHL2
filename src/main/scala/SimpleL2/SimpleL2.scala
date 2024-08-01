@@ -93,7 +93,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         beatBytes = 32,
         minLatency = 2,
         responseFields = Nil,
-        requestKeys = Nil,
+        requestKeys = Seq(AliasKey),
         endSinkId = idsAll * (1 << bankBits)
     )
 

@@ -6,18 +6,23 @@ import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation
 
 object GenerateVerilog {
-    def apply(args: Array[String], gen: () => RawModule, name: String = "Unknown", split: Boolean = false) {
+    def apply(args: Array[String], gen: () => RawModule, release: Boolean = false, name: String = "Unknown", split: Boolean = false) {
 
         var extraFirtoolOptions = Seq(FirtoolOption("--export-module-hierarchy"))
         if (split) {
             extraFirtoolOptions = extraFirtoolOptions ++ Seq(FirtoolOption("--split-verilog"), FirtoolOption("-o=./build/" + name))
         }
 
+        val buildOpt = if (release) {
+            FirtoolOption("-O=release")
+        } else {
+            FirtoolOption("-O=debug")
+        }
+
         (new ChiselStage).execute(
             Array("--target", "verilog") ++ args,
             Seq(
-                // FirtoolOption("-O=release"),
-                FirtoolOption("-O=debug"),
+                buildOpt,
                 FirtoolOption("--disable-all-randomization"),
                 FirtoolOption("--disable-annotation-unknown"),
                 FirtoolOption("--strip-debug-info"),

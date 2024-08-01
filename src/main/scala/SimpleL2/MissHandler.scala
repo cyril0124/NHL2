@@ -14,6 +14,8 @@ class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
     val req      = new TaskBundle
     val fsmState = new MshrFsmState
     val dirResp  = new DirResp
+    val mshrId   = UInt(mshrBits.W)
+    val realloc  = Bool()
 }
 
 // TODO: extra MSHR for Snoop, extra MSHR for Release
@@ -68,7 +70,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     val retryTasksMatchOH_s2 = UIntToOH(io.retryTasks.mshrId_s2)
     val retryTasksMatchOH_s4 = UIntToOH(io.retryTasks.mshrId_s4)
 
-    mshrs.zip(io.mshrFreeOH_s3.asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
+    mshrs.zip(UIntToOH(io.mshrAlloc_s3.bits.mshrId).asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
         mshr.io    <> DontCare
         mshr.io.id := i.U
 
