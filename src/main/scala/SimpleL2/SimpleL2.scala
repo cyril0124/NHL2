@@ -93,7 +93,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         beatBytes = 32,
         minLatency = 2,
         responseFields = Nil,
-        requestKeys = Nil,
+        requestKeys = Seq(AliasKey),
         endSinkId = idsAll * (1 << bankBits)
     )
 
@@ -382,7 +382,7 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
                     channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
                     minLatency = 1,
                     echoFields = Nil,
-                    requestFields = Nil,
+                    requestFields = Seq(AliasField(2)),
                     responseKeys = Nil
                 )
             )
