@@ -213,7 +213,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
                 set = sets,
                 way = group,
                 singlePort = true,
-                multicycle = 1,
+                multicycle = 1
             )
         )
     }

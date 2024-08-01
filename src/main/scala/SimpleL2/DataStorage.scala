@@ -91,7 +91,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
                     set = sets,
                     way = 1,
                     singlePort = true,
-                    multicycle = 2,
+                    multicycle = 2
                 )
             )
         }

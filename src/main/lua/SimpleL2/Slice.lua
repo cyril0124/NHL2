@@ -4655,7 +4655,6 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
     end
 }
 
--- TODO: nest: Release nest Probe, Snoop nest WriteBack/Evict
 local test_release_nested_probe = env.register_test_case "test_release_nested_probe" {
     function ()
         env.dut_reset()
