@@ -100,14 +100,14 @@ tl_a.acquire_block = function (this, addr, param, source)
     env.negedge()
 end
 
-tl_a.acquire_block_alias = function (this, addr, param, source, alias)
+tl_a.acquire_alias = function (this, opcode, addr, param, source, alias)
     assert(addr ~= nil)
     assert(param ~= nil)
 
     env.negedge()
         this.ready:expect(1)
         this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeA.AcquireBlock)
+        this.bits.opcode:set(opcode)
         this.bits.address:set(addr, true)
         this.bits.param:set(param)
         this.bits.source:set(source or 0)
@@ -5390,8 +5390,15 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
         -- CacheAlias means that the two cachelines with different alias bits are the same in phisical address space. 
         -- As L2Cache, we should make sure that there is only one copy in the L1Cache.
         --
-        local function do_alias(core, acquire_param, meta_alias, req_alias)
-            print("single_core_alias core => " .. core .. " meta_alias => " .. meta_alias .. " req_alias => " .. req_alias .. " acquire_param => " .. TLParam(acquire_param))
+        local function do_alias(core, sinka_opcode, acquire_param, meta_alias, req_alias)
+            print("single_core_alias" .. " opcode => " .. TLOpcodeA(sinka_opcode) .. " core => " .. core .. " meta_alias => " .. meta_alias .. " req_alias => " .. req_alias .. " acquire_param => " .. TLParam(acquire_param))
+
+            env.posedge(10)
+            env.dut_reset()
+            resetFinish:posedge()
+
+            tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
             local address = to_address(0x01, 0x01)
             local source = 0
             local clientsOH = 0
@@ -5406,7 +5413,7 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
             env.negedge(20)
                 write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH, meta_alias)
             env.negedge()
-                tl_a:acquire_block_alias(address, acquire_param, source, req_alias)
+                tl_a:acquire_alias(sinka_opcode, address, acquire_param, source, req_alias)
             env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(meta_alias) end)
             env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(acquire_param == TLParam.NtoT and TLParam.toN or TLParam.toB) and tl_b.bits.source:is(source) end)
             expect.equal(tl_b.bits.data:get()[1], bit.lshift(meta_alias, 1))
@@ -5415,12 +5422,21 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
                 tl_c:probeack_data(address, TLParam.TtoN, "0xabcd", "0xabbb", source)
             else
                 assert(acquire_param == TLParam.NtoB)
-                tl_c:probeack(address, TLParam.BtoN, source)
+                tl_c:probeack(address, TLParam.TtoN, source)
             end
             verilua "appendTasks" {
                 function()
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabcd end)
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabbb end)
+                    if sinka_opcode == TLOpcodeA.AcquireBlock then
+                        if acquire_param == TLParam.NtoT then
+                            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabcd end)
+                            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xabbb end)
+                        else
+                            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) end)
+                            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) end)
+                        end
+                    else
+                        env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                    end
                     env.negedge()
                     tl_e:grantack(0)
                     env.negedge(5)
@@ -5434,21 +5450,28 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
                     end
                 end,
             }
-            env.negedge(20)
+            env.negedge(200)
         end
         
+        local sinka_opcodes = {TLOpcodeA.AcquireBlock, TLOpcodeA.AcquirePerm}
         local acquire_params = {TLParam.NtoT, TLParam.NtoB}
-        for meta_alias = 0, 3 do
-            for req_alias = 0, 3 do
-                for i = 1, 2 do
-                    if req_alias ~= meta_alias then
-                        do_alias(0, acquire_params[i], meta_alias, req_alias)
-                        do_alias(1, acquire_params[i], meta_alias, req_alias)
+        for j = 1, 2 do
+            for meta_alias = 0, 3 do
+                for req_alias = 0, 3 do
+                    for i = 1, 2 do
+                        if sinka_opcodes[j] == TLOpcodeA.AcquirePerm and acquire_params[i] ~= TLParam.NtoT then
+                            -- do nothing, AcquirePerm should pair with NtoT
+                        else
+                            if req_alias ~= meta_alias then
+                                do_alias(0, sinka_opcodes[j], acquire_params[i], meta_alias, req_alias)
+                                do_alias(1, sinka_opcodes[j], acquire_params[i], meta_alias, req_alias)
+                            end
+                        end
                     end
-                end
-            end    
+                end    
+            end
         end
-        
+
         env.posedge(100)
     end
 }

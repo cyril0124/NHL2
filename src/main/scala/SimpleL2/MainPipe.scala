@@ -176,7 +176,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             meta_s3.isTrunk
         )
     } else {
-        isGet_s3 && hit_s3 && meta_s3.isTrunk
+        isGet_s3 && hit_s3 && meta_s3.isTrunk || isAcquire_s3 && hit_s3 && cacheAlias_s3 && meta_s3.clientsOH.orR
     }
     val needProbeOnMiss_a_s3 = task_s3.isChannelA && !hit_s3 && meta_s3.clientsOH.orR
     val needProbe_a_s3       = task_s3.isChannelA && (hit_s3 && needProbeOnHit_a_s3 || !hit_s3 && needProbeOnMiss_a_s3)
@@ -296,6 +296,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             "Acquire.NtoB should never get trunk state! addr:%x", // It is possible to get trunk state for cacheAlias_s3.
             addr
         )
+
+        assert(!(task_s3.isChannelA && isAcquirePerm_s3 && task_s3.param === NtoB), "Unsupported AcquirePerm.NtoB! addr:%x", addr)
 
         // assert(!(task_s3.isChannelC && (isRelease_s3 || isReleaseData_s3) && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
         assert(!((isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB

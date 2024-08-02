@@ -414,7 +414,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             reqIsGet || reqIsPrefetch,
             meta.aliasOpt.getOrElse(0.U),
             req.aliasOpt.getOrElse(0.U)
-        ), // TODO:
+        ),
         clientsOH = Mux(
             reqIsPrefetch,
             Mux(dirResp.hit, meta.clientsOH, Fill(nrClients, false.B)),
@@ -427,8 +427,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     (reqIsAcquire && reqNeedB) -> Mux(dirResp.hit, meta.clientsOH | reqClientOH, reqClientOH)
                 )
             )
-        ),                           // TODO:
-        fromPrefetch = reqIsPrefetch // TODO:
+        ),
+        fromPrefetch = reqIsPrefetch
     )
     assert(
         !(io.tasks.mpTask.fire && mpTask_refill.valid && mpTask_refill.bits.opcode === AccessAckData && mpTask_refill.bits.updateDir && !dirResp.hit && mpTask_refill.bits.newMetaEntry.clientsOH.orR),
