@@ -322,7 +322,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
     io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
-    io.tasks.sourceb.bits.data    := DontCare
+    io.tasks.sourceb.bits.data    := Cat(dirResp.meta.aliasOpt.getOrElse(0.U), 0.U(1.W))
     io.tasks.sourceb.bits.mask    := DontCare
     io.tasks.sourceb.bits.corrupt := DontCare
     io.tasks.sourceb.bits.source  := clientOHToSource(probeSource)
