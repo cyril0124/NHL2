@@ -180,6 +180,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reallocTxnID    = RegInit(0.U.asTypeOf(chiselTypeOf(req.txnID)))
     val gotCompData     = RegInit(false.B)
     val gotDirty        = RegInit(false.B)
+    val releaseGotDirty = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
     val needProbe       = RegInit(false.B)
@@ -227,6 +228,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         gotCompData     := false.B
         gotT            := false.B
         gotDirty        := false.B
+        releaseGotDirty := false.B
         replGotDirty    := false.B
         nestedRelease   := false.B
         probeGotDirty   := false.B
@@ -402,7 +404,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         DataDestination.SourceD
     )
     mpTask_refill.bits.newMetaEntry := DirectoryMetaEntryNoTag(
-        dirty = gotDirty || dirResp.hit && meta.isDirty, // TODO: Release ?
+        dirty = gotDirty || releaseGotDirty || dirResp.hit && meta.isDirty,
         state = Mux(
             reqIsGet,
             Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
@@ -489,14 +491,15 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty)
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpSharedX, BRANCH, INVALID))
+    val snprespNeedData   = gotDirty || probeGotDirty || req.retToSrc || meta.isDirty
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
     mpTask_snpresp.bits.txnID       := Mux(isRealloc, reallocTxnID, req.txnID)
     mpTask_snpresp.bits.isCHIOpcode := true.B
-    mpTask_snpresp.bits.opcode      := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, SnpRespData, SnpResp)
+    mpTask_snpresp.bits.opcode      := Mux(snprespNeedData, SnpRespData, SnpResp)
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
-    mpTask_snpresp.bits.channel     := Mux(gotDirty || probeGotDirty || req.retToSrc || meta.isDirty, CHIChannel.TXDAT, CHIChannel.TXRSP)
-    mpTask_snpresp.bits.readTempDs  := probeGotDirty || gotCompData
+    mpTask_snpresp.bits.channel     := Mux(snprespNeedData, CHIChannel.TXDAT, CHIChannel.TXRSP)
+    mpTask_snpresp.bits.readTempDs  := snprespNeedData && !releaseGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
     mpTask_snpresp.bits.updateDir   := hasValidProbeAck                                                    // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
@@ -709,6 +712,16 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
             state.w_sprobeack_first := true.B
             state.w_sprobeack       := state.w_sprobeack | probeFinish | (nextProbeAckClients === probeClients)
+
+            when(!state.s_evict && releaseGotDirty) {
+                state.s_evict      := true.B
+                state.w_evict_comp := true.B
+
+                state.s_wb            := false.B
+                state.w_compdbid      := false.B
+                state.s_cbwrdata      := false.B
+                state.w_cbwrdata_sent := false.B
+            }
         }.elsewhen(sinkc.bits.opcode === ProbeAckData) {
             val probeAckIsDirty = sinkc.bits.param === TtoN || sinkc.bits.param === TtoB
             when(probeAckIsDirty) { // for now we think ProbeAckData.BtoN is not a diry data
@@ -905,7 +918,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         when(nested.setDirty) {
             when(nedtedHitMatch) {
-                gotDirty := true.B
+                releaseGotDirty := true.B
             }.otherwise {
                 replGotDirty := true.B
             }
