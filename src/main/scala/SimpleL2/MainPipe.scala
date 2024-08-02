@@ -292,8 +292,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         // assert(!(task_s3.isChannelA && isAcquire_s3 && task_s3.param === BtoT && hit_s3 && !isReqClient_s3), "Acquire.BtoT should have clientsOH! addr:%x", addr)
 
         assert(
-            !(task_s3.isChannelA && isAcquire_s3 && task_s3.param === NtoB && dirResp_s3.hit && isReqClient_s3 && meta_s3.isTrunk),
-            "Acquire.NtoB should never get trunk state! addr:%x",
+            !(task_s3.isChannelA && isAcquire_s3 && task_s3.param === NtoB && dirResp_s3.hit && isReqClient_s3 && meta_s3.isTrunk && !cacheAlias_s3),
+            "Acquire.NtoB should never get trunk state! addr:%x", // It is possible to get trunk state for cacheAlias_s3.
             addr
         )
 
