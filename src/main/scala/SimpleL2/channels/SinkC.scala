@@ -137,14 +137,19 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * Send response to [[MSHR]], only for ProbeAck/ProbeAckData.
      * Release/ReleaseData is request, not response.
      */
-    io.resp.valid       := io.c.fire && (first || last) && !isRelease
-    io.resp.bits.opcode := io.c.bits.opcode
-    io.resp.bits.param  := io.c.bits.param
-    io.resp.bits.source := io.c.bits.source
-    io.resp.bits.sink   := DontCare
-    io.resp.bits.set    := set
-    io.resp.bits.tag    := tag
-    io.resp.bits.last   := hasData && last || !hasData
+    val resp      = WireInit(0.U.asTypeOf(Valid(chiselTypeOf(io.resp.bits))))
+    val respValid = RegNext(resp.valid, false.B)     // opt for timing
+    val respBits  = RegEnable(resp.bits, resp.valid) // opt for timing
+    resp.valid       := io.c.fire && (first || last) && !isRelease
+    resp.bits.opcode := io.c.bits.opcode
+    resp.bits.param  := io.c.bits.param
+    resp.bits.source := io.c.bits.source
+    resp.bits.sink   := DontCare
+    resp.bits.set    := set
+    resp.bits.tag    := tag
+    resp.bits.last   := hasData && last || !hasData
+    io.resp.valid    := respValid
+    io.resp.bits     := respBits
 
     /** 
      * Write response data into [[TempDataStorage]].

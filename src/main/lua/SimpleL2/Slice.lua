@@ -4826,8 +4826,8 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
                     tl_e:grantack(0)
                 end
             }
-            env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xdead2 end)
-            env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xbeef2 end)
+            env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xdead2 end)
+            env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xbeef2 end)
             env.negedge(10)
             mshrs[0].io_status_valid:expect(0)
         end
@@ -5864,6 +5864,8 @@ verilua "mainTask" { function ()
 
     -- local test_all = false
     local test_all = true
+
+    -- test_snoop_nested_read()
 
     -- 
     -- normal test cases
