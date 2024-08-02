@@ -93,6 +93,7 @@ tl_a.acquire_block = function (this, addr, param, source)
         this.bits.address:set(addr, true)
         this.bits.param:set(param)
         this.bits.source:set(source or 0)
+        this.bits.user_alias:set(0)
         this.bits.size:set(6) -- 2^6 == 64
     env.negedge()
         this.valid:set(0)
@@ -411,13 +412,14 @@ local mpReq_s2 = ([[
     | snpHitWriteBack
 ]]):bundle {hier = mp:name(), prefix = "io_mpReq_s2_", name = "mpReq_s2"}
 
-local function write_dir(set, wayOH, tag, state, clientsOH)
+local function write_dir(set, wayOH, tag, state, clientsOH, alias)
     assert(type(set) == "number")
     assert(type(wayOH) == "number" or type(wayOH) == "cdata")
     assert(type(tag) == "number")
     assert(type(state) == "number")
 
     local clientsOH = clientsOH or ("0b00"):number()
+    local alias = alias or ("0b00"):number()
     
     env.negedge()
         dir:force_all()
@@ -426,7 +428,7 @@ local function write_dir(set, wayOH, tag, state, clientsOH)
             dir.io_dirWrite_s3_bits_wayOH:set(wayOH)
             dir.io_dirWrite_s3_bits_meta_tag:set(tag)
             dir.io_dirWrite_s3_bits_meta_state:set(state)
-            dir.io_dirWrite_s3_bits_meta_aliasOpt:set(0)
+            dir.io_dirWrite_s3_bits_meta_aliasOpt:set(alias)
             dir.io_dirWrite_s3_bits_meta_clientsOH:set(clientsOH)
     
     env.negedge()
@@ -1136,6 +1138,8 @@ local test_release_hit = env.register_test_case "test_release_hit" {
     function ()
         env.dut_reset()
         resetFinish:posedge()
+
+        tl_d.ready:set(1)
 
         -- 
         -- [1] test ReleaseData.TtoN hit
@@ -5386,10 +5390,9 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
         -- CacheAlias means that the two cachelines with different alias bits are the same in phisical address space. 
         -- As L2Cache, we should make sure that there is only one copy in the L1Cache.
         --
-        local function do_alias(core)
-            print("single_core_alias core => " .. core)
+        local function do_alias(core, meta_alias, req_alias)
+            print("single_core_alias core => " .. core .. " meta_alias => " .. meta_alias .. " req_alias => " .. req_alias)
             local address = to_address(0x01, 0x01)
-            local alias = 1
             local source = 0
             local clientsOH = 0
             if core == 0 then
@@ -5401,11 +5404,12 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
             end
 
             env.negedge(20)
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, clientsOH, meta_alias)
             env.negedge()
-                tl_a:acquire_block_alias(address, TLParam.NtoT, source, alias)
-            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(0) end)
+                tl_a:acquire_block_alias(address, TLParam.NtoT, source, req_alias)
+            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(meta_alias) end)
             env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(source) end)
+            expect.equal(tl_b.bits.data:get()[1], bit.lshift(meta_alias, 1))
             env.negedge(5)
             tl_c:probeack_data(address, TLParam.TtoN, "0xabcd", "0xabbb", source)
             verilua "appendTasks" {
@@ -5418,14 +5422,20 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
                     mshrs[0].io_status_valid:expect(0)
                 end,
                 function()
-                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTD) and mp.io_dirWrite_s3_bits_meta_aliasOpt:is(1) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(clientsOH) end)
+                    env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTD) and mp.io_dirWrite_s3_bits_meta_aliasOpt:is(req_alias) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(clientsOH) end)
                 end,
             }
             env.negedge(20)
         end
-
-        do_alias(0)
-        do_alias(1)
+        
+        for meta_alias = 0, 3 do
+            for req_alias = 0, 3 do
+                if req_alias ~= meta_alias then
+                    do_alias(0, meta_alias, req_alias)
+                    do_alias(1, meta_alias, req_alias)
+                end
+            end    
+        end
         
         env.posedge(100)
     end
@@ -5871,7 +5881,7 @@ verilua "mainTask" { function ()
 
     test_snoop_nested_writebackfull()
     test_snoop_nested_evict()
-    -- test_snoop_nested_read()
+    test_snoop_nested_read()
 
     test_multi_probe()
     test_release_nested_probe()
