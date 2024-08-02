@@ -5760,6 +5760,51 @@ local test_mshr_realloc = env.register_test_case "test_mshr_realloc" {
     end
 }
 
+local test_reorder_rxdat = env.register_test_case "test_reorder_rxdat" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        do
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+            local source = 4
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            env.negedge()
+                chi_rxdat.bits.txnID:set(0)
+                chi_rxdat.bits.dataID:set(2) -- last data beat
+                chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+                chi_rxdat.bits.data:set_str("0xbeef")
+                chi_rxdat.bits.dbID:set(5)
+                chi_rxdat.bits.resp:set(CHIResp.UC)
+                chi_rxdat.valid:set(1)
+            env.negedge()
+                chi_rxdat.bits.data:set_str("0xdead")
+                chi_rxdat.bits.dataID:set(0) -- first data beat
+            env.negedge()
+                chi_rxdat.valid:set(0)
+            
+            env.posedge()
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
+            
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead  end)
+            env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef  end)
+            env.negedge()
+            tl_e:grantack(0)
+
+            env.negedge(10)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5774,9 +5819,6 @@ verilua "mainTask" { function ()
 
     -- local test_all = false
     local test_all = true
-
-    -- test_snoop_nested_read() -- TODO: 
-    test_nested_cancel_req() -- TODO:
 
     -- 
     -- normal test cases
@@ -5829,6 +5871,7 @@ verilua "mainTask" { function ()
 
     test_snoop_nested_writebackfull()
     test_snoop_nested_evict()
+    -- test_snoop_nested_read()
 
     test_multi_probe()
     test_release_nested_probe()
@@ -5840,6 +5883,8 @@ verilua "mainTask" { function ()
     test_sinkA_alias()
     test_snoop_hit_req()
     test_mshr_realloc()
+    test_nested_cancel_req()
+    test_reorder_rxdat()
     end
 
    

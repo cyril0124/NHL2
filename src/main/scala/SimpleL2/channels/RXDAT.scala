@@ -18,8 +18,16 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
         }
     })
 
-    val first = io.rxdat.bits.dataID === "b00".U
-    val last  = io.rxdat.bits.dataID === "b10".U
+    val beatCnt = RegInit(0.U(log2Ceil(nrBeat).W))
+    val last    = beatCnt === (nrBeat - 1).U
+    val first   = beatCnt === 0.U
+    when(io.rxdat.fire) {
+        when(beatCnt === (nrBeat - 1).U) {
+            beatCnt := 0.U
+        }.otherwise {
+            beatCnt := beatCnt + 1.U
+        }
+    }
 
     io.resp.valid          := io.rxdat.fire && (first || last)
     io.resp.bits.chiOpcode := io.rxdat.bits.opcode
@@ -30,10 +38,20 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
     io.resp.bits.last      := last
     io.resp.bits.pCrdType  := DontCare
 
+    /**
+      * Data from CHI bus is possibly not obeying the order of the beat, so we need to reorder it. 
+      * CHI provide dataID field to indicate the order of the data.
+      */
+    val firstData = io.rxdat.bits.dataID === "b00".U
+    val lastData  = io.rxdat.bits.dataID === "b10".U
+    val tmpData   = RegEnable(io.rxdat.bits.data, io.rxdat.fire)
+    val writeData = Mux(lastData, Cat(io.rxdat.bits.data, tmpData), Cat(tmpData, io.rxdat.bits.data))
+
     io.rxdat.ready              := io.toTempDS.write.ready
     io.toTempDS.write.valid     := io.rxdat.valid && last
-    io.toTempDS.write.bits.data := Cat(io.rxdat.bits.data, RegEnable(io.rxdat.bits.data, io.rxdat.fire))
+    io.toTempDS.write.bits.data := writeData
     io.toTempDS.write.bits.idx  := io.rxdat.bits.txnID
+    assert(!(io.rxdat.fire && !firstData && !lastData), "RXDAT dataID should be 00 or 10")
 
     LeakChecker(io.rxdat.valid, io.rxdat.fire, Some("RXDAT_valid"), maxCount = deadlockThreshold)
 }
