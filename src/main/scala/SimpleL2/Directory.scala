@@ -287,6 +287,10 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val mshrId_s2       = RegEnable(io.dirRead_s1.bits.mshrId, io.dirRead_s1.fire && io.dirRead_s1.bits.replTask)
     val reqTag_s2       = RegEnable(io.dirRead_s1.bits.tag, io.dirRead_s1.fire)
     val reqSet_s2       = RegEnable(io.dirRead_s1.bits.set, io.dirRead_s1.fire)
+    val occWayMask_s2 = VecInit(io.mshrStatus.map { mshr =>
+        /* Only those set match and dirHit mshr can occupy a way */
+        Mux(mshr.valid && mshr.set === reqSet_s2 && (mshr.dirHit || mshr.lockWay), mshr.wayOH, 0.U(ways.W))
+    }).reduceTree(_ | _).asUInt // opt for timing, move from Stage 3 to Stage 2, cut the timing path between MSHR, Directory, MainPipe(Stage 3)
     metaRead_s2 := VecInit(metaSRAMs.map(_.io.r.resp.data)).asTypeOf(Vec(ways, new DirectoryMetaEntry()))
 
     // -----------------------------------------------------------------------------------------
@@ -298,6 +302,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val mshrId_s3       = RegEnable(mshrId_s2, replReqValid_s2)
     val reqTag_s3       = RegEnable(reqTag_s2, reqValid_s2)
     val reqSet_s3       = RegEnable(reqSet_s2, reqValid_s2)
+    val occWayMask_s3   = RegEnable(occWayMask_s2, reqValid_s2)
     val stateVec_s3     = VecInit(metaRead_s3.map(_.state))
     val tagVec_s3       = VecInit(metaRead_s3.map(_.tag))
     val invVec_s3       = VecInit(stateVec_s3.map(_ === MixedState.I)).asUInt
@@ -307,10 +312,6 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val hasInv_s3   = invVec_s3.orR
     val invWayOH_s3 = PriorityEncoderOH(invVec_s3)
 
-    val occWayMask_s3 = VecInit(io.mshrStatus.map { mshr =>
-        /* Only those set match and dirHit mshr can occupy a way */
-        Mux(mshr.valid && mshr.set === reqSet_s3 && (mshr.dirHit || mshr.lockWay), mshr.wayOH, 0.U(ways.W))
-    }).reduceTree(_ | _).asUInt
     val freeWayMask_s3 = ~occWayMask_s3
     val replRetry_s3   = occWayMask_s3.andR
     val noFreeWay_s3   = replRetry_s3
