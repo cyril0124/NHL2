@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import xs.utils.LatchFastArbiter
 import Utils.GenerateVerilog
 import SimpleL2.chi.Resp
 import SimpleL2.Configs._
@@ -122,7 +123,7 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    val lfsrArb = Module(new LFSRArbiter(new TaskBundle, nrReplayEntry))
+    val lfsrArb = Module(new LatchFastArbiter(new TaskBundle, nrReplayEntry)) // opt for timing
     lfsrArb.io.in.zipWithIndex.foreach { case (in, i) =>
         val entry    = entries(i)
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
