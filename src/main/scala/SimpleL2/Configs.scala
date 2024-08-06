@@ -36,6 +36,7 @@ case class L2Param(
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
     rxsnpHasLatch: Boolean = true, // Whether to latch the request for one cycle delay in the RXSNP module
+    sinkcHasLatch: Boolean = true, // Whether to latch the request for one cycle delay in the SinkC module
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -77,6 +78,7 @@ trait HasL2Param {
     val idsAll        = 256
 
     val rxsnpHasLatch         = l2param.rxsnpHasLatch
+    val sinkcHasLatch         = l2param.sinkcHasLatch
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry

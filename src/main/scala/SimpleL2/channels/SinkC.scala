@@ -55,12 +55,20 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         }
     })
 
+    println(s"[${this.getClass().toString()}] sinkcHasLatch:${sinkcHasLatch}")
+
+    val c = if(sinkcHasLatch) {
+        Queue(io.c, 1)
+    } else {
+        io.c
+    }
+
     val blockDsWrite_s1    = WireInit(false.B)
-    val (tag, set, offset) = parseAddress(io.c.bits.address)
+    val (tag, set, offset) = parseAddress(c.bits.address)
     assert(offset === 0.U, "offset is not zero")
 
-    val isRelease      = io.c.bits.opcode(1)
-    val hasData        = io.c.bits.opcode(0)
+    val isRelease      = c.bits.opcode(1)
+    val hasData        = c.bits.opcode(0)
     val isProbeAckData = !isRelease && hasData
     val isReleaseData  = isRelease && hasData
 
@@ -68,10 +76,10 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     val beatCnt = RegInit(0.U(log2Ceil(nrBeat).W)) // TODO: parameterize
     val last    = beatCnt === (nrBeat - 1).U
     val first   = beatCnt === 0.U
-    when(io.c.fire && hasData) {
+    when(c.fire && hasData) {
         beatCnt := beatCnt + 1.U
     }
-    assert(!(io.c.fire && !hasData && beatCnt === 1.U))
+    assert(!(c.fire && !hasData && beatCnt === 1.U))
 
     /**
      * [[respDestMap]] is used to determine the destination of ProbeAckData, which can be chosen between [[TempDataStorage]] and [[DataStorage]].
@@ -124,10 +132,10 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     val resp      = WireInit(0.U.asTypeOf(Valid(chiselTypeOf(io.resp.bits))))
     val respValid = RegNext(resp.valid, false.B)     // opt for timing
     val respBits  = RegEnable(resp.bits, resp.valid) // opt for timing
-    resp.valid       := io.c.fire && (first || last) && !isRelease
-    resp.bits.opcode := io.c.bits.opcode
-    resp.bits.param  := io.c.bits.param
-    resp.bits.source := io.c.bits.source
+    resp.valid       := c.fire && (first || last) && !isRelease
+    resp.bits.opcode := c.bits.opcode
+    resp.bits.param  := c.bits.param
+    resp.bits.source := c.bits.source
     resp.bits.sink   := DontCare
     resp.bits.set    := set
     resp.bits.tag    := tag
@@ -143,25 +151,25 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * Further more, if this Probe request is triggered by a [[SinkA]](AcquireBlock), then the data will be written into both [[TempDataStorage]] or [[DataStorage]], 
      * where data in [[TempDataStoarge]] can be further used by [[SoruceD]].
      */
-    io.toTempDS.write.valid     := io.c.fire && last && hasData && respDataToTempDS
-    io.toTempDS.write.bits.data := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
+    io.toTempDS.write.valid     := c.fire && last && hasData && respDataToTempDS
+    io.toTempDS.write.bits.data := Cat(c.bits.data, RegEnable(c.bits.data, c.fire))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
     // -----------------------------------------------------------------------------------------
     // Stage 1
     // -----------------------------------------------------------------------------------------
-    val fire_s1 = io.c.fire && ((isReleaseData || isProbeAckData) && last || isRelease && !hasData)
+    val fire_s1 = c.fire && ((isReleaseData || isProbeAckData) && last || isRelease && !hasData)
 
     /**
      * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
      * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
      */
-    io.task.valid           := io.c.valid && (isReleaseData && last || isRelease && !hasData)
+    io.task.valid           := c.valid && (isReleaseData && last || isRelease && !hasData)
     io.task.bits            := DontCare
     io.task.bits.channel    := L2Channel.ChannelC
-    io.task.bits.opcode     := io.c.bits.opcode
-    io.task.bits.param      := io.c.bits.param
-    io.task.bits.source     := io.c.bits.source
+    io.task.bits.opcode     := c.bits.opcode
+    io.task.bits.param      := c.bits.param
+    io.task.bits.source     := c.bits.source
     io.task.bits.isPrefetch := false.B
     io.task.bits.set        := set
     io.task.bits.tag        := tag
@@ -172,12 +180,12 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * ProbeAckData can also write data into [[DataStorage]] depending on respDataToDS(control by MainPipe).
      */
     val dsWrite_s1 = WireInit(0.U.asTypeOf(Valid(new DSWrite)))
-    dsWrite_s1.valid      := io.c.fire && last && (isReleaseData || isProbeAckData && respDataToDS)
-    dsWrite_s1.bits.data  := Cat(io.c.bits.data, RegEnable(io.c.bits.data, io.c.fire))
+    dsWrite_s1.valid      := c.fire && last && (isReleaseData || isProbeAckData && respDataToDS)
+    dsWrite_s1.bits.data  := Cat(c.bits.data, RegEnable(c.bits.data, c.fire))
     dsWrite_s1.bits.set   := set
     dsWrite_s1.bits.wayOH := respMatchEntry.wayOH // For ReleaseData, wayOH is provided in MainPipe stage 3
 
-    io.toReqArb.willWriteDS_s1 := io.c.valid && last && hasData
+    io.toReqArb.willWriteDS_s1 := c.valid && last && hasData
 
     // -----------------------------------------------------------------------------------------
     // Stage 2
@@ -191,7 +199,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     io.toReqArb.willWriteDS_s2 := RegNext(fire_s1, false.B)
 
     // TODO: ReleaseData does not need to Replay, so it is necessary to make sure that when Release is fired and the SourceD is prepared to receive the ReleaseAck.
-    io.c.ready := Mux(
+    c.ready := Mux(
         isRelease,
         Mux(hasData, !blockDsWrite_s1 && io.task.ready || first, io.task.ready),                                                                                    // ReleaseData / Release
         hasData && ((respDataToTempDS && io.toTempDS.write.ready || !respDataToTempDS) && (respDataToDS && !blockDsWrite_s1 || !respDataToDS) || first) || !hasData // ProbeAckData / ProbeAck
@@ -200,18 +208,18 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     blockDsWrite_s1 := io.fromReqArb.mayReadDS_s1 || io.fromReqArb.willRefillDS_s1 || io.fromReqArb.mayReadDS_s2 || io.fromReqArb.willRefillDS_s2
 
     // @formatter:off
-    assert(!(io.c.fire && hasData && io.c.bits.size =/= log2Ceil(blockBytes).U))
-    assert(!(io.c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid && !dsWrite_s1.valid),"SinkC data is not written into TempDataStorage or DataStorage")
-    LeakChecker(io.c.valid, io.c.fire, Some("SinkC_io_c_valid"), maxCount = deadlockThreshold)
+    assert(!(c.fire && hasData && c.bits.size =/= log2Ceil(blockBytes).U))
+    assert(!(c.fire && hasData && last && !io.toTempDS.write.fire && !io.dsWrite_s2.valid && !dsWrite_s1.valid),"SinkC data is not written into TempDataStorage or DataStorage")
+    LeakChecker(c.valid, c.fire, Some("SinkC_io_c_valid"), maxCount = deadlockThreshold)
 
     when(io.dsWrite_s2.fire || io.toTempDS.write.fire) {
         val _isRelease = Mux(io.toTempDS.write.fire, isRelease, RegNext(isRelease))
         val _isProbeAckData = Mux(io.toTempDS.write.fire, isProbeAckData, RegNext(isProbeAckData))
         val _respMatchOH = Mux(io.toTempDS.write.fire, respMatchOH, RegNext(respMatchOH)).asTypeOf(UInt(nrRespDestMapEntry.W))
         val _respMatchEntry = Mux(io.toTempDS.write.fire, respMatchEntry, RegNext(respMatchEntry))
-        val _address = Mux(io.toTempDS.write.fire, io.c.bits.address, RegNext(io.c.bits.address))
-        val _opcode = Mux(io.toTempDS.write.fire, io.c.bits.opcode, RegNext(io.c.bits.opcode))
-        val _param = Mux(io.toTempDS.write.fire, io.c.bits.param, RegNext(io.c.bits.param))
+        val _address = Mux(io.toTempDS.write.fire, c.bits.address, RegNext(c.bits.address))
+        val _opcode = Mux(io.toTempDS.write.fire, c.bits.opcode, RegNext(c.bits.opcode))
+        val _param = Mux(io.toTempDS.write.fire, c.bits.param, RegNext(c.bits.param))
         
         when(_isProbeAckData) {
             assert(
