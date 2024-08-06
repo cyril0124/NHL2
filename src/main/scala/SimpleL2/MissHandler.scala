@@ -15,7 +15,10 @@ class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
     val fsmState = new MshrFsmState
     val dirResp  = new DirResp
     val mshrId   = UInt(mshrBits.W)
-    val realloc  = Bool()
+
+    // for reallocation(snpresp)
+    val realloc     = Bool()
+    val snpGotDirty = Bool()
 }
 
 // TODO: extra MSHR for Snoop, extra MSHR for Release

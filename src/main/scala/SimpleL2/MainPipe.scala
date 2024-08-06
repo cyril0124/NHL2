@@ -108,8 +108,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s2.valid       := valid_s2 && (isMshrTXDAT_s2 || isTXDAT_s2)
     io.txdat_s2.bits        := DontCare
     io.txdat_s2.bits.txnID  := task_s2.txnID
-    io.txdat_s2.bits.dbID   := Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId)                  // TODO:
-    io.txdat_s2.bits.resp   := Mux(task_s2.snpHitReq, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp) // TODO:
+    io.txdat_s2.bits.dbID   := Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId)                                         // TODO:
+    io.txdat_s2.bits.resp   := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp) // TODO:
     io.txdat_s2.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s2.bits.opcode := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
 
@@ -261,21 +261,22 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val mshrReplay_s3    = io.mshrAlloc_s3.valid && !io.mshrAlloc_s3.ready && valid_s3
     val reallocMshrId_s3 = task_s3.snpHitMshrId
     io.mshrAlloc_s3.valid                := mshrAlloc_s3
-    io.mshrAlloc_s3.bits.realloc         := mshrRealloc_s3
     io.mshrAlloc_s3.bits.mshrId          := Mux(mshrRealloc_s3, reallocMshrId_s3, OHToUInt(io.mshrFreeOH_s3))
     io.mshrAlloc_s3.bits.dirResp         := dirResp_s3
     io.mshrAlloc_s3.bits.fsmState        := Mux(mshrRealloc_s3, mshrReallocStates_s3, mshrAllocStates)
     io.mshrAlloc_s3.bits.req             := task_s3
     io.mshrAlloc_s3.bits.req.isAliasTask := cacheAlias_s3
+    io.mshrAlloc_s3.bits.realloc         := mshrRealloc_s3
+    io.mshrAlloc_s3.bits.snpGotDirty     := task_s3.snpGotDirty
 
     val snpReplay_dup_s3 = WireInit(false.B)
-    io.mshrNested        <> DontCare
-    io.mshrNested.isMshr := task_s3.isMshrTask
-    io.mshrNested.mshrId := task_s3.mshrId
-    io.mshrNested.set    := task_s3.set
-    io.mshrNested.tag    := task_s3.tag
-    io.mshrNested.source := task_s3.source
-    // io.mshrNested.snoop.cleanDirty :=
+    io.mshrNested                  <> DontCare
+    io.mshrNested.isMshr           := task_s3.isMshrTask
+    io.mshrNested.mshrId           := task_s3.mshrId
+    io.mshrNested.set              := task_s3.set
+    io.mshrNested.tag              := task_s3.tag
+    io.mshrNested.source           := task_s3.source
+    io.mshrNested.snoop.cleanDirty := io.mshrNested.snoop.toN || io.mshrNested.snoop.toB // TODO:
     io.mshrNested.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
     io.mshrNested.snoop.toB := (isSnpToB_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
     io.mshrNested.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData && valid_s3
@@ -303,6 +304,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         // assert(!(task_s3.isChannelC && (isRelease_s3 || isReleaseData_s3) && !dirResp_s3.hit), "Release/ReleaseData should always hit! addr => TODO: ")
         assert(!((isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoB && task_s3.opcode =/= Release), "TtoB can only be used in Release") // TODO: ReleaseData.TtoB
         assert(!((isRelease_s3 || isReleaseData_s3) && task_s3.param === NtoN), "Unsupported Release.NtoN")
+
+        assert(!(io.dirWrite_s3.fire && io.dirWrite_s3.bits.meta.isBranch && io.dirWrite_s3.bits.meta.isDirty), "Branch should never be dirty! addr:%x", addr)
     }
 
     /** Deal with snoop requests */

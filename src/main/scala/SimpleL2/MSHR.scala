@@ -81,7 +81,7 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val replGotDirty  = Bool()
     val isChannelA    = Bool()
     val reqAllowSnoop = Bool()
-    val gotCompData   = Bool()
+    val gotDirtyData  = Bool() // TempDS has dirty data
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -186,8 +186,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val needProbe       = RegInit(false.B)
     val needRead        = RegInit(false.B)
     val needPromote     = RegInit(false.B)
+    val needWb          = RegInit(false.B)
     val nestedRelease   = RegInit(false.B)
     val probeGotDirty   = RegInit(false.B)
+    val snpGotDirty     = RegInit(false.B)                                                                                                // for reallocation
     val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
     val probeAckClients = RegInit(0.U(nrClients.W))
     val probeFinish     = WireInit(false.B)
@@ -221,6 +223,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         needProbe   := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
         needRead    := !allocState.s_read
         needPromote := !allocState.s_makeunique
+        needWb      := false.B
 
         rspDBID         := 0.U
         datDBID         := 0.U
@@ -234,7 +237,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         probeGotDirty   := false.B
         probeAckClients := 0.U
         finishedProbes  := 0.U
-        probeAckParams.foreach(_ := 0.U)
+        probeAckParams.foreach(_ := NtoN)
     }
 
     when(io.alloc_s3.fire && io.alloc_s3.bits.realloc) {
@@ -242,6 +245,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         isRealloc    := true.B
         reallocTxnID := io.alloc_s3.bits.req.txnID
+        snpGotDirty  := io.alloc_s3.bits.snpGotDirty
 
         state.s_snpresp      := allocState.s_snpresp
         state.w_snpresp_sent := allocState.w_snpresp_sent
@@ -377,7 +381,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
         (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
-        (state.s_aprobe && state.w_aprobeack) // need to wait for aProbe to finish (cause by Acquire)
+        (state.s_aprobe && state.w_aprobeack) &&  // need to wait for aProbe to finish (cause by Acquire)
+        (state.s_snpresp && state.w_snpresp_sent) // need to wait for snpresp to finish (cause by realloc)
     mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
     mpTask_refill.bits.param := Mux(
         reqIsGet || reqIsPrefetch,
@@ -398,18 +403,20 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_refill.bits.isReplTask  := !dirResp.hit && !meta.isInvalid && !state.w_replResp
     mpTask_refill.bits.updateDir   := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
     mpTask_refill.bits.tempDsDest := Mux(
-        !dirResp.hit || dirResp.hit && meta.isTrunk,
+        io.status.gotDirtyData,
         /** For TRUNK state, dirty data will be written into [[DataStorage]] after receiving ProbeAckData */
         DataDestination.SourceD | DataDestination.DataStorage,
         DataDestination.SourceD
     )
+
+    val refillFinalState = Mux(
+        reqIsGet,
+        Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
+        Mux(reqPromoteT || reqNeedT, Mux(reqIsPrefetch, TIP, TRUNK), Mux(reqNeedB && meta.isTrunk && dirResp.hit, TIP, BRANCH))
+    )
     mpTask_refill.bits.newMetaEntry := DirectoryMetaEntryNoTag(
-        dirty = gotDirty || releaseGotDirty || dirResp.hit && meta.isDirty,
-        state = Mux(
-            reqIsGet,
-            Mux(dirResp.hit, Mux(meta.isTip || meta.isTrunk, TIP, BRANCH), Mux(reqPromoteT, TIP, BRANCH)),
-            Mux(reqPromoteT || reqNeedT, Mux(reqIsPrefetch, TIP, TRUNK), Mux(reqNeedB && meta.isTrunk && dirResp.hit, TIP, BRANCH))
-        ),
+        dirty = (gotDirty || releaseGotDirty || dirResp.hit && meta.isDirty) && refillFinalState =/= BRANCH /* Branch should not have dirty state */,
+        state = refillFinalState,
         alias = Mux(
             reqIsGet || reqIsPrefetch,
             meta.aliasOpt.getOrElse(0.U),
@@ -491,7 +498,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty)
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpSharedX, BRANCH, INVALID))
-    val snprespNeedData   = gotDirty || probeGotDirty || req.retToSrc || meta.isDirty
+    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || req.retToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ )
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
     mpTask_snpresp.bits.txnID       := Mux(isRealloc, reallocTxnID, req.txnID)
@@ -791,9 +798,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     state.w_compdbid      := false.B // Wait CompDBIDResp
                     state.s_cbwrdata      := false.B // Send CopyBackWrData
                     state.w_cbwrdata_sent := false.B
+                    needWb                := true.B
                 }.otherwise {
                     state.s_evict      := false.B // Send Evict if it is not a dirty way
                     state.w_evict_comp := false.B // Wait Comp
+                    needWb             := true.B
                 }
 
                 /** Send Probe if victim way has clients */
@@ -824,10 +833,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val nedtedHitMatch = valid && dirResp.hit && req.set === io.nested.set && meta.tag === io.nested.tag && !(io.nested.isMshr && io.nested.mshrId === io.id)
     when(nestedMatch) {
         val nested = io.nested.snoop
-        // when(nested.cleanDirty) {
-        //     // TODO: toB ?
-        //     meta.state := MixedState.cleanDirty(meta.state)
-        // }
+        when(nested.cleanDirty) {
+            // gotCompData := false.B // gotCompData is for reqAddr not for metaAddr
+            meta.state := MixedState.cleanDirty(meta.state)
+        }
 
         when(nested.toB) {
             meta.state := Mux(meta.isInvalid, MixedState.I, MixedState.BC)
@@ -845,6 +854,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.s_wb       := true.B
                 state.w_compdbid := true.B
                 state.s_cbwrdata := true.B
+                needWb           := false.B
                 assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull")
             }
 
@@ -852,6 +862,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 willCancelEvict    := true.B
                 state.s_evict      := true.B
                 state.w_evict_comp := true.B
+                needWb             := true.B
                 // assert(false.B, "TODO: Check! Snoop.toN cancel Evict") // Already checked
             }
 
@@ -901,15 +912,15 @@ class MSHR()(implicit p: Parameters) extends L2Module {
          *  - A WriteData response, and if applicable, CompAck, for a WriteUnique request where the HN-F has not used a DWT flow
          *  - A Comp response from the Subordinate Node for a WriteUnique request where the HN-F has used a DWT flow
          */
-        val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
-        assert(
-            (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack || io.status.willFree) && hasNestedSnoop || !hasNestedSnoop || req.channel === L2Channel.ChannelB,
-            "w_compdbid:%d, w_evict_comp:%d, s_grant:%d, s_accessack:%d",
-            state.w_compdbid,
-            state.w_evict_comp,
-            state.s_grant,
-            state.s_accessack
-        )
+        // val hasNestedSnoop = VecInit(io.nested.snoop.elements.map(_._2).toSeq).asUInt.orR
+        // assert(
+        //     (!state.w_compdbid || !state.w_evict_comp || !state.s_grant || !state.s_accessack || io.status.willFree) && hasNestedSnoop || !hasNestedSnoop || req.channel === L2Channel.ChannelB,
+        //     "w_compdbid:%d, w_evict_comp:%d, s_grant:%d, s_accessack:%d",
+        //     state.w_compdbid,
+        //     state.w_evict_comp,
+        //     state.s_grant,
+        //     state.s_accessack
+        // )
     }
 
     val respMapCancel = RegInit(false.B)
@@ -986,12 +997,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      *  the read reissue is required beacuse the data will be snooped back.
      * Read resissue is work with reallocation which is triggered by the Snoop that cannot be handled by the TXDAT at stage 2.
      */
-    val snoopMatchReqAddr = valid && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr && io.status.reqAllowSnoop
+    val snoopMatchReqAddr = valid && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr
     when(snoopMatchReqAddr) {
         val nested = io.nested.snoop
 
         when(nested.toN) {
-            when(needRead) {
+            when(needRead && state.s_compack) {
                 state.s_read          := false.B
                 state.w_compdat       := false.B
                 state.w_compdat_first := false.B
@@ -999,7 +1010,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 assert(state.s_read)
             }
 
-            when(needPromote) {
+            when(needPromote && state.w_comp && state.s_compack) {
                 state.s_makeunique := false.B
                 state.w_comp       := false.B
                 state.s_compack    := false.B
@@ -1008,7 +1019,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         }
 
         when(nested.toB) {
-            when(needRead) {
+            when(needRead && state.s_compack) {
                 when(reqNeedT) {
                     state.s_read          := false.B
                     state.w_compdat       := false.B
@@ -1019,7 +1030,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 assert(state.s_read)
             }
 
-            when(needPromote) {
+            when(needPromote && state.w_comp && state.s_compack) {
                 state.s_makeunique := false.B
                 state.w_comp       := false.B
                 state.s_compack    := false.B
@@ -1066,11 +1077,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.isChannelA   := req.isChannelA
 
     // Allow Snoop nested request address. This operation will cause ReadReissue
-    io.status.reqAllowSnoop := state.w_compdat && state.w_comp && state.s_compack && // Already get CompData or Comp from downstream cache
-        state.w_replResp && (!state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent) && // Does not grant to upstream cache
-        state.s_rprobe && state.w_rprobeack &&                                                                          // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
-        (!state.w_compdbid || !state.w_evict_comp)                                                                      // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
-    io.status.gotCompData := gotCompData
+    val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
+    val gotWbResp        = state.w_compdbid && state.w_evict_comp
+    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent
+    io.status.reqAllowSnoop := {
+        // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
+        state.w_replResp &&
+        hasPendingRefill &&       // Does not grant to upstream cache
+        gotReplProbeAck &&        // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
+        !(needWb && gotWbResp) && // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
+        !io.status.waitProbeAck   // Does not wait for any ProbeAck
+    }
+    io.status.gotDirtyData := gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))
