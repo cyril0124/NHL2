@@ -119,6 +119,15 @@ class MshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
     val stage4 = ValidIO(new MshrRetryStage4)
 }
 
+class MshrEarlyNested()(implicit p: Parameters) extends L2Bundle {
+    // Early nested info to indicate whether the next cycle will make a mshr nested operation.
+    val set       = UInt(setBits.W)
+    val tag       = UInt(tagBits.W)
+    val isMshr    = Bool()
+    val isSnpToN  = Bool()
+    val isRelease = Bool()
+}
+
 class MshrNestedSnoop()(implicit p: Parameters) extends L2Bundle {
     val toN        = Bool()
     val toB        = Bool()
@@ -149,6 +158,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val tasks         = new MshrTasks
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MshrRetryTasks)
+        val earlyNested   = Input(new MshrEarlyNested)
         val nested        = Input(new MshrNestedWriteback)
         val respMapCancel = DecoupledIO(UInt(mshrBits.W))
         val id            = Input(UInt(mshrBits.W))
@@ -260,10 +270,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      */
     val willCancelEvict = WireInit(false.B)
     val willCancelWb    = WireInit(false.B)
+    val mayChangeEvict  = WireInit(false.B)
+    val mayCancelEvict  = WireInit(false.B)
+    val mayCancelWb     = WireInit(false.B)
+    mayChangeEvict := RegNext(req.set === io.earlyNested.set && (meta.tag === io.earlyNested.tag || io.replResp_s3.valid && io.replResp_s3.bits.meta.tag === io.earlyNested.tag) && io.earlyNested.isRelease)
+    mayCancelEvict := RegNext(req.set === io.earlyNested.set && (meta.tag === io.earlyNested.tag || io.replResp_s3.valid && io.replResp_s3.bits.meta.tag === io.earlyNested.tag) && io.earlyNested.isSnpToN)
+    mayCancelWb    := mayCancelEvict
+
     io.tasks.txreq <> DontCare
     io.tasks.txreq.valid := (!state.s_read ||
         !state.s_makeunique ||
-        (!state.s_evict && !willCancelEvict || !state.s_wb && !willCancelWb) && state.w_rprobeack) && state.s_snpresp && state.w_snpresp_sent // Evict/WriteBackFull should wait for refill and probeack finish
+        (!state.s_evict && !mayChangeEvict && !mayCancelEvict || !state.s_wb && !mayCancelWb) && state.w_rprobeack) && state.s_snpresp && state.w_snpresp_sent // Evict/WriteBackFull should wait for refill and probeack finish
     io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
@@ -855,6 +872,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_compdbid := true.B
                 state.s_cbwrdata := true.B
                 needWb           := false.B
+                assert(mayCancelWb)
                 assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull")
             }
 
@@ -863,6 +881,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.s_evict      := true.B
                 state.w_evict_comp := true.B
                 needWb             := true.B
+                assert(mayCancelEvict)
                 // assert(false.B, "TODO: Check! Snoop.toN cancel Evict") // Already checked
             }
 
@@ -941,6 +960,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_compdbid      := false.B
                 state.s_cbwrdata      := false.B
                 state.w_cbwrdata_sent := false.B
+                assert(mayChangeEvict)
             }
         }
 

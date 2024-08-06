@@ -113,15 +113,16 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.fromReqArb.mayReadDS_s2    := reqArb.io.toSinkC.mayReadDS_s2
     sinkC.io.fromReqArb.willRefillDS_s2 := reqArb.io.toSinkC.willRefillDS_s2
 
-    missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
-    missHandler.io.resps.rxdat  <> rxdat.io.resp
-    missHandler.io.resps.rxrsp  <> rxrsp.io.resp
-    missHandler.io.resps.sinke  <> sinkE.io.resp
-    missHandler.io.resps.sinkc  <> sinkC.io.resp
-    missHandler.io.mshrStatus   <> dir.io.mshrStatus
-    missHandler.io.replResp_s3  <> dir.io.replResp_s3
-    missHandler.io.retryTasks   <> mainPipe.io.retryTasks
-    missHandler.io.mshrNested   <> mainPipe.io.mshrNested
+    missHandler.io.mshrAlloc_s3       <> mainPipe.io.mshrAlloc_s3
+    missHandler.io.resps.rxdat        <> rxdat.io.resp
+    missHandler.io.resps.rxrsp        <> rxrsp.io.resp
+    missHandler.io.resps.sinke        <> sinkE.io.resp
+    missHandler.io.resps.sinkc        <> sinkC.io.resp
+    missHandler.io.mshrStatus         <> dir.io.mshrStatus
+    missHandler.io.replResp_s3        <> dir.io.replResp_s3
+    missHandler.io.retryTasks         <> mainPipe.io.retryTasks
+    missHandler.io.mshrEarlyNested_s2 <> mainPipe.io.mshrEarlyNested_s2
+    missHandler.io.mshrNested_s3      <> mainPipe.io.mshrNested_s3
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
@@ -171,6 +172,7 @@ object Slice extends App {
             L2Param(
                 nrClients = CFG_CLIENT.toInt,
                 rxsnpHasLatch = false,
+                sinkcHasLatch = false
             )
         case DebugOptionsKey => DebugOptions()
     })

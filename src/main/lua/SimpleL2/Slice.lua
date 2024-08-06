@@ -5569,6 +5569,7 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
             mshrs[0].state_s_evict:expect(0)
             mshrs[0].state_w_evict_comp:expect(0)
             mp:force_all()
+                mshrs[0].mayCancelEvict:set(1)
                 env.negedge()
                     mp.io_mshrNested_s3_isMshr:set(1)
                     mp.io_mshrNested_s3_mshrId:set(3)

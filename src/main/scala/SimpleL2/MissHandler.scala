@@ -24,15 +24,16 @@ class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
 // TODO: extra MSHR for Snoop, extra MSHR for Release
 class MissHandler()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val mshrAlloc_s3  = Flipped(Decoupled(new MshrAllocBundle))
-        val mshrFreeOH_s3 = Output(UInt(nrMSHR.W))
-        val replResp_s3   = Flipped(ValidIO(new DirReplResp))
-        val mshrNested_s3 = Input(new MshrNestedWriteback)
-        val mshrStatus    = Vec(nrMSHR, Output(new MshrStatus))
-        val tasks         = new MshrTasks
-        val resps         = new MshrResps
-        val retryTasks    = Flipped(new MpMshrRetryTasks)
-        val respMapCancel = DecoupledIO(UInt(mshrBits.W)) // to SinkC
+        val mshrEarlyNested_s2 = Input(new MshrEarlyNested)
+        val mshrAlloc_s3       = Flipped(Decoupled(new MshrAllocBundle))
+        val mshrFreeOH_s3      = Output(UInt(nrMSHR.W))
+        val replResp_s3        = Flipped(ValidIO(new DirReplResp))
+        val mshrNested_s3      = Input(new MshrNestedWriteback)
+        val mshrStatus         = Vec(nrMSHR, Output(new MshrStatus))
+        val tasks              = new MshrTasks
+        val resps              = new MshrResps
+        val retryTasks         = Flipped(new MpMshrRetryTasks)
+        val respMapCancel      = DecoupledIO(UInt(mshrBits.W)) // to SinkC
     })
 
     io <> DontCare
@@ -113,6 +114,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.retryTasks.stage4.bits.accessack_s4 := retry_s4.bits.accessack_s4
         mshr.io.retryTasks.stage4.bits.snpresp_s4   := retry_s4.bits.snpresp_s4
         mshr.io.retryTasks.stage4.bits.cbwrdata_s4  := retry_s4.bits.cbwrdata_s4
+
+        mshr.io.earlyNested := io.mshrEarlyNested_s2
 
         mshr.io.nested.isMshr  := io.mshrNested_s3.isMshr
         mshr.io.nested.mshrId  := io.mshrNested_s3.mshrId
