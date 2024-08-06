@@ -232,24 +232,22 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     blockC_s1 := mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2 || noSpaceForNonDataResp // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
 
-    /** Task priority: MSHR > Replay > CMO > Snoop > SinkC > SinkA */
+    /** Task priority: MSHR > CMO > SinkC > Snoop > Replay > SinkA */
     val opcodeSinkC_s1 = io.taskSinkC_s1.bits.opcode
     val otherTasks_s1  = Seq(io.taskReplay_s1, io.taskCMO_s1, io.taskSnoop_s1, io.taskSinkC_s1, io.taskSinkA_s1)
     val chnlTask_s1    = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     val arb            = Module(new Arbiter(chiselTypeOf(chnlTask_s1.bits), otherTasks_s1.size))
-    val arbTaskCMO     = arb.io.in(0)
-    val arbTaskSnoop   = arb.io.in(1)
-    val arbTaskSinkC   = arb.io.in(2)
+    val arbTaskCMO     = arb.io.in(0) // TODO: CMO Task
+    val arbTaskSinkC   = arb.io.in(1)
+    val arbTaskSnoop   = arb.io.in(2)
     val arbTaskReplay  = arb.io.in(3)
     val arbTaskSinkA   = arb.io.in(4)
     io.taskCMO_s1    <> arbTaskCMO
-    io.taskSnoop_s1  <> arbTaskSnoop
     io.taskSinkC_s1  <> arbTaskSinkC // TODO: Store Miss Release / PutPartial?
+    io.taskSnoop_s1  <> arbTaskSnoop
     io.taskReplay_s1 <> arbTaskReplay
     io.taskSinkA_s1  <> arbTaskSinkA
     arb.io.out       <> chnlTask_s1
-
-    // TODO: CMO Task
 
     val blockReplay_s1 = MuxLookup(io.taskReplay_s1.bits.channel, false.B)(
         Seq(
