@@ -5002,12 +5002,8 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
                 chi_rxsnp.ready:expect(1) -- Snoop will not be blocked since the Acquire MSHR is scheduling MakeUnique and does not get Comp from next level cache.
             env.negedge()
                 chi_rxsnp.valid:set(0)
-            env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirResp_s3_bits_meta_clientsOH:is(1) end)
-            mp.io_mshrNested_snoop_toN:expect(0) -- Snoop cannot nest Acquire MSHR because the Snoop needs to Probe the upper level cache. The mshr nested action by Snoop will be deferred until the Snoop MSHR scheduling mainpipe task to update the directory meta.
-            
-            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
-            tl_c:probeack(address, TLParam.BtoN, 0) -- TODO: ProbeAckData, ret2src = 1, SnpShared, SnpUnique
-            env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) end)
+            env.expect_happen_until(10, function() return mp.valid_s3:is(1) end)
+            mp.io_dirResp_s3_valid:expect(0)
             mp.io_mshrNested_snoop_toN:expect(1)
             env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
 
@@ -5021,9 +5017,6 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
                 mshrs[0].io_status_valid:expect(0)
                 mshrs[1].io_status_valid:expect(0)
         end
-
-        -- env.posedge(200)
-        -- env.TEST_SUCCESS()
 
         -- 
         -- [2] Snoop does not require MSHR
@@ -5123,6 +5116,77 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             mshrs[0].io_status_valid:expect(0)
         end
 
+        local function do_snp_nest_acquire_perm(ret2src)
+            -- 
+            -- BC    I <--- AcquirePerm.NtoT
+            --   \  /
+            --    BC <--- SnoopUnique
+            -- 
+            env.negedge(20)
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b10"):number())
+            env.negedge()
+                write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                    {s = 0,   e = 63, v = 0x1111},
+                    {s = 256, e = 256 + 63, v = 0x2222}
+                }, 512))
+            local source = 4
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.NtoT, source)
+            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+            mshrs[0].state_w_aprobeack:expect(0)
+
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(to_address(0x01, 0x01), 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+                env.posedge()
+                    chi_rxsnp.ready:expect(0) -- Snoop is blocked since the previous Probe is not finished
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+
+            mshrs[0].state_w_aprobeack:expect(0)
+            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 16)
+            mshrs[0].state_w_aprobeack:expect(1)
+
+            env.negedge()
+                chi_rxsnp.bits.txnID:set(3)
+                chi_rxsnp.bits.addr:set(bit.rshift(to_address(0x01, 0x01), 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+                chi_rxsnp.bits.retToSrc:set(ret2src)
+                chi_rxsnp.valid:set(1)
+                env.posedge()
+                    chi_rxsnp.ready:expect(1) -- Snoop is now permitted to enter MainPipe
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+
+            if ret2src == 0 then
+                env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+            else
+                env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0x1111 end)
+                env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0x2222 end)
+            end
+            env.negedge(10)
+
+            chi_rxrsp:comp(0, 5)
+
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) and tl_d.bits.param:is(TLParam.toT) end)
+                    tl_e:grantack(0)
+                end,
+                function ()
+                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.TTC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0x01) end)
+                end
+            }
+
+            env.negedge(10)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        do_snp_nest_acquire_perm(0)
+        do_snp_nest_acquire_perm(1)
 
         env.posedge(100)
     end
@@ -5626,7 +5690,7 @@ local test_snoop_hit_req = env.register_test_case "test_snoop_hit_req" {
                 chi_rxsnp.valid:set(1)
                 env.posedge()
                 mshrs[0].io_status_reqAllowSnoop:expect(1)
-                mshrs[0].io_status_gotCompData:expect(1)
+                mshrs[0].io_status_gotDirtyData:expect(1)
                 chi_rxsnp.ready:expect(1) -- snpHitReq
             env.negedge()
                 chi_rxsnp.valid:set(0)
@@ -5706,6 +5770,7 @@ local test_mshr_realloc = env.register_test_case "test_mshr_realloc" {
 
         do
             -- mshr realloc
+            -- with WriteBackFull
             local clientsOH = ("0b00"):number()
             env.negedge()
                 write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
@@ -5731,7 +5796,7 @@ local test_mshr_realloc = env.register_test_case "test_mshr_realloc" {
                 chi_rxsnp.valid:set(1)
                 env.posedge()
                 mshrs[0].io_status_reqAllowSnoop:expect(1)
-                mshrs[0].io_status_gotCompData:expect(1)
+                mshrs[0].io_status_gotDirtyData:expect(1)
                 chi_rxsnp.ready:expect(1) -- snpHitReq
             env.negedge()
                 chi_rxsnp.valid:set(0)
@@ -5739,12 +5804,12 @@ local test_mshr_realloc = env.register_test_case "test_mshr_realloc" {
                 function ()
                     -- SnpRespData cannot be fired since txdat_s2 is not ready, the Snoop will be realloced into the snpHitMshr
                     env.expect_not_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) end)
-                end,
-
+                end
             }
             env.expect_happen_until(10, function() return mp.valid_s3:is(1) and mp.task_s3_snpHitReq:is(1) end)
                 mp.task_s3_snpHitMshrId:expect(0)
                 mp.task_s3_readTempDs:expect(1)
+                mp.io_mshrAlloc_s3_bits_realloc:expect(1)
                 mp.io_mshrAlloc_s3_valid:expect(1) -- mshr realloc
                 mp.io_mshrAlloc_s3_ready:expect(1)
                 mshrs[0].state_w_compdat_first:expect(1)
