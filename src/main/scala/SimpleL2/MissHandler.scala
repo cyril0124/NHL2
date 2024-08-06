@@ -27,11 +27,11 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val mshrAlloc_s3  = Flipped(Decoupled(new MshrAllocBundle))
         val mshrFreeOH_s3 = Output(UInt(nrMSHR.W))
         val replResp_s3   = Flipped(ValidIO(new DirReplResp))
+        val mshrNested_s3 = Input(new MshrNestedWriteback)
         val mshrStatus    = Vec(nrMSHR, Output(new MshrStatus))
         val tasks         = new MshrTasks
         val resps         = new MshrResps
         val retryTasks    = Flipped(new MpMshrRetryTasks)
-        val mshrNested    = Input(new MshrNestedWriteback)
         val respMapCancel = DecoupledIO(UInt(mshrBits.W)) // to SinkC
     })
 
@@ -114,13 +114,13 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.retryTasks.stage4.bits.snpresp_s4   := retry_s4.bits.snpresp_s4
         mshr.io.retryTasks.stage4.bits.cbwrdata_s4  := retry_s4.bits.cbwrdata_s4
 
-        mshr.io.nested.isMshr  := io.mshrNested.isMshr
-        mshr.io.nested.mshrId  := io.mshrNested.mshrId
-        mshr.io.nested.set     := io.mshrNested.set
-        mshr.io.nested.tag     := io.mshrNested.tag
-        mshr.io.nested.source  := io.mshrNested.source
-        mshr.io.nested.snoop   := io.mshrNested.snoop
-        mshr.io.nested.release := io.mshrNested.release
+        mshr.io.nested.isMshr  := io.mshrNested_s3.isMshr
+        mshr.io.nested.mshrId  := io.mshrNested_s3.mshrId
+        mshr.io.nested.set     := io.mshrNested_s3.set
+        mshr.io.nested.tag     := io.mshrNested_s3.tag
+        mshr.io.nested.source  := io.mshrNested_s3.source
+        mshr.io.nested.snoop   := io.mshrNested_s3.snoop
+        mshr.io.nested.release := io.mshrNested_s3.release
 
         io.mshrStatus(i) := mshr.io.status
     }
@@ -130,10 +130,10 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
     val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt
-    val nestedSetMatchVec     = VecInit(mshrs.map(_.io.status.set === io.mshrNested.set)).asUInt
-    val nestedReqTagMatchVec  = VecInit(mshrs.map(m => m.io.status.reqTag === io.mshrNested.tag)).asUInt
-    val nestedMetaTagMatchVec = VecInit(mshrs.map(m => m.io.status.metaTag === io.mshrNested.tag && m.io.status.lockWay)).asUInt
-    val hasNestedActions      = VecInit(io.mshrNested.snoop.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.mshrNested.release.elements.map(_._2).toSeq).asUInt.orR
+    val nestedSetMatchVec     = VecInit(mshrs.map(_.io.status.set === io.mshrNested_s3.set)).asUInt
+    val nestedReqTagMatchVec  = VecInit(mshrs.map(m => m.io.status.reqTag === io.mshrNested_s3.tag)).asUInt
+    val nestedMetaTagMatchVec = VecInit(mshrs.map(m => m.io.status.metaTag === io.mshrNested_s3.tag && m.io.status.lockWay)).asUInt
+    val hasNestedActions      = VecInit(io.mshrNested_s3.snoop.elements.map(_._2).toSeq).asUInt.orR || VecInit(io.mshrNested_s3.release.elements.map(_._2).toSeq).asUInt.orR
     assert(
         !(hasNestedActions && PopCount(nestedSetMatchVec & nestedReqTagMatchVec & mshrValidNestedVec) > 1.U),
         "nested set and reqTag should be unique, %b",

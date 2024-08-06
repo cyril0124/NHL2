@@ -343,33 +343,27 @@ local chi_rxsnp = ([[
     | retToSrc
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxsnp_", name = "chi_rxsnp"}
 
-chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src)
-    local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
-    env.negedge()
-        chi_rxsnp.bits.txnID:set(txn_id)
-        chi_rxsnp.bits.addr:set(addr, true)
-        chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
-        chi_rxsnp.bits.retToSrc:set(ret2src)
-        chi_rxsnp.valid:set(1)
-    env.posedge()
-        chi_rxsnp.ready:expect(1)
-    env.negedge()
-        chi_rxsnp.valid:set(0)
-end
-
-chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
+chi_rxsnp.send_request = function(this, addr, opcode, txn_id, ret2src)
     local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
     env.negedge()
         chi_rxsnp.ready:expect(1)
         chi_rxsnp.bits.txnID:set(txn_id)
         chi_rxsnp.bits.addr:set(addr, true)
-        chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpUnique)
+        chi_rxsnp.bits.opcode:set(opcode)
         chi_rxsnp.bits.retToSrc:set(ret2src)
         chi_rxsnp.valid:set(1)
         env.posedge()
         chi_rxsnp.ready:expect(1)
     env.negedge()
         chi_rxsnp.valid:set(0)
+end
+
+chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src)
+    chi_rxsnp:send_request(addr, OpcodeSNP.SnpShared, txn_id, ret2src)
+end
+
+chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
+    chi_rxsnp:send_request(addr, OpcodeSNP.SnpUnique, txn_id, ret2src)
 end
 
 local mp_dirResp = ([[
@@ -3861,7 +3855,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(1)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(1)
@@ -3944,7 +3938,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(1)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(1)
@@ -4014,7 +4008,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(1)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toN:expect(1)
+                    mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(1)
@@ -4098,7 +4092,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(1)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toN:expect(1)
+                    mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(1)
@@ -4223,7 +4217,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4297,7 +4291,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4358,7 +4352,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4432,7 +4426,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4493,8 +4487,8 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toB:expect(0)
-                    mp.io_mshrNested_snoop_toN:expect(1)
+                    mp.io_mshrNested_s3_snoop_toB:expect(0)
+                    mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4568,7 +4562,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toN:expect(1)
+                    mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4631,7 +4625,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_dirWrite_s3_valid:expect(0)
                     mp.io_toDS_dsRead_s3_valid:expect(0)
                     mp.io_mshrAlloc_s3_valid:expect(0)
-                    mp.io_mshrNested_snoop_toN:expect(1)
+                    mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
                     mp.valid_s4:expect(0)
@@ -4693,7 +4687,7 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
             local probe_address = tl_b.bits.address:get()
             
             tl_c:release_data(probe_address, TLParam.TtoN, 8, "0xdead1", "0xbeef1")
-            env.expect_happen_until(10, function () return mp.io_mshrNested_release_setDirty:is(1) and mp.io_mshrNested_release_TtoN:is(1) end)
+            env.expect_happen_until(10, function () return mp.io_mshrNested_s3_release_setDirty:is(1) and mp.io_mshrNested_s3_release_TtoN:is(1) end)
             env.negedge()
                 mshrs[0].state_s_evict:expect(1)
                 mshrs[0].state_s_wb:expect(0)
@@ -4745,7 +4739,7 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
             local probe_address = tl_b.bits.address:get()
             
             tl_c:release(probe_address, TLParam.BtoN, 8)
-            env.expect_happen_until(10, function () return mp.io_mshrNested_release_setDirty:is(0) and mp.io_mshrNested_release_BtoN:is(1) end)
+            env.expect_happen_until(10, function () return mp.io_mshrNested_s3_release_setDirty:is(0) and mp.io_mshrNested_s3_release_BtoN:is(1) end)
             env.negedge()
                 mshrs[0].state_s_evict:expect(0)
                 mshrs[0].state_s_wb:expect(1)
@@ -4802,7 +4796,7 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
             local probe_address = tl_b.bits.address:get()
             
             tl_c:release_data(probe_address, TLParam.BtoN, 8, "0xdead2", "0xbeef2")
-            env.expect_happen_until(10, function () return mp.io_mshrNested_release_setDirty:is(1) and mp.io_mshrNested_release_BtoN:is(1) end)
+            env.expect_happen_until(10, function () return mp.io_mshrNested_s3_release_setDirty:is(1) and mp.io_mshrNested_s3_release_BtoN:is(1) end)
             env.negedge()
                 mshrs[0].state_s_evict:expect(1)
                 mshrs[0].state_s_wb:expect(0)
@@ -5004,7 +4998,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
                 chi_rxsnp.valid:set(0)
             env.expect_happen_until(10, function() return mp.valid_s3:is(1) end)
             mp.io_dirResp_s3_valid:expect(0)
-            mp.io_mshrNested_snoop_toN:expect(1)
+            mp.io_mshrNested_s3_snoop_toN:expect(1)
             env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
 
             chi_rxrsp:comp(0, 0)
@@ -5576,11 +5570,11 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
             mshrs[0].state_w_evict_comp:expect(0)
             mp:force_all()
                 env.negedge()
-                    mp.io_mshrNested_isMshr:set(1)
-                    mp.io_mshrNested_mshrId:set(3)
-                    mp.io_mshrNested_snoop_toN:set(1)
-                    mp.io_mshrNested_set:set(set)
-                    mp.io_mshrNested_tag:set(tag)
+                    mp.io_mshrNested_s3_isMshr:set(1)
+                    mp.io_mshrNested_s3_mshrId:set(3)
+                    mp.io_mshrNested_s3_snoop_toN:set(1)
+                    mp.io_mshrNested_s3_set:set(set)
+                    mp.io_mshrNested_s3_tag:set(tag)
                 env.negedge()
             mp:release_all()
             mshrs[0].state_s_evict:expect(1)
@@ -5623,11 +5617,11 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
         --     mshrs[0].state_s_cbwrdata:expect(0)
         --     mp:force_all()
         --         env.negedge()
-        --             mp.io_mshrNested_isMshr:set(1)
-        --             mp.io_mshrNested_mshrId:set(3)
-        --             mp.io_mshrNested_snoop_toN:set(1)
-        --             mp.io_mshrNested_set:set(set)
-        --             mp.io_mshrNested_tag:set(tag)
+        --             mp.io_mshrNested_s3_isMshr:set(1)
+        --             mp.io_mshrNested_s3_mshrId:set(3)
+        --             mp.io_mshrNested_s3_snoop_toN:set(1)
+        --             mp.io_mshrNested_s3_set:set(set)
+        --             mp.io_mshrNested_s3_tag:set(tag)
         --         env.negedge()
         --     mp:release_all()
         --     mshrs[0].state_s_wb:expect(1)
@@ -5915,6 +5909,51 @@ local test_reorder_rxdat = env.register_test_case "test_reorder_rxdat" {
     end
 }
 
+local test_other_snoop = env.register_test_case "test_other_snoop" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+        
+        do
+            -- SnpNotSharedDirty on I
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+            env.negedge()
+                chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 0)
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                end,
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            env.negedge(10)
+        end
+
+        do
+            -- SnpNotSharedDirty on BC
+            env.negedge()
+                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, 0)
+            env.negedge()
+                chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 0)
+            verilua "appendTasks" {
+                function ()
+                    env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                end,
+                function ()
+                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                end
+            }
+            env.negedge(10)
+        end
+
+        env.posedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: replacement policy
 -- TODO: Get not preferCache
@@ -5930,6 +5969,7 @@ verilua "mainTask" { function ()
     -- local test_all = false
     local test_all = true
 
+    -- test_other_snoop()
     -- test_snoop_nested_read()
 
     -- 

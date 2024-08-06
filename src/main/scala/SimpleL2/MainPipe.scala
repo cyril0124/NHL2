@@ -51,7 +51,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val dirWrite_s3   = ValidIO(new DirWrite)
         val mshrAlloc_s3  = DecoupledIO(new MshrAllocBundle)
         val mshrFreeOH_s3 = Input(UInt(nrMSHR.W))
-        val mshrNested    = Output(new MshrNestedWriteback)
+        val mshrNested_s3 = Output(new MshrNestedWriteback)
         val toDS = new Bundle {
             val dsRead_s3    = ValidIO(new DSRead)
             val mshrId_s3    = Output(UInt(mshrBits.W))
@@ -270,18 +270,18 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrAlloc_s3.bits.snpGotDirty     := task_s3.snpGotDirty
 
     val snpReplay_dup_s3 = WireInit(false.B)
-    io.mshrNested                  <> DontCare
-    io.mshrNested.isMshr           := task_s3.isMshrTask
-    io.mshrNested.mshrId           := task_s3.mshrId
-    io.mshrNested.set              := task_s3.set
-    io.mshrNested.tag              := task_s3.tag
-    io.mshrNested.source           := task_s3.source
-    io.mshrNested.snoop.cleanDirty := io.mshrNested.snoop.toN || io.mshrNested.snoop.toB // TODO:
-    io.mshrNested.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
-    io.mshrNested.snoop.toB := (isSnpToB_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
-    io.mshrNested.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData && valid_s3
-    io.mshrNested.release.TtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoN && valid_s3
-    io.mshrNested.release.BtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === BtoN && valid_s3
+    io.mshrNested_s3                  <> DontCare
+    io.mshrNested_s3.isMshr           := task_s3.isMshrTask
+    io.mshrNested_s3.mshrId           := task_s3.mshrId
+    io.mshrNested_s3.set              := task_s3.set
+    io.mshrNested_s3.tag              := task_s3.tag
+    io.mshrNested_s3.source           := task_s3.source
+    io.mshrNested_s3.snoop.cleanDirty := io.mshrNested_s3.snoop.toN || io.mshrNested_s3.snoop.toB // TODO:
+    io.mshrNested_s3.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
+    io.mshrNested_s3.snoop.toB := (isSnpToB_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
+    io.mshrNested_s3.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData && valid_s3
+    io.mshrNested_s3.release.TtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoN && valid_s3
+    io.mshrNested_s3.release.BtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === BtoN && valid_s3
 
     /** coherency check */
     when(valid_s3) {
