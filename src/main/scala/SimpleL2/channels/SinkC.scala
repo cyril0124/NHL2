@@ -77,7 +77,8 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * [[respDestMap]] is used to determine the destination of ProbeAckData, which can be chosen between [[TempDataStorage]] and [[DataStorage]].
      * This infomation is sent from [[MissHandler]]. 
      */
-    val respDestMap = RegInit(VecInit(Seq.fill(nrMSHR)(0.U.asTypeOf(new Bundle {
+    val nrRespDestMapEntry = nrMSHR
+    val respDestMap = RegInit(VecInit(Seq.fill(nrRespDestMapEntry)(0.U.asTypeOf(new Bundle {
         val valid    = Bool()
         val set      = UInt(setBits.W)
         val tag      = UInt(tagBits.W)
@@ -105,23 +106,6 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         entry.isDS     := io.respDest_s4.bits.isDS
         // ! If then probe has been canceled by Release, this entry will still be valid.
         // assert(!entry.valid, "respDestMap[%d] is already valid! addr:0x%x", io.respDest_s4.bits.mshrId, Cat(io.respDest_s4.bits.tag, io.respDest_s4.bits.set, 0.U(6.W)))
-    }
-    respDestMap.zip(respMatchOH.asBools).zipWithIndex.foreach { case ((destMap, en), i) =>
-    // when(io.c.fire && !isRelease && hasData && last && en) {
-    //     destMap.valid := false.B
-    //     assert(respHasMatch, "ProbeAckData does not match any entry of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-    //     assert(
-    //         PopCount(respMatchOH) <= 1.U,
-    //         "ProbeAckData match multiple entries of respDestMap! addr => 0x%x set => 0x%x tag => 0x%x respMatchOH: 0b%b",
-    //         io.c.bits.address,
-    //         set,
-    //         tag,
-    //         respMatchOH
-    //     )
-    //     assert(destMap.valid, s"ProbeAckData match an empty entry! entry_idx => ${i} addr => 0x%x set => 0x%x tag => 0x%x", io.c.bits.address, set, tag)
-    // }.elsewhen(io.c.fire && !isRelease && !hasData && en) {
-    //     destMap.valid := false.B
-    // }
     }
 
     io.respMapCancel.ready := true.B
@@ -223,6 +207,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
     when(io.dsWrite_s2.fire || io.toTempDS.write.fire) {
         val _isRelease = Mux(io.toTempDS.write.fire, isRelease, RegNext(isRelease))
         val _isProbeAckData = Mux(io.toTempDS.write.fire, isProbeAckData, RegNext(isProbeAckData))
+        val _respMatchOH = Mux(io.toTempDS.write.fire, respMatchOH, RegNext(respMatchOH)).asTypeOf(UInt(nrRespDestMapEntry.W))
         val _respMatchEntry = Mux(io.toTempDS.write.fire, respMatchEntry, RegNext(respMatchEntry))
         val _address = Mux(io.toTempDS.write.fire, io.c.bits.address, RegNext(io.c.bits.address))
         val _opcode = Mux(io.toTempDS.write.fire, io.c.bits.opcode, RegNext(io.c.bits.opcode))
@@ -239,6 +224,8 @@ class SinkC()(implicit p: Parameters) extends L2Module {
                 io.toTempDS.write.fire
             )
         }
+
+        assert(PopCount(_respMatchOH) <= 1.U, "ProbeAckData match multiple entries of respDestMap! addr => 0x%x respMatchOH: 0b%b", _address, _respMatchOH)
     }
     // @formatter:on
 }

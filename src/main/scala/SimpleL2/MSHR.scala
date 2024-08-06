@@ -973,6 +973,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         respMapCancel := false.B
     }.elsewhen(io.respMapCancel.fire) {
         respMapCancel := false.B
+    }.elsewhen(RegNext(io.resps.sinkc.fire && io.resps.sinkc.bits.last, false.B) && probeFinish) {
+        respMapCancel := true.B
     }
     io.respMapCancel.valid := respMapCancel || io.status.valid && io.status.willFree
     io.respMapCancel.bits  := io.id
