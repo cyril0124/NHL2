@@ -169,7 +169,8 @@ object Slice extends App {
     val config = new Config((_, _, _) => {
         case L2ParamKey =>
             L2Param(
-                nrClients = CFG_CLIENT.toInt
+                nrClients = CFG_CLIENT.toInt,
+                rxsnpHasLatch = false,
             )
         case DebugOptionsKey => DebugOptions()
     })

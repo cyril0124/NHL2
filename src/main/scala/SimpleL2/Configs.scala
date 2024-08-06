@@ -27,15 +27,15 @@ case class L2Param(
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
-    nrClients: Int = 2, // number of L1 DCache
-    enableClockGate: Boolean = true,
+    nrClients: Int = 2, // Number of L1 DCache
     nrMSHR: Int = 16,
-    nrExtraSinkId: Int = 16, // extra sink ids for hit Acquire requests which need to wait GrantAck
+    nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntry: Int = 8,
     nrNonDataSourceDEntry: Int = 4,
     nrTXRSPEntry: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
+    rxsnpHasLatch: Boolean = true, // Whether to latch the request for one cycle delay in the RXSNP module
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -76,7 +76,7 @@ trait HasL2Param {
     val nrBeat        = l2param.blockBytes / l2param.beatBytes
     val idsAll        = 256
 
-    val enableClockGate       = l2param.enableClockGate
+    val rxsnpHasLatch         = l2param.rxsnpHasLatch
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry
