@@ -10,7 +10,6 @@ import SimpleL2.chi.Resp
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import freechips.rocketchip.util.SeqToAugmentedSeq
-import Utils.LFSRArbiter
 
 object ReplayResion {
     val width            = 3
@@ -123,8 +122,8 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    val lfsrArb = Module(new LatchFastArbiter(new TaskBundle, nrReplayEntry)) // opt for timing
-    lfsrArb.io.in.zipWithIndex.foreach { case (in, i) =>
+    val arb = Module(new LatchFastArbiter(new TaskBundle, nrReplayEntry)) // opt for timing
+    arb.io.in.zipWithIndex.foreach { case (in, i) =>
         val entry    = entries(i)
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
         val subEntry = Mux1H(deqOH, entry.bits.subEntries)
@@ -153,9 +152,9 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    when(lfsrArb.io.out.fire) {
+    when(arb.io.out.fire) {
         entries.zipWithIndex.foreach { case (entry, i) =>
-            when(i.U === lfsrArb.io.chosen) {
+            when(i.U === arb.io.chosen) {
                 val deqSubEntry = entry.bits.subEntries(entry.bits.deqIdx.value)
                 deqSubEntry.valid := false.B
 
@@ -165,7 +164,7 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.req_s1 <> lfsrArb.io.out
+    io.req_s1 <> arb.io.out
 
     io.freeCnt := PopCount(freeVec)
 
