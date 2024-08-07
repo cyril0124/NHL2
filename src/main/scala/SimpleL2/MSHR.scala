@@ -78,6 +78,7 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_comp_first = Bool()
 
     val waitProbeAck  = Bool()
+    val waitGrantAck  = Bool()
     val replGotDirty  = Bool()
     val isChannelA    = Bool()
     val reqAllowSnoop = Bool()
@@ -1093,6 +1094,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_comp_first := state.w_compdat_first && state.w_comp
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
+    io.status.waitGrantAck := state.s_grant && state.w_grant_sent && !state.w_grantack
     io.status.replGotDirty := replGotDirty
     io.status.isChannelA   := req.isChannelA
 
