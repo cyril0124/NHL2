@@ -5933,42 +5933,248 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
         resetFinish:posedge()
 
         tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
-        
-        do
-            -- SnpNotSharedDirty on I
-            env.negedge()
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
-            env.negedge()
-                chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 0)
-            verilua "appendTasks" {
-                function ()
-                    env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
-                end,
-                function ()
-                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
-                end
-            }
-            env.negedge(10)
+
+        local function do_test_SnpNotSharedDirty(test_opcode)
+            local test_opcode = test_opcode or OpcodeSNP.SnpNotSharedDirty
+
+            print(string.format("\nstart test %s\n", OpcodeSNP(test_opcode)))
+
+            local function iterate_all(func)
+                func(0, 0)
+                func(0, 1)
+                func(0, 2)
+                func(0, 3)
+                func(1, 0)
+                func(1, 1)
+                func(1, 2)
+                func(1, 3)
+            end
+            
+            do
+                -- SnpNotSharedDirty on I
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, 0) -- txn_id = 0, ret2src = 0
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            local function SnpNotSharedDirty_BC(ret2src, client) 
+                print("SnpNotSharedDirty_BC ret2src=" .. ret2src .. ", client=" .. client)
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                        else
+                            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            iterate_all(SnpNotSharedDirty_BC)
+
+            local function SnpNotSharedDirty_TC(ret2src, client) 
+                print("SnpNotSharedDirty_TC ret2src=" .. ret2src .. ", client=" .. client)
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                        else
+                            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            iterate_all(SnpNotSharedDirty_TC)
+
+            local function SnpNotSharedDirty_TD(ret2src, client) 
+                print("SnpNotSharedDirty_TD ret2src=" .. ret2src .. ", client=" .. client)
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            iterate_all(SnpNotSharedDirty_TD)
+
+            local function SnpNotSharedDirty_TTC(ret2src, client, probeack_data)
+                if client == 0 or client == 3 then return end
+                print("SnpNotSharedDirty_TTC ret2src=" .. ret2src .. ", client=" .. client .. ", probeack_data=" .. tostring(probeack_data))
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                verilua "appendTasks" {
+                    function()
+                        env.expect_happen_until(10, function() return mshrs[0].io_status_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.address:is(to_address(0x01, 0x01)) and tl_b.bits.param:is(TLParam.toB) end)
+                        if probeack_data == false then
+                            if client == 1 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 0)
+                            elseif client == 2 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 16)
+                            end
+                        else
+                            if client == 1 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 0)
+                            elseif client == 2 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 16)
+                            end
+                        end
+                    end,
+                    function ()
+                        if probeack_data == false then
+                            if ret2src == 1 then
+                                env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                                env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                            else
+                                env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC)  end)
+                            end
+                        else
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            SnpNotSharedDirty_TTC(0, 1, false)
+            SnpNotSharedDirty_TTC(0, 1, true)
+            SnpNotSharedDirty_TTC(0, 2, false)
+            SnpNotSharedDirty_TTC(0, 2, true)
+            SnpNotSharedDirty_TTC(1, 1, false)
+            SnpNotSharedDirty_TTC(1, 1, true)
+            SnpNotSharedDirty_TTC(1, 2, false)
+            SnpNotSharedDirty_TTC(1, 2, true)
+
+            local function SnpNotSharedDirty_TTD(ret2src, client, probeack_data)
+                if client == 0 or client == 3 then return end
+                print("SnpNotSharedDirty_TTD ret2src=" .. ret2src .. ", client=" .. client .. ", probeack_data=" .. tostring(probeack_data))
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTD, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                verilua "appendTasks" {
+                    function()
+                        env.expect_happen_until(10, function() return mshrs[0].io_status_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.address:is(to_address(0x01, 0x01)) and tl_b.bits.param:is(TLParam.toB) end)
+                        if probeack_data == false then
+                            if client == 1 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 0)
+                            elseif client == 2 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 16)
+                            end
+                        else
+                            if client == 1 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 0)
+                            elseif client == 2 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 16)
+                            end
+                        end
+                    end,
+                    function ()
+                        if probeack_data == false then
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        else
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(20)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            SnpNotSharedDirty_TTD(0, 1, false)
+            SnpNotSharedDirty_TTD(0, 1, true)
+            SnpNotSharedDirty_TTD(0, 2, false)
+            SnpNotSharedDirty_TTD(0, 2, true)
+            SnpNotSharedDirty_TTD(1, 1, false)
+            SnpNotSharedDirty_TTD(1, 1, true)
+            SnpNotSharedDirty_TTD(1, 2, false)
+            SnpNotSharedDirty_TTD(1, 2, true)
+
+            env.posedge(100)
         end
 
-        do
-            -- SnpNotSharedDirty on BC
-            env.negedge()
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, 0)
-            env.negedge()
-                chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 0)
-            verilua "appendTasks" {
-                function ()
-                    env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
-                end,
-                function ()
-                    env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
-                end
-            }
-            env.negedge(10)
-        end
-
-        env.posedge(100)
+        do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirty)
+        do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirtyFwd)
     end
 }
 
@@ -6055,6 +6261,7 @@ verilua "mainTask" { function ()
     test_mshr_realloc()
     test_nested_cancel_req()
     test_reorder_rxdat()
+    test_other_snoop()
     end
 
    

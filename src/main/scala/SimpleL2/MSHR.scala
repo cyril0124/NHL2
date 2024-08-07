@@ -512,10 +512,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** Send SnpRespData/SnpResp task to [[MainPipe]] */
     val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(req.opcode)
-    val isSnpSharedX      = CHIOpcodeSNP.isSnpSharedX(req.opcode)
+    val isSnpToB          = CHIOpcodeSNP.isSnpToB(req.opcode)
     val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty)
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
-    val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpSharedX, BRANCH, INVALID))
+    val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpToB, BRANCH, INVALID))
     val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || req.retToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ )
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
@@ -531,7 +531,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         dirty = snprespFinalDirty,
         state = snprespFinalState,
         alias = req.aliasOpt.getOrElse(0.U),
-        clientsOH = Mux(isSnpSharedX || isSnpOnceX, meta.clientsOH, Fill(nrClients, false.B)),
+        clientsOH = Mux(isSnpToB || isSnpOnceX, meta.clientsOH, Fill(nrClients, false.B)),
         fromPrefetch = false.B
     )
     assert(!(valid && snprespPassDirty && snprespFinalDirty))

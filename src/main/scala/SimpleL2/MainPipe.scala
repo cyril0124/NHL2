@@ -347,11 +347,15 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
      *     => Get is a TL-UL message which will not modify the coherent state
      *     => Prefetch only change the L2 state and not response upwards to L1
      */
-    val snpNotUpdateDir_s3 = dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && task_s3.opcode === SnpShared || !dirResp_s3.hit || task_s3.snpHitWriteBack || task_s3.snpHitReq
-    val dirWen_mshr_s3     = task_s3.isMshrTask && task_s3.updateDir && !hasRetry_s3                                   // if stage2 has retry task, we should not update directory info.
-    val dirWen_a_s3        = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3 && !acquireReplay_s3
-    val dirWen_b_s3        = task_s3.isChannelB && !mshrAlloc_s3 && isSnoop_s3 && !snpNotUpdateDir_s3 && !snpReplay_s3 // TODO: Snoop
-    val dirWen_c_s3        = task_s3.isChannelC && hit_s3
+    val snpNotUpdateDir_s3 = {
+        val opcodes       = VecInit(SnpShared, SnpNotSharedDirty, SnpSharedFwd, SnpNotSharedDirtyFwd)
+        val opcodeMatchOH = VecInit(opcodes.map(_ === task_s3.opcode))
+        dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && opcodeMatchOH.asUInt.orR || !dirResp_s3.hit || task_s3.snpHitWriteBack || task_s3.snpHitReq
+    }
+    val dirWen_mshr_s3 = task_s3.isMshrTask && task_s3.updateDir && !hasRetry_s3                                   // if stage2 has retry task, we should not update directory info.
+    val dirWen_a_s3    = task_s3.isChannelA && !mshrAlloc_s3 && !isGet_s3 && !isPrefetch_s3 && !acquireReplay_s3
+    val dirWen_b_s3    = task_s3.isChannelB && !mshrAlloc_s3 && isSnoop_s3 && !snpNotUpdateDir_s3 && !snpReplay_s3 // TODO: Snoop
+    val dirWen_c_s3    = task_s3.isChannelC && hit_s3
 
     val newMeta_mshr_s3 = DirectoryMetaEntry(task_s3.tag, task_s3.newMetaEntry)
 
