@@ -1101,7 +1101,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     // Allow Snoop nested request address. This operation will cause ReadReissue
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
-    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent
+    val hasPendingRefill = !state.w_grant_sent || !state.w_accessack_sent
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
         state.w_replResp &&
