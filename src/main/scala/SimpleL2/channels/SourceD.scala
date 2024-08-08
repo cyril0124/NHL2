@@ -42,7 +42,6 @@ class SourceD()(implicit p: Parameters) extends L2Module {
             flow = true
         )
     )
-    io.nonDataRespCnt := nonDataRespQueue.io.count
 
     val skidBuffer = Module(new SkidBuffer(new Bundle {
         val task = new TaskBundle
@@ -55,6 +54,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     val taskFire      = io.task_s2.fire || io.task_s4.fire || io.task_s6s7.fire
     val bufferReady   = Mux(needData(task.opcode), skidBuffer.io.enq.ready, nonDataRespQueue.io.enq.ready)
     val grantMapReady = Mux(task.opcode === GrantData || task.opcode === Grant, io.allocGrantMap.ready, true.B)
+    io.nonDataRespCnt  := Mux(!grantMapReady, nrNonDataSourceDEntry.U, nonDataRespQueue.io.count) // If grantMap is not ready, set io.nonDataRespCnt to the max value so that the MainPipe could stall the Grant request.
     io.task_s4.ready   := bufferReady && grantMapReady
     io.task_s2.ready   := bufferReady && grantMapReady && !io.task_s4.valid
     io.task_s6s7.ready := bufferReady && grantMapReady && !io.task_s4.valid && !io.task_s2.valid

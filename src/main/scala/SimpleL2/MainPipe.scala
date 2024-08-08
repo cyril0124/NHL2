@@ -601,7 +601,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.sourceD_s4.bits        := task_s4
     io.sourceD_s4.bits.opcode := Mux(valid_refill_mp_s4, task_s4.opcode, respOpcode_s4)
     io.sourceD_s4.bits.param  := Mux(valid_refill_mp_s4, task_s4.param, respParam_s4)
-    assert(!(io.sourceD_s4.valid && !io.sourceD_s4.ready), "sourceD_s4 should not be stalled!")
+    assert(!(io.sourceD_s4.valid && !io.sourceD_s4.ready), "sourceD_s4(NonDataResp) should not be stalled!")
 
     // -----------------------------------------------------------------------------------------
     // Stage 5
