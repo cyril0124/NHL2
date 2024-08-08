@@ -185,10 +185,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reqNeedT      = needT(req.opcode, req.param)
     val reqNeedB      = needB(req.opcode, req.param)
 
+    val isRealloc       = RegInit(false.B)
+    val reallocTxnID    = RegInit(0.U(req.txnID.getWidth.W))
+    val reallocOpcode   = RegInit(0.U(req.opcode.getWidth.W))
+    val reallocRetToSrc = RegInit(false.B)
+
     val rspDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
     val datDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
-    val isRealloc       = RegInit(false.B)
-    val reallocTxnID    = RegInit(0.U.asTypeOf(chiselTypeOf(req.txnID)))
     val gotCompData     = RegInit(false.B)
     val gotDirty        = RegInit(false.B)
     val releaseGotDirty = RegInit(false.B)
@@ -236,9 +239,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         needPromote := !allocState.s_makeunique
         needWb      := false.B
 
+        isRealloc := false.B
+
         rspDBID         := 0.U
         datDBID         := 0.U
-        isRealloc       := false.B
         gotCompData     := false.B
         gotT            := false.B
         gotDirty        := false.B
@@ -254,9 +258,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     when(io.alloc_s3.fire && io.alloc_s3.bits.realloc) {
         val allocState = io.alloc_s3.bits.fsmState
 
-        isRealloc    := true.B
-        reallocTxnID := io.alloc_s3.bits.req.txnID
-        snpGotDirty  := io.alloc_s3.bits.snpGotDirty
+        isRealloc       := true.B
+        reallocTxnID    := io.alloc_s3.bits.req.txnID
+        reallocOpcode   := io.alloc_s3.bits.req.opcode
+        reallocRetToSrc := io.alloc_s3.bits.req.retToSrc
+        snpGotDirty     := io.alloc_s3.bits.snpGotDirty
 
         state.s_snpresp      := allocState.s_snpresp
         state.w_snpresp_sent := allocState.w_snpresp_sent
@@ -511,15 +517,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     }
 
     /** Send SnpRespData/SnpResp task to [[MainPipe]] */
-    val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(req.opcode)
-    val isSnpToB          = CHIOpcodeSNP.isSnpToB(req.opcode)
-    val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty)
+    val snpTxnID          = Mux(isRealloc, reallocTxnID, req.txnID)
+    val snpOpcode         = Mux(isRealloc, reallocOpcode, req.opcode)
+    val snpRetToSrc       = Mux(isRealloc, reallocRetToSrc, req.retToSrc)
+    val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(snpOpcode)
+    val isSnpToB          = CHIOpcodeSNP.isSnpToB(snpOpcode)
+    val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty) || isRealloc && snpGotDirty
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpToB, BRANCH, INVALID))
-    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || req.retToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ )
+    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ )
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
-    mpTask_snpresp.bits.txnID       := Mux(isRealloc, reallocTxnID, req.txnID)
+    mpTask_snpresp.bits.txnID       := snpTxnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(snprespNeedData, SnpRespData, SnpResp)
     mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
