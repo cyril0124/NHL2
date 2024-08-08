@@ -14,7 +14,7 @@ case class CHIBundleParameters(
     dataCheck: Boolean
 // TODO: has snoop
 ) {
-    def TXNID_WIDTH = 8
+    def TXNID_WIDTH = 12 // TODO: 8-bit for issueB, 12-bit for issueE or higher
     def DBID_WIDTH = TXNID_WIDTH
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
     require(addressBits >= 44 && addressBits <= 52)
