@@ -29,7 +29,8 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
     val hasEntry = freeVec.orR
     val insertOH = PriorityEncoderOH(freeVec)
 
-    val storeTask = io.taskIn.valid && !io.taskOut.ready
+    val taskOut   = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
+    val storeTask = io.taskIn.valid && !taskOut.ready
     io.taskIn.ready := hasEntry
 
     buffers.zipWithIndex.zip(insertOH.asBools).foreach { case ((buf, i), en) =>
@@ -50,10 +51,18 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.taskOut            <> issueArb.io.out
-    io.taskOut.bits       := Mux(io.taskIn.fire, io.taskIn.bits, issueArb.io.out.bits)
-    io.taskOut.valid      := io.taskIn.fire || issueArb.io.out.valid
-    issueArb.io.out.ready := io.taskOut.ready && !io.taskIn.fire
+    taskOut               <> issueArb.io.out
+    taskOut.bits          := Mux(io.taskIn.fire, io.taskIn.bits, issueArb.io.out.bits)
+    taskOut.valid         := io.taskIn.fire || issueArb.io.out.valid
+    issueArb.io.out.ready := taskOut.ready && !io.taskIn.fire
+
+    println(s"[${this.getClass().toString()}] reqBufOutLatch:${reqBufOutLatch}")
+
+    if (reqBufOutLatch) {
+        io.taskOut <> Queue(taskOut, 1)
+    } else {
+        io.taskOut <> taskOut
+    }
 
     dontTouch(storeTask)
 }

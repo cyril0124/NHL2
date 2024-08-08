@@ -183,6 +183,7 @@ object Slice extends App {
         case L2ParamKey =>
             L2Param(
                 nrClients = CFG_CLIENT.toInt,
+                reqBufOutLatch = false,
                 rxsnpHasLatch = false,
                 sinkcHasLatch = false
             )
