@@ -5933,22 +5933,22 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
         resetFinish:posedge()
 
         tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+        
+        local function iterate_all(func)
+            func(0, 0)
+            func(0, 1)
+            func(0, 2)
+            func(0, 3)
+            func(1, 0)
+            func(1, 1)
+            func(1, 2)
+            func(1, 3)
+        end
 
         local function do_test_SnpNotSharedDirty(test_opcode)
             local test_opcode = test_opcode or OpcodeSNP.SnpNotSharedDirty
 
             print(string.format("\nstart test %s\n", OpcodeSNP(test_opcode)))
-
-            local function iterate_all(func)
-                func(0, 0)
-                func(0, 1)
-                func(0, 2)
-                func(0, 3)
-                func(1, 0)
-                func(1, 1)
-                func(1, 2)
-                func(1, 3)
-            end
             
             do
                 -- SnpNotSharedDirty on I
@@ -6173,8 +6173,88 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
             env.posedge(100)
         end
 
+        local function do_test_SnpMakeInvalid()
+            local test_opcode = OpcodeSNP.SnpMakeInvalid
+            print(string.format("\nstart test %s\n", OpcodeSNP(OpcodeSNP.SnpMakeInvalid)))
+
+            do
+                -- SnpMakeInvalid on I
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, 0) -- txn_id = 0, ret2src = 0
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            local function SnpMakeInvalid_common(state, client)
+                local ret2src = 0 -- RetToSrc is inapplicable for this opcode and must be set to 0
+                print("SnpMakeInvalid_" .. MixedState(state) .. " client=" .. client)
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, state, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                if client ~= 0 then
+                    env.expect_happen_until(10, function() return mshrs[0].io_status_valid:is(1) end)
+                end
+                if client == 1 then
+                    env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(0) end)
+                    env.negedge()
+                    tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                elseif client == 2 then
+                    env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(16) end)
+                    env.negedge()
+                    tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 16)
+                elseif client == 3 then
+                    env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(0) end)
+                    env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(16) end)
+                    env.negedge()
+                    tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                    tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 16)
+                end
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0) end)
+                    end
+                }
+                env.negedge(20)
+            end
+            
+            local function iterate_all(states, func)
+                for i, state in ipairs(states) do
+                    if state ~= MixedState.TTC and state ~= MixedState.TTD then
+                        func(state, 0)
+                    end
+                    func(state, 1)
+                    func(state, 2)
+                    if state ~= MixedState.TTC and state ~= MixedState.TTD then
+                        func(state, 3)
+                    end
+                end
+            end
+
+            iterate_all({MixedState.BC, MixedState.TC, MixedState.TTC, MixedState.TTD}, SnpMakeInvalid_common)
+        end
+
         do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirty)
         do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirtyFwd)
+
+        do_test_SnpMakeInvalid()
     end
 }
 

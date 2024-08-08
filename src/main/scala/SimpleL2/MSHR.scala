@@ -521,11 +521,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snpOpcode         = Mux(isRealloc, reallocOpcode, req.opcode)
     val snpRetToSrc       = Mux(isRealloc, reallocRetToSrc, req.retToSrc)
     val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(snpOpcode)
+    val isSnpMakeInvalidX = CHIOpcodeSNP.isSnpMakeInvalidX(snpOpcode)
     val isSnpToB          = CHIOpcodeSNP.isSnpToB(snpOpcode)
-    val snprespPassDirty  = !isSnpOnceX && (meta.isDirty || gotDirty) || isRealloc && snpGotDirty
+    val snprespPassDirty  = !isSnpOnceX && !isSnpMakeInvalidX && (meta.isDirty || gotDirty) || isRealloc && snpGotDirty
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpToB, BRANCH, INVALID))
-    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ )
+    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ ) && !isSnpMakeInvalidX
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
     mpTask_snpresp.bits.txnID       := snpTxnID
