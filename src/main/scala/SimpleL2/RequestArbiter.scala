@@ -170,7 +170,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_replay_s1_dup = WireInit(false.B)
     val noFreeWay_forSinkA      = noFreeWay(io.taskSinkA_s1.bits.set)
     val setConflict_forSinkA    = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
-    val blockA_addrConflict     = (task_s1.set === task_s2.set && task_s1.tag === task_s2.tag) && valid_s2 || (task_s1.set === set_s3 && task_s1.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
+    val blockA_addrConflict     = (io.taskSinkA_s1.bits.set === task_s2.set && io.taskSinkA_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskSinkA_s1.bits.set === set_s3 && io.taskSinkA_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
     val blockA_mayReadDS_forSinkA =
         mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
     val blockA_mayReadDS_forReplay = mayReadDS_replay_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2)
