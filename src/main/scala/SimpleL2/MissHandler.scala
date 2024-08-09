@@ -132,7 +132,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     arbTask(mshrs.map(_.io.respMapCancel), io.respMapCancel)
 
     /** Check nested behavior. Only one [[MSHR]] can be nested at the same time. */
-    val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA)).asUInt
+    val mshrValidNestedVec    = VecInit(mshrs.map(s => s.io.status.valid && s.io.status.isChannelA && !s.io.status.state.isInvalid)).asUInt
     val nestedSetMatchVec     = VecInit(mshrs.map(_.io.status.set === io.mshrNested_s3.set)).asUInt
     val nestedReqTagMatchVec  = VecInit(mshrs.map(m => m.io.status.reqTag === io.mshrNested_s3.tag)).asUInt
     val nestedMetaTagMatchVec = VecInit(mshrs.map(m => m.io.status.metaTag === io.mshrNested_s3.tag && m.io.status.lockWay)).asUInt
