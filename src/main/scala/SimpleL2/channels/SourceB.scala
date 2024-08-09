@@ -11,8 +11,10 @@ import SimpleL2.Bundles._
 
 class SourceB()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val b              = DecoupledIO(new TLBundleB(tlBundleParams))
-        val task           = Flipped(DecoupledIO(new TLBundleB(tlBundleParams)))
+        val b    = DecoupledIO(new TLBundleB(tlBundleParams))
+        val task = Flipped(DecoupledIO(new TLBundleB(tlBundleParams)))
+
+        /** These signals are used for blocking sourceb tasks. */
         val grantMapStatus = Input(Vec(nrMSHR, new GrantMapStatus)) // from SinkE
         val mpStatus       = Input(new MpStatus)                    // from MainPipe
         val bufferStatus   = Input(new BufferStatusSourceD)         // from SourceD
@@ -20,6 +22,10 @@ class SourceB()(implicit p: Parameters) extends L2Module {
 
     val (tag, set, offset) = parseAddress(io.task.bits.address)
 
+    /**
+     * Block sourceb tasks if there exist any Grant which does not get GrantAck or 
+     * if there exist any on-going Grant on [[MainPipe]] or [[SourceD]] buffer. 
+     */
     val matchVec_sinke    = VecInit(io.grantMapStatus.map { s => s.valid && s.set === set && s.tag === tag }).asUInt
     val shouldBlock_sinke = matchVec_sinke.orR
     assert(!(io.b.fire && PopCount(matchVec_sinke) > 1.U), "matchVec_sinke:%b", matchVec_sinke)

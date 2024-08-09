@@ -125,6 +125,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
     io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
 
+    /**
+      * Notify [[MSHR]]s that the stage 2 task may nested [[MSHR]] in stage 3.
+      * This is used to optimize the timing path between nested write-back at [[MainPipe]] stage 3 and the txreq task blocking logic in [[MSHR]].
+      */
     io.mshrEarlyNested_s2.set       := task_s2.set
     io.mshrEarlyNested_s2.tag       := task_s2.tag
     io.mshrEarlyNested_s2.isMshr    := task_s2.isMshrTask
