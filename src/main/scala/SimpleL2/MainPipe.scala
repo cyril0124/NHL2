@@ -209,8 +209,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     when(task_s3.isChannelA) {
 
         /** need to send replTask to [[Directory]] */
-        mshrAllocStates.s_repl     := dirResp_s3.hit || !dirResp_s3.hit && dirResp_s3.meta.isInvalid
-        mshrAllocStates.w_replResp := dirResp_s3.hit || !dirResp_s3.hit && dirResp_s3.meta.isInvalid
+        mshrAllocStates.s_repl     := dirResp_s3.hit || !dirResp_s3.hit && dirResp_s3.meta.isInvalid && !dirResp_s3.needsRepl
+        mshrAllocStates.w_replResp := dirResp_s3.hit || !dirResp_s3.hit && dirResp_s3.meta.isInvalid && !dirResp_s3.needsRepl
 
         when(isGet_s3) {
             mshrAllocStates.s_accessack      := false.B

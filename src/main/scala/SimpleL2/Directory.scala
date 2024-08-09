@@ -178,6 +178,9 @@ class DirResp(implicit p: Parameters) extends L2Bundle {
     val meta  = new DirectoryMetaEntry
     val wayOH = UInt(ways.W)
     val hit   = Bool()
+
+    /** If there is no free way, we need to schecule a replacement task in [[MSHR]] even the cacheline state is INVALID */
+    val needsRepl = Bool()
 }
 
 class DirReplResp(implicit p: Parameters) extends L2Bundle {
@@ -331,10 +334,11 @@ class Directory()(implicit p: Parameters) extends L2Module {
     assert(!(io.resetFinish && PopCount(hitOH_s3) > 1.U))
     assert(!(io.resetFinish && PopCount(finalWayOH_s3) > 1.U))
 
-    io.dirResp_s3.valid      := reqValid_s3
-    io.dirResp_s3.bits.hit   := hit_s3
-    io.dirResp_s3.bits.meta  := Mux1H(respWayOH_s3, metaRead_s3)
-    io.dirResp_s3.bits.wayOH := respWayOH_s3
+    io.dirResp_s3.valid          := reqValid_s3
+    io.dirResp_s3.bits.hit       := hit_s3
+    io.dirResp_s3.bits.meta      := Mux1H(respWayOH_s3, metaRead_s3)
+    io.dirResp_s3.bits.wayOH     := respWayOH_s3
+    io.dirResp_s3.bits.needsRepl := noFreeWay_s3
 
     io.replResp_s3.valid       := replReqValid_s3
     io.replResp_s3.bits.mshrId := mshrId_s3
