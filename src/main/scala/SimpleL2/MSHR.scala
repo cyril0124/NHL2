@@ -1113,14 +1113,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     // Allow Snoop nested request address. This operation will cause ReadReissue
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
-    val hasPendingRefill = !state.w_grant_sent || !state.w_accessack_sent
+    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent
+    val gotCompResp      = state.w_comp && state.w_compdat_first
+    val isAcquireHit     = dirResp.hit && req.isChannelA
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
         state.w_replResp &&
-        hasPendingRefill &&       // Does not grant to upstream cache
-        gotReplProbeAck &&        // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
-        !(needWb && gotWbResp) && // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
-        !io.status.waitProbeAck   // Does not wait for any ProbeAck
+        !(isAcquireHit && gotCompResp) // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
+        hasPendingRefill &&            // Does not grant to upstream cache
+        gotReplProbeAck &&             // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
+        !(needWb && gotWbResp) &&      // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
+        !io.status.waitProbeAck        // Does not wait for any ProbeAck
     }
     io.status.gotDirtyData := gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
