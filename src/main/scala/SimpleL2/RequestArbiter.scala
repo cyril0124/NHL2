@@ -132,10 +132,19 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     }
 
     def noFreeWay(set: UInt): Bool = {
-        val sameSet_s2     = valid_s2 && task_s2.isChannelA && task_s2.set === set
-        val sameSet_s3     = RegNext(valid_s2 && task_s2.isChannelA, false.B) && RegEnable(task_s2.set, valid_s2) === set
+        val validChannelA_s2 = valid_s2 && task_s2.isChannelA
+        val validChannelA_s3 = RegNext(validChannelA_s2, false.B)
+        val validChannelA_s4 = RegNext(validChannelA_s3, false.B)
+        val validSet_s2      = task_s2.set
+        val validSet_s3      = RegEnable(validSet_s2, validChannelA_s2)
+        val validSet_s4      = RegEnable(validSet_s3, validChannelA_s3)
+
+        val sameSet_s2 = validChannelA_s2 && validSet_s2 === set
+        val sameSet_s3 = validChannelA_s3 && validSet_s3 === set
+        val sameSet_s4 = validChannelA_s4 && validSet_s4 === set
+
         val mshrSameSetVec = VecInit(io.mshrStatus.map(s => s.valid && s.isChannelA && s.set === set))
-        (PopCount(mshrSameSetVec) + sameSet_s2 + sameSet_s3) >= ways.U
+        (PopCount(mshrSameSetVec) + sameSet_s2 + sameSet_s3 /* + sameSet_s4 */ ) >= ways.U
     }
 
     def setConflict(channel: String, set: UInt, tag: UInt): Bool = {
