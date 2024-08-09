@@ -5434,11 +5434,15 @@ local test_cancel_sinkC_respMap = env.register_test_case "test_cancel_sinkC_resp
             
             tl_c:release_data(address, TLParam.TtoN, 0, "0xaabb", "0xccdd") -- core 0 release dirty data
             env.expect_happen_until(10, function() return mshrs[0].io_nested_release_TtoN:is(1) and mshrs[0].nestedMatch:is(1) end)
-            mshrs[0].state_s_aprobe:expect(0)
+                mshrs[0].state_s_aprobe:expect(0)
+                mshrs[0].cancelProbe:expect(1)
+            env.negedge()
+                mshrs[0].cancelProbe:expect(0)
             env.negedge()
                 sinkC.io_respMapCancel_valid:expect(1)
                 sinkC.io_respMapCancel_bits:expect(0)
             env.negedge()
+                sinkC.io_respMapCancel_valid:expect(0)
                 mshrs[0].state_s_aprobe:expect(1)
                 tl_b.valid:expect(0) -- core 0 probe has been canceled
             env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xaabb end)

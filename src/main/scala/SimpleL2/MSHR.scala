@@ -954,6 +954,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     }
 
     val respMapCancel = RegInit(false.B)
+    val cancelProbe   = WireInit(false.B)
     when(nestedMatch) {
         val nested = io.nested.release
 
@@ -981,30 +982,31 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             meta.clientsOH  := meta.clientsOH & ~releaseClientOH
             probeAckClients := probeAckClients & ~releaseClientOH
             nestedRelease   := true.B
+            cancelProbe     := noProbeRequired
+        }
+    }
 
-            /** Any unfired probe transactions will be canceled. */
-            when(noProbeRequired && !io.tasks.sourceb.fire) {
-                when(!state.s_sprobe) {
-                    state.s_sprobe          := true.B
-                    state.w_sprobeack       := true.B
-                    state.w_sprobeack_first := true.B
-                    respMapCancel           := true.B
-                }
+    /** Any unfired probe transactions will be canceled. */
+    when(RegNext(cancelProbe) /* Optimize for better timing */ && !io.tasks.sourceb.fire) {
+        when(!state.s_sprobe) {
+            state.s_sprobe          := true.B
+            state.w_sprobeack       := true.B
+            state.w_sprobeack_first := true.B
+            respMapCancel           := true.B
+        }
 
-                when(!state.s_aprobe) {
-                    state.s_aprobe          := true.B
-                    state.w_aprobeack       := true.B
-                    state.w_aprobeack_first := true.B
-                    respMapCancel           := true.B
-                }
+        when(!state.s_aprobe) {
+            state.s_aprobe          := true.B
+            state.w_aprobeack       := true.B
+            state.w_aprobeack_first := true.B
+            respMapCancel           := true.B
+        }
 
-                when(!state.s_rprobe) {
-                    state.s_rprobe          := true.B
-                    state.w_rprobeack       := true.B
-                    state.w_rprobeack_first := true.B
-                    respMapCancel           := true.B
-                }
-            }
+        when(!state.s_rprobe) {
+            state.s_rprobe          := true.B
+            state.w_rprobeack       := true.B
+            state.w_rprobeack_first := true.B
+            respMapCancel           := true.B
         }
     }
 
