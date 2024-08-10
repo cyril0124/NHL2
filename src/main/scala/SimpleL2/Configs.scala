@@ -183,7 +183,7 @@ trait HasL2Param {
     def clientOHToSource(clientBitOH: UInt): UInt = {
         if (l2param.useDiplomacy) {
             if (nrClients <= 1) {
-                0.U
+                edgeIn.client.clients.filter(_.supports.probe).map(c => c.sourceId.start).head.U
             } else {
                 Mux1H(
                     clientBitOH,
