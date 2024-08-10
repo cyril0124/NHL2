@@ -246,15 +246,21 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.taskSinkA_s1 <> arbTaskSinkA
     arb.io.out      <> chnlTask_s1
 
+    val snpHitWriteBackVec_s1 = snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag)
+    val snpGotDirtyVec_s1     = snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag)
+    val snpHitReqVec_s1       = snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag)
     arbTaskSnoop_dup_s1               := arbTaskSnoop
-    arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-    arbTaskSnoop.bits.snpGotDirty     := snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-    arbTaskSnoop.bits.snpHitReq       := snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-    arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag))
-    arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag), io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc
+    arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBackVec_s1.orR
+    arbTaskSnoop.bits.snpGotDirty     := snpGotDirtyVec_s1.orR
+    arbTaskSnoop.bits.snpHitReq       := snpHitReqVec_s1.orR
+    arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReqVec_s1)
+    arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc
     arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
     io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
     assert(!(arbTaskSnoop.valid && arbTaskSnoop.bits.snpHitWriteBack && arbTaskSnoop.bits.snpHitReq), "snpHitWriteBack and snpHitReq should not be both true")
+    assert(PopCount(snpHitWriteBackVec_s1) <= 1.U, "snpHitWriteBackVec_s1: %b", snpHitWriteBackVec_s1)
+    assert(PopCount(snpGotDirtyVec_s1) <= 1.U, "snpGotDirtyVec_s1: %b", snpGotDirtyVec_s1)
+    assert(PopCount(snpHitReqVec_s1) <= 1.U, "snpHitReqVec_s1: %b", snpHitReqVec_s1)
 
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
