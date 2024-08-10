@@ -536,7 +536,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.channel     := Mux(snprespNeedData, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := snprespNeedData && !releaseGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
-    mpTask_snpresp.bits.updateDir   := hasValidProbeAck                                                    // Update directory info when then received ProbeAck params are not all NtoN.
+    mpTask_snpresp.bits.updateDir   := hasValidProbeAck && !isRealloc                                      // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = snprespFinalDirty,
         state = snprespFinalState,
@@ -1095,9 +1095,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.metaTag   := dirResp.meta.tag
     io.status.needsRepl := evictNotSent || wbNotSent // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay := !dirResp.hit && meta.isInvalid && !dirResp.needsRepl || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
-    io.status.dirHit  := dirResp.hit                                                                                                                                                                         // Used by Directory to occupy a particular way.
-    io.status.state   := meta.state
+    io.status.dirHit    := dirResp.hit               // Used by Directory to occupy a particular way.
+    io.status.state     := meta.state
+    io.status.lockWay := !dirResp.hit && meta.isInvalid && !dirResp.needsRepl || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull
 
     io.status.w_replResp   := state.w_replResp
     io.status.w_rprobeack  := state.w_rprobeack
