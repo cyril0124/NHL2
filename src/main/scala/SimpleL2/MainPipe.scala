@@ -288,8 +288,16 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrNested_s3.tag              := task_s3.tag
     io.mshrNested_s3.source           := task_s3.source
     io.mshrNested_s3.snoop.cleanDirty := io.mshrNested_s3.snoop.toN || io.mshrNested_s3.snoop.toB // TODO:
-    io.mshrNested_s3.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
-    io.mshrNested_s3.snoop.toB := (isSnpToB_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
+    io.mshrNested_s3.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq && Mux(
+        mshrRealloc_s3,
+        io.mshrAlloc_s3.ready,
+        true.B
+    )) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.I) && valid_s3
+    io.mshrNested_s3.snoop.toB := (isSnpToB_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq && Mux(
+        mshrRealloc_s3,
+        io.mshrAlloc_s3.ready,
+        true.B
+    )) && !snpReplay_dup_s3 || task_s3.isMshrTask && (task_s3.channel === L2Channel.TXDAT || task_s3.channel === L2Channel.TXRSP) && task_s3.updateDir && task_s3.newMetaEntry.state === MixedState.BC) && valid_s3
     io.mshrNested_s3.release.setDirty := task_s3.isChannelC && task_s3.opcode === ReleaseData && valid_s3
     io.mshrNested_s3.release.TtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === TtoN && valid_s3
     io.mshrNested_s3.release.BtoN     := (isRelease_s3 || isReleaseData_s3) && task_s3.param === BtoN && valid_s3
@@ -324,7 +332,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val txrspWillFull_s3 = io.txrspCnt >= (nrTXRSPEntry - 1).U
     val snpNeedData_b_s3 = !task_s3.isMshrTask && task_s3.isChannelB && hit_s3 && Mux(
         isFwdSnoop_s3,
-        task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty,
+        task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty /* snpHitWriteBack needs to read Directory but snpHitReq does not */,
         meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty
     )
     val snpNeedData_mshr_s3 = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT
