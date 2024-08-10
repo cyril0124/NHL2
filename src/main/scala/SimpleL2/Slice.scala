@@ -80,7 +80,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.mpStatus                 <> mainPipe.io.status
     reqArb.io.replayFreeCntSinkA       := replayStationSinkA.io.freeCnt
     reqArb.io.replayFreeCntSnoop       := replayStationSnoop.io.freeCnt
-    reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCnt
+    reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCntSinkC
     reqArb.io.mshrStatus               <> missHandler.io.mshrStatus
     reqArb.io.bufferStatus             := sourceD.io.bufferStatus
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
@@ -91,7 +91,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
     mainPipe.io.mshrFreeOH_s3  := missHandler.io.mshrFreeOH_s3
     mainPipe.io.replay_s4      <> replayStationSinkA.io.replay_s4
-    mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCnt
+    mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCntMp
     mainPipe.io.txrspCnt       := txrsp.io.txrspCnt
 
     replayStationSinkA.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelA
@@ -140,12 +140,13 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
-    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
-    sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
-    sourceD.io.task_s4         <> mainPipe.io.sourceD_s4
-    sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
-    sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid
-    sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data
+    sourceD.io.task_s2          <> mainPipe.io.sourceD_s2
+    sourceD.io.data_s2          <> tempDS.io.toSourceD.data_s2
+    sourceD.io.task_s4          <> mainPipe.io.sourceD_s4
+    sourceD.io.task_s6s7        <> mainPipe.io.sourceD_s6s7
+    sourceD.io.data_s6s7.valid  := ds.io.toSourceD.dsResp_s6s7.valid
+    sourceD.io.data_s6s7.bits   := ds.io.toSourceD.dsResp_s6s7.bits.data
+    sourceD.io.grantMapWillFull := sinkE.io.grantMapWillFull
 
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s4 <> mainPipe.io.txrsp_s4
