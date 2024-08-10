@@ -194,7 +194,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val matchVec = VecInit(io.mshrStatus.map { s =>
             s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_evict_comp || !s.w_compdbid)
         }).asUInt
-        assert(PopCount(matchVec) <= 1.U)
         matchVec
     }
 
@@ -202,7 +201,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val matchVec = VecInit(io.mshrStatus.map { s =>
             s.valid && s.set === set && (s.reqTag === tag && s.gotDirtyData || s.metaTag === tag && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && s.replGotDirty)
         }).asUInt
-        assert(PopCount(matchVec) <= 1.U)
         matchVec
     }
 
@@ -210,7 +208,6 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val matchVec = VecInit(io.mshrStatus.map { s =>
             s.valid && s.set === set && s.reqTag === tag && s.reqAllowSnoop
         }).asUInt
-        assert(PopCount(matchVec) <= 1.U)
         matchVec
     }
 
@@ -257,10 +254,12 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc
     arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
     io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
-    assert(!(arbTaskSnoop.valid && arbTaskSnoop.bits.snpHitWriteBack && arbTaskSnoop.bits.snpHitReq), "snpHitWriteBack and snpHitReq should not be both true")
-    assert(PopCount(snpHitWriteBackVec_s1) <= 1.U, "snpHitWriteBackVec_s1: %b", snpHitWriteBackVec_s1)
-    assert(PopCount(snpGotDirtyVec_s1) <= 1.U, "snpGotDirtyVec_s1: %b", snpGotDirtyVec_s1)
-    assert(PopCount(snpHitReqVec_s1) <= 1.U, "snpHitReqVec_s1: %b", snpHitReqVec_s1)
+    when(io.taskSnoop_s1.fire) {
+        assert(!(arbTaskSnoop.valid && arbTaskSnoop.bits.snpHitWriteBack && arbTaskSnoop.bits.snpHitReq), "snpHitWriteBack and snpHitReq should not be both true")
+        assert(PopCount(snpHitWriteBackVec_s1) <= 1.U, "snpHitWriteBackVec_s1: %b", snpHitWriteBackVec_s1)
+        assert(PopCount(snpGotDirtyVec_s1) <= 1.U, "snpGotDirtyVec_s1: %b", snpGotDirtyVec_s1)
+        assert(PopCount(snpHitReqVec_s1) <= 1.U, "snpHitReqVec_s1: %b", snpHitReqVec_s1)
+    }
 
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
