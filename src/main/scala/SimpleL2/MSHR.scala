@@ -1095,7 +1095,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.metaTag   := dirResp.meta.tag
     io.status.needsRepl := evictNotSent || wbNotSent // Used by MissHandler to guide the ProbeAck/ProbeAckData response to the match the correct MSHR
     io.status.wayOH     := dirResp.wayOH
-    io.status.lockWay := !dirResp.hit && meta.isInvalid || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
+    io.status.lockWay := !dirResp.hit && meta.isInvalid && !dirResp.needsRepl || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull. TODO:
     io.status.dirHit  := dirResp.hit                                                                                                                                                                         // Used by Directory to occupy a particular way.
     io.status.state   := meta.state
 
@@ -1119,11 +1119,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
         state.w_replResp &&
-        !(isAcquireHit && gotCompResp) // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
-        hasPendingRefill &&            // Does not grant to upstream cache
-        gotReplProbeAck &&             // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
-        !(needWb && gotWbResp) &&      // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
-        !io.status.waitProbeAck        // Does not wait for any ProbeAck
+        !(isAcquireHit && gotCompResp) && // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
+        hasPendingRefill &&               // Does not grant to upstream cache
+        gotReplProbeAck &&                // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
+        !(needWb && gotWbResp) &&         // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
+        !io.status.waitProbeAck           // Does not wait for any ProbeAck
     }
     io.status.gotDirtyData := gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
