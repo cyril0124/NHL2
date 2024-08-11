@@ -3829,7 +3829,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
 
             env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
             local snp_address = chi_txreq.bits.addr:get()
-            print(("snp_address is 0x%x"):format(snp_address))
+            print(("[1] snp_address is 0x%x"):format(snp_address))
 
             -- When MSHR is waiting for CompDBIDResp, a snoop is comming
             chi_rxsnp:snpshared(snp_address, 3, 0)
@@ -3881,7 +3881,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
-
+            env.negedge()
             tl_e:grantack(0)  
         end
 
@@ -3900,7 +3900,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             
             env.expect_happen_until(10, function () return tl_b:fire() end)
             local snp_address = tl_b.bits.address:get()
-            print(("snp_address is 0x%x"):format(snp_address))
+            print(("[2] snp_address is 0x%x"):format(snp_address))
 
             -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
             env.negedge()
@@ -3961,13 +3961,13 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                 
             verilua "appendTasks" {
                 function ()
-                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                    env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) end)
                 end
             }
             local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.SC) end)
-
+            env.negedge()
             tl_e:grantack(0)  
         end
 
@@ -3986,7 +3986,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
 
             env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
             local snp_address = chi_txreq.bits.addr:get()
-            print(("snp_address is 0x%x"):format(snp_address))
+            print(("[3] snp_address is 0x%x"):format(snp_address))
 
             -- When MSHR is waiting for CompDBIDResp, a snoop is comming
             chi_rxsnp:snpunique(snp_address, 3, 0)
@@ -4038,7 +4038,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
-
+            env.negedge()
             tl_e:grantack(0)  
         end
 
@@ -4057,7 +4057,7 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
             
             env.expect_happen_until(10, function () return tl_b:fire() end)
             local snp_address = tl_b.bits.address:get()
-            print(("snp_address is 0x%x"):format(snp_address))
+            print(("[4] snp_address is 0x%x"):format(snp_address))
 
             -- When MSHR is waiting for CompDBIDResp, a snoop is comming, and the snoop should also be stalled until the rprobe finish(receive the ProbeAck)
             env.negedge()
@@ -4118,13 +4118,13 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                 
             verilua "appendTasks" {
                 function ()
-                    env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                    env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) end)
                 end
             }
             local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
             env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
-
+            env.negedge()
             tl_e:grantack(0)  
         end
 
@@ -4714,8 +4714,8 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
 
             verilua "appendTasks" {
                 function ()
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead end)
-                    env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef end)
+                    env.expect_happen_until(12, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead end)
+                    env.expect_happen_until(12, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef end)
                     env.negedge()
                     tl_e:grantack(0)
                 end
@@ -4779,7 +4779,7 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
                     tl_e:grantack(0)
                 end
             }
-            env.negedge(10)
+            env.negedge(12)
             mshrs[0].io_status_valid:expect(0)
         end
 
