@@ -15,9 +15,9 @@ class SourceB()(implicit p: Parameters) extends L2Module {
         val task = Flipped(DecoupledIO(new TLBundleB(tlBundleParams)))
 
         /** These signals are used for blocking sourceb tasks. */
-        val grantMapStatus = Input(Vec(nrMSHR, new GrantMapStatus)) // from SinkE
-        val mpStatus       = Input(new MpStatus)                    // from MainPipe
-        val bufferStatus   = Input(new BufferStatusSourceD)         // from SourceD
+        val grantMapStatus = Input(Vec(nrGrantMap, new GrantMapStatus)) // from SinkE
+        val mpStatus       = Input(new MpStatus)                        // from MainPipe
+        val bufferStatus   = Input(new BufferStatusSourceD)             // from SourceD
     })
 
     val (tag, set, offset) = parseAddress(io.task.bits.address)
