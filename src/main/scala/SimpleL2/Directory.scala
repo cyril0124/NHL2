@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.util.ReplacementPolicy
 import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import Utils.{GenerateVerilog, RandomPriorityEncoder}
+import Utils.{GenerateVerilog, RandomPriorityEncoderOH}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 
@@ -294,6 +294,9 @@ class Directory()(implicit p: Parameters) extends L2Module {
         /* Only those set match and dirHit mshr can occupy a way */
         Mux(mshr.valid && mshr.set === reqSet_s2 && (mshr.dirHit || mshr.lockWay), mshr.wayOH, 0.U(ways.W))
     }).reduceTree(_ | _).asUInt // opt for timing, move from Stage 3 to Stage 2, cut the timing path between MSHR, Directory, MainPipe(Stage 3)
+    val randomChosenWayOH_s2 = RandomPriorityEncoderOH(~occWayMask_s2, reqValid_s2 || replReqValid_s2) /* Select a random way, as a way to prevent deadlock */
+    val victimWay_s2         = UIntToOH(random.LFSR(3))(ways - 1, 0)                                   /* TODO: Replacment way */
+
     metaRead_s2 := VecInit(metaSRAMs.map(_.io.r.resp.data)).asTypeOf(Vec(ways, new DirectoryMetaEntry()))
 
     // -----------------------------------------------------------------------------------------
@@ -319,17 +322,12 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val replRetry_s3   = occWayMask_s3.andR
     val noFreeWay_s3   = replRetry_s3
 
-    val chosenWayOH_s3     = Mux(hasInv_s3, invWayOH_s3, UIntToOH(random.LFSR(3))(ways - 1, 0) /* TODO: Replacment way */ )
-    val chosenWay_s3       = OHToUInt(chosenWayOH_s3)
-    val randomChosenWay_s3 = RandomPriorityEncoder(freeWayMask_s3, reqValid_s2 || replReqValid_s2) /* Select a random way, as a way to prevent deadlock */
-    val finalWay_s3 = Mux(
-        freeWayMask_s3(chosenWay_s3),
-        chosenWay_s3,
-        // PriorityEncoder(freeWayMask_s3)
-        randomChosenWay_s3
-    )
-    val finalWayOH_s3 = UIntToOH(finalWay_s3)
-    val respWayOH_s3  = Mux(hit_s3, hitOH_s3, finalWayOH_s3)
+    val victimWay_s3         = RegEnable(victimWay_s2, reqValid_s2 || replReqValid_s2)
+    val chosenWayOH_s3       = Mux(hasInv_s3, invWayOH_s3, victimWay_s3)
+    val randomChosenWayOH_s3 = RegEnable(randomChosenWayOH_s2, reqValid_s2 || replReqValid_s2)
+    val isFreeWay_s3         = (freeWayMask_s3 & chosenWayOH_s3).orR
+    val finalWayOH_s3        = Mux(isFreeWay_s3, chosenWayOH_s3, randomChosenWayOH_s3)
+    val respWayOH_s3         = Mux(hit_s3, hitOH_s3, finalWayOH_s3)
 
     assert(!(io.resetFinish && PopCount(hitOH_s3) > 1.U))
     assert(!(io.resetFinish && PopCount(finalWayOH_s3) > 1.U))
