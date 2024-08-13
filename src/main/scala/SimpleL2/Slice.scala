@@ -159,7 +159,11 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sinkE.io.allocGrantMap <> sourceD.io.allocGrantMap
 
-    sourceB.io.task           <> missHandler.io.tasks.sourceb
+    if (sourcebHasLatch) {
+        sourceB.io.task <> Queue(missHandler.io.tasks.sourceb, 1)
+    } else {
+        sourceB.io.task <> missHandler.io.tasks.sourceb
+    }
     sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
     sourceB.io.mpStatus       <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
@@ -186,7 +190,8 @@ object Slice extends App {
                 nrClients = CFG_CLIENT.toInt,
                 reqBufOutLatch = false,
                 rxsnpHasLatch = false,
-                sinkcHasLatch = false
+                sinkcHasLatch = false,
+                sourcebHasLatch = false
             )
         case DebugOptionsKey => DebugOptions()
     })

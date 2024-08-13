@@ -5435,9 +5435,9 @@ local test_cancel_sinkC_respMap = env.register_test_case "test_cancel_sinkC_resp
             tl_c:release_data(address, TLParam.TtoN, 0, "0xaabb", "0xccdd") -- core 0 release dirty data
             env.expect_happen_until(10, function() return mshrs[0].io_nested_release_TtoN:is(1) and mshrs[0].nestedMatch:is(1) end)
                 mshrs[0].state_s_aprobe:expect(0)
-                mshrs[0].cancelProbe:expect(1)
+                mshrs[0].willCancelProbe:expect(1)
             env.negedge()
-                mshrs[0].cancelProbe:expect(0)
+                mshrs[0].willCancelProbe:expect(0)
             env.negedge()
                 sinkC.io_respMapCancel_valid:expect(1)
                 sinkC.io_respMapCancel_bits:expect(0)

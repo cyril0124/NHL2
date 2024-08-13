@@ -342,10 +342,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Send [[SourceB]] task
      * -------------------------------------------------------
      */
-    val probeSource = PriorityEncoderOH(~finishedProbes & probeClients)
-    io.tasks.sourceb.valid := !state.s_aprobe /* TODO: acquire probe with MakeUnique */ ||
+    val cancelProbe_dup = WireInit(false.B)
+    val probeSource     = PriorityEncoderOH(~finishedProbes & probeClients)
+    io.tasks.sourceb.valid := !cancelProbe_dup && (!state.s_aprobe /* TODO: acquire probe with MakeUnique */ ||
         !state.s_sprobe ||
-        !state.s_rprobe // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
+        !state.s_rprobe) // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
     io.tasks.sourceb.bits.opcode  := Probe
     io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
     io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
@@ -953,8 +954,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         // )
     }
 
-    val respMapCancel = RegInit(false.B)
-    val cancelProbe   = WireInit(false.B)
+    val respMapCancel   = RegInit(false.B)
+    val willCancelProbe = WireInit(false.B)
+    val cancelProbe     = RegNext(willCancelProbe)
+    cancelProbe_dup := cancelProbe
     when(nestedMatch) {
         val nested = io.nested.release
 
@@ -982,12 +985,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             meta.clientsOH  := meta.clientsOH & ~releaseClientOH
             probeAckClients := probeAckClients & ~releaseClientOH
             nestedRelease   := true.B
-            cancelProbe     := noProbeRequired
+            willCancelProbe := noProbeRequired
         }
     }
 
     /** Any unfired probe transactions will be canceled. */
-    when(RegNext(cancelProbe) /* Optimize for better timing */ && !io.tasks.sourceb.fire) {
+    when(cancelProbe /* Optimize for better timing */ && !io.tasks.sourceb.fire) {
         when(!state.s_sprobe) {
             state.s_sprobe          := true.B
             state.w_sprobeack       := true.B
