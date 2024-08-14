@@ -75,7 +75,6 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     val retryTasksMatchOH_s4 = UIntToOH(io.retryTasks.mshrId_s4)
 
     mshrs.zip(UIntToOH(io.mshrAlloc_s3.bits.mshrId).asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io    <> DontCare
         mshr.io.id := i.U
 
         mshr.io.alloc_s3.valid := io.mshrAlloc_s3.fire && en
