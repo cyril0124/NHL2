@@ -879,13 +879,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
             /** If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions. */
             when(!state.s_wb) {
-                willCancelWb     := true.B
-                state.s_wb       := true.B
-                state.w_compdbid := true.B
-                state.s_cbwrdata := true.B
-                needWb           := false.B
+                willCancelWb          := true.B
+                state.s_wb            := true.B
+                state.w_compdbid      := true.B
+                state.s_cbwrdata      := true.B
+                state.w_cbwrdata_sent := true.B
+                needWb                := false.B
                 assert(mayCancelWb)
-                assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull")
+                // assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull") // Already checked
             }
 
             when(!state.s_evict) {
