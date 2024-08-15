@@ -122,6 +122,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
         }).asUInt.orR
 
+        // io.mpStatus provides stage info from stage 4 to stage 7.
         val mpAddrConflict = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
             stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
         }.toSeq).asUInt.orR
@@ -150,8 +151,11 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     def setConflict(channel: String, set: UInt, tag: UInt): Bool = {
         // setConflict for channel tasks
         // ! This function only covers stage2 and stage3. Other stages should be covered by other signals.
-        // TODO: optimize this
         if (channel == "A") {
+            /**
+             *  Set conflict is necessary because continuous access same set cacheline may lead to conflicts in directory meta info; 
+             *  that is, continuous same set requests can modified the same directory way which mat ultimately result in bugs.
+             */
             val sameSet_s2 = valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask) && task_s2.set === set
             val sameSet_s3 = RegNext(valid_s2 && (!task_s2.isMshrTask || task_s2.isMshrTask && task_s2.isReplTask), false.B) && RegEnable(task_s2.set, valid_s2) === set
             sameSet_s2 || sameSet_s3
@@ -175,9 +179,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val addrConflict_forSinkA = addrConflict(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
     val addrConflict_forSnoop = addrConflict(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
 
-    // TODO: set block in stage 2 and stage 3 in replace of noFreeWay
     val mayReadDS_a_s1_dup   = WireInit(false.B)
-    val noFreeWay_forSinkA   = noFreeWay(io.taskSinkA_s1.bits.set)
+    val noFreeWay_forSinkA   = noFreeWay(io.taskSinkA_s1.bits.set) // If there is no free way, requests with the same set should not enter MainPipe and finally go into MSHR to prevent frequent repl task from MSHR which may seriously affect MainPipe bandwidth.
     val setConflict_forSinkA = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
     val blockA_addrConflict  = (io.taskSinkA_s1.bits.set === task_s2.set && io.taskSinkA_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskSinkA_s1.bits.set === set_s3 && io.taskSinkA_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
     val blockA_mayReadDS_forSinkA =
