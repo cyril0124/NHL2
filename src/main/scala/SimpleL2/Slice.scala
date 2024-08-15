@@ -77,7 +77,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.taskSinkC_s1             <> sinkC.io.task
     reqArb.io.dirRead_s1               <> dir.io.dirRead_s1
     reqArb.io.resetFinish              <> dir.io.resetFinish
-    reqArb.io.mpStatus                 <> mainPipe.io.status
+    reqArb.io.mpStatus_s4567           <> mainPipe.io.status
     reqArb.io.replayFreeCntSinkA       := replayStationSinkA.io.freeCnt
     reqArb.io.replayFreeCntSnoop       := replayStationSnoop.io.freeCnt
     reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCntSinkC
@@ -165,7 +165,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
         sourceB.io.task <> missHandler.io.tasks.sourceb
     }
     sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
-    sourceB.io.mpStatus       <> mainPipe.io.status
+    sourceB.io.mpStatus_s4567 <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
 
     io.tl.d      <> sourceD.io.d

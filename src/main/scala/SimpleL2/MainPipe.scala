@@ -22,7 +22,7 @@ class MpStageInfo(implicit p: Parameters) extends L2Bundle {
     val tag      = UInt(tagBits.W)
 }
 
-class MpStatus()(implicit p: Parameters) extends L2Bundle {
+class MpStatus4567()(implicit p: Parameters) extends L2Bundle {
     val stage4 = new MpStageInfo
     val stage5 = new MpStageInfo
     val stage6 = new MpStageInfo
@@ -70,7 +70,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val txdat_s6s7   = DecoupledIO(new CHIBundleDAT(chiBundleParams))
 
         /** Other status signals */
-        val status         = Output(new MpStatus) // to SoruceB + ReqArb
+        val status         = Output(new MpStatus4567) // to SoruceB + ReqArb
         val retryTasks     = new MpMshrRetryTasks
         val nonDataRespCnt = Input(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
         val txrspCnt       = Input(UInt(log2Ceil(nrTXRSPEntry + 1).W))

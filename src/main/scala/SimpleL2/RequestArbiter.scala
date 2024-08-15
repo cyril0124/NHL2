@@ -52,7 +52,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val replayFreeCntSinkA = Input(UInt((log2Ceil(nrReplayEntrySinkA) + 1).W))
         val replayFreeCntSnoop = Input(UInt((log2Ceil(nrReplayEntrySnoop) + 1).W))
         val nonDataRespCnt     = Input(UInt((log2Ceil(nrNonDataSourceDEntry) + 1).W))
-        val mpStatus           = Input(new MpStatus)
+        val mpStatus_s4567     = Input(new MpStatus4567)
         val bufferStatus       = Input(new BufferStatusSourceD) // from SourceD
         val resetFinish        = Input(Bool())
     })
@@ -122,8 +122,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             s.valid && s.set === set && (s.reqTag === tag || s.needsRepl && s.metaTag === tag || s.lockWay && s.metaTag === tag)
         }).asUInt.orR
 
-        // io.mpStatus provides stage info from stage 4 to stage 7.
-        val mpAddrConflict = VecInit(io.mpStatus.elements.map { case (name: String, stage: MpStageInfo) =>
+        // io.mpStatus_s4567 provides stage info from stage 4 to stage 7.
+        val mpAddrConflict = VecInit(io.mpStatus_s4567.elements.map { case (name: String, stage: MpStageInfo) =>
             stage.valid && stage.isRefill && stage.set === set && stage.tag === tag
         }.toSeq).asUInt.orR
 
@@ -152,6 +152,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         // setConflict for channel tasks
         // ! This function only covers stage2 and stage3. Other stages should be covered by other signals.
         if (channel == "A") {
+
             /**
              *  Set conflict is necessary because continuous access same set cacheline may lead to conflicts in directory meta info; 
              *  that is, continuous same set requests can modified the same directory way which mat ultimately result in bugs.
