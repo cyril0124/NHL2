@@ -362,8 +362,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     noSpaceForReplay_a_s1 := mayReplayCnt_a >= io.replayFreeCntSinkA
 
     val mayReplayCnt_snp = WireInit(0.U(io.replayFreeCntSnoop.getWidth.W))
-    val mayReplay_snp_s2 = valid_s2 && !task_s2.isMshrTask && !task_s2.isChannelC
-    val mayReplay_snp_s3 = valid_s3 && !isMshrTask_s3 && !(channel_s3 === L2Channel.ChannelC)
+    val mayReplay_snp_s2 = valid_s2 && !task_s2.isMshrTask && task_s2.isChannelB
+    val mayReplay_snp_s3 = valid_s3 && !isMshrTask_s3 && channel_s3 === L2Channel.ChannelB
     mayReplayCnt_snp        := PopCount(Cat(1.U, mayReplay_snp_s2, mayReplay_snp_s3)) // TODO:
     noSpaceForReplay_snp_s1 := mayReplayCnt_snp >= io.replayFreeCntSnoop
 
