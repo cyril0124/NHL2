@@ -96,15 +96,32 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     }
     val rdData_ts2 = WireInit(0.U.asTypeOf(Vec(group, new TempDataEntry(groupBytes))))
 
+    val full_ts1 = RegInit(true.B)
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 0
+    // -----------------------------------------------------------------------------------------
+    val wIdx_sinkc_ts0  = io.fromSinkC.write.bits.idx
+    val wData_sinkc_ts0 = io.fromSinkC.write.bits.data
+    val fire_ts0        = io.fromSinkC.write.fire
+
     // -----------------------------------------------------------------------------------------
     // Stage 1
     // -----------------------------------------------------------------------------------------
-    val wen_ds_ts1    = io.fromDS.write_s5.valid
-    val wen_rxdat_ts1 = io.fromRXDAT.write.fire
-    val wen_sinkc_ts1 = io.fromSinkC.write.fire
-    val wen_ts1       = wen_ds_ts1 || wen_rxdat_ts1 || wen_sinkc_ts1
-    val wIdx_ts1      = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.idx, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.idx, wen_sinkc_ts1 -> io.fromSinkC.write.bits.idx))
-    val wData_ts1     = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.data, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.data, wen_sinkc_ts1 -> io.fromSinkC.write.bits.data))
+    val wen_ds_ts1      = io.fromDS.write_s5.valid
+    val wen_rxdat_ts1   = io.fromRXDAT.write.valid
+    val wen_sinkc_ts1   = full_ts1
+    val wIdx_sinkc_ts1  = RegEnable(wIdx_sinkc_ts0, fire_ts0)
+    val wData_sinkc_ts1 = RegEnable(wData_sinkc_ts0, fire_ts0)
+    val wen_ts1         = wen_ds_ts1 || wen_rxdat_ts1 || wen_sinkc_ts1
+    val wIdx_ts1        = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.idx, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.idx, wen_sinkc_ts1 -> wIdx_sinkc_ts1))
+    val wData_ts1       = PriorityMux(Seq(wen_ds_ts1 -> io.fromDS.write_s5.bits.data, wen_rxdat_ts1 -> io.fromRXDAT.write.bits.data, wen_sinkc_ts1 -> wData_sinkc_ts1))
+
+    when(fire_ts0) {
+        full_ts1 := true.B
+    }.elsewhen(wen_ts1 && !wen_ds_ts1 && !wen_rxdat_ts1) {
+        full_ts1 := false.B
+    }
 
     val ren_ts1       = io.fromReqArb.read_s1.fire
     val rDest_ts1     = io.fromReqArb.read_s1.bits.dest
@@ -114,11 +131,11 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
 
     /**
      * Priority:
-     *          fromDS.write_s5 > fromRXDAT.write > fromReqArb.read_s1 > fromSinkC.write
+     *          fromDS.write_s5 > fromRXDAT.write > fromSinkC.write > fromReqArb.read_s1
      */
-    io.fromReqArb.read_s1.ready := !wen_ds_ts1 && !io.fromRXDAT.write.valid
+    io.fromReqArb.read_s1.ready := !wen_ds_ts1 && !wen_sinkc_ts1 && !wen_rxdat_ts1
     io.fromRXDAT.write.ready    := !wen_ds_ts1
-    io.fromSinkC.write.ready    := !io.fromReqArb.read_s1.valid && !wen_ds_ts1 && !io.fromRXDAT.write.valid
+    io.fromSinkC.write.ready    := !full_ts1
 
     tempDataSRAMs.zipWithIndex.foreach { case (sram, i) =>
         sram.io.w.req.valid             := wen_ts1

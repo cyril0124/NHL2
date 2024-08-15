@@ -345,3 +345,4 @@ hs_err_pid*
 .verilua/
 vrtl_gen_src/
 verdiLog
+build_archive

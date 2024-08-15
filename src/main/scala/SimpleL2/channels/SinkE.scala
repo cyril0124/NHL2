@@ -26,10 +26,11 @@ class GrantMapStatus(implicit p: Parameters) extends L2Bundle {
 
 class SinkE()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
-        val e             = Flipped(DecoupledIO(new TLBundleE(tlBundleParams)))
-        val resp          = ValidIO(new TLRespBundle(tlBundleParams))
-        val allocGrantMap = Flipped(DecoupledIO(new AllocGrantMap))              // from SourceD
-        val sinkIdFree    = Flipped(new IDPoolFree(log2Ceil(nrExtraSinkId + 1))) // to sinkIDPool TODO: parameterize idBits
+        val e                = Flipped(DecoupledIO(new TLBundleE(tlBundleParams)))
+        val resp             = ValidIO(new TLRespBundle(tlBundleParams))
+        val allocGrantMap    = Flipped(DecoupledIO(new AllocGrantMap))              // from SourceD
+        val grantMapWillFull = Output(Bool())                                       // to SourceD
+        val sinkIdFree       = Flipped(new IDPoolFree(log2Ceil(nrExtraSinkId + 1))) // to sinkIDPool TODO: parameterize idBits
 
         /**
          * If there exist an entry that has the same set and tag as sourceB task then we should block this request until the Grant/GrantData finally gets GrantAck from upstream. 
@@ -39,6 +40,8 @@ class SinkE()(implicit p: Parameters) extends L2Module {
         val grantMapStatus = Output(Vec(nrGrantMap, new GrantMapStatus)) // to SourceB
     })
 
+    require(nrGrantMap >= 2)
+
     val grantMap = RegInit(VecInit(Seq.fill(nrGrantMap)(0.U.asTypeOf(new Bundle {
         val valid    = Bool()
         val sink     = UInt(tlBundleParams.sinkBits.W)
@@ -46,15 +49,18 @@ class SinkE()(implicit p: Parameters) extends L2Module {
         val set      = UInt(setBits.W)
         val tag      = UInt(tagBits.W)
     }))))
-    val insertOH        = PriorityEncoderOH(VecInit(grantMap.map(!_.valid)).asUInt)
-    val grantMapMatchOH = VecInit(grantMap.map(e => e.sink === io.e.bits.sink && e.valid)).asUInt
-    val hasMatch        = grantMapMatchOH.orR
-    val matchEntry      = Mux1H(grantMapMatchOH, grantMap)
-    val grantMapFull    = VecInit(grantMap.map(_.valid)).asUInt.andR
+    val insertOH         = PriorityEncoderOH(VecInit(grantMap.map(!_.valid)).asUInt)
+    val grantMapMatchOH  = VecInit(grantMap.map(e => e.sink === io.e.bits.sink && e.valid)).asUInt
+    val hasMatch         = grantMapMatchOH.orR
+    val matchEntry       = Mux1H(grantMapMatchOH, grantMap)
+    val grantMapValidVec = VecInit(grantMap.map(_.valid)).asUInt
+    val grantMapWillFull = PopCount(grantMapValidVec) >= (nrGrantMap - 1).U
+    val grantMapFull     = grantMapValidVec.andR
     assert(!(io.e.fire && PopCount(grantMapMatchOH) > 1.U), "grantMap has multiple matchs for sink:%d grantMapMatchOH:%b", io.e.bits.sink, grantMapMatchOH)
     assert(!(io.allocGrantMap.fire && grantMapFull), "no valid grantMap entry!")
 
     io.allocGrantMap.ready := !grantMapFull
+    io.grantMapWillFull    := grantMapWillFull
 
     when(io.allocGrantMap.fire) {
         grantMap.zip(insertOH.asBools).foreach { case (entry, en) =>

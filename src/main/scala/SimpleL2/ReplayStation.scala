@@ -4,12 +4,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import xs.utils.LatchFastArbiter
 import Utils.GenerateVerilog
 import SimpleL2.chi.Resp
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import freechips.rocketchip.util.SeqToAugmentedSeq
-import Utils.LFSRArbiter
 
 object ReplayResion {
     val width            = 3
@@ -39,26 +39,26 @@ class ReplaySubEntry(implicit p: Parameters) extends L2Bundle {
     def txnID = source     // alias to source
     def chiOpcode = opcode // alias to opcode
 }
-class ReplayEntry(implicit p: Parameters) extends L2Bundle {
+class ReplayEntry(nrSubEntry: Int)(implicit p: Parameters) extends L2Bundle {
     val set        = UInt(setBits.W)
     val tag        = UInt(tagBits.W)
-    val subEntries = Vec(nrClients + 1, Valid(new ReplaySubEntry))
-    val enqIdx     = new Counter(nrClients + 1)
-    val deqIdx     = new Counter(nrClients + 1)
+    val subEntries = Vec(nrSubEntry, Valid(new ReplaySubEntry))
+    val enqIdx     = new Counter(nrSubEntry)
+    val deqIdx     = new Counter(nrSubEntry)
 
     def subValidVec = VecInit(subEntries.map(_.valid)).asUInt
 }
 
-class ReplayStation()(implicit p: Parameters) extends L2Module {
+class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val replay_s4 = Flipped(ValidIO(new ReplayRequest))
         val req_s1    = DecoupledIO(new TaskBundle)
         val freeCnt   = Output(UInt((log2Ceil(nrReplayEntry) + 1).W))
     })
 
-    io <> DontCare
+    println(s"[${this.getClass().toString()}] nrReplayEntry:${nrReplayEntry} nrSubEntry:${nrSubEntry}")
 
-    val entries = Seq.fill(nrReplayEntry) { RegInit(0.U.asTypeOf(Valid(new ReplayEntry))) }
+    val entries = Seq.fill(nrReplayEntry) { RegInit(0.U.asTypeOf(Valid(new ReplayEntry(nrSubEntry)))) }
     val freeVec = VecInit(entries.map(!_.valid)).asUInt
     val freeOH  = PriorityEncoderOH(freeVec)
     val freeIdx = OHToUInt(freeOH)
@@ -122,8 +122,8 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    val lfsrArb = Module(new LFSRArbiter(new TaskBundle, nrReplayEntry))
-    lfsrArb.io.in.zipWithIndex.foreach { case (in, i) =>
+    val arb = Module(new LatchFastArbiter(new TaskBundle, nrReplayEntry)) // opt for timing
+    arb.io.in.zipWithIndex.foreach { case (in, i) =>
         val entry    = entries(i)
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
         val subEntry = Mux1H(deqOH, entry.bits.subEntries)
@@ -152,9 +152,9 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    when(lfsrArb.io.out.fire) {
+    when(arb.io.out.fire) {
         entries.zipWithIndex.foreach { case (entry, i) =>
-            when(i.U === lfsrArb.io.chosen) {
+            when(i.U === arb.io.chosen) {
                 val deqSubEntry = entry.bits.subEntries(entry.bits.deqIdx.value)
                 deqSubEntry.valid := false.B
 
@@ -164,7 +164,7 @@ class ReplayStation()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    io.req_s1 <> lfsrArb.io.out
+    io.req_s1 <> arb.io.out
 
     io.freeCnt := PopCount(freeVec)
 

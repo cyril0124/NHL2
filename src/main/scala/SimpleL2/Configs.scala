@@ -27,15 +27,19 @@ case class L2Param(
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
-    nrClients: Int = 2, // number of L1 DCache
-    enableClockGate: Boolean = true,
+    nrClients: Int = 2, // Number of L1 DCache
     nrMSHR: Int = 16,
-    nrExtraSinkId: Int = 16, // extra sink ids for hit Acquire requests which need to wait GrantAck
-    nrReplayEntry: Int = 8,
+    nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
+    nrReplayEntrySinkA: Int = 4,
+    nrReplayEntrySnoop: Int = 4,
     nrNonDataSourceDEntry: Int = 4,
     nrTXRSPEntry: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
+    reqBufOutLatch: Boolean = true,
+    rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
+    sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
+    sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -72,16 +76,20 @@ trait HasL2Param {
     val nrExtraSinkId = l2param.nrExtraSinkId
     val nrGrantMap    = nrMSHR
     val mshrBits      = log2Ceil(l2param.nrMSHR)
-    val nrReplayEntry = l2param.nrReplayEntry
     val nrBeat        = l2param.blockBytes / l2param.beatBytes
     val idsAll        = 256
 
-    val enableClockGate       = l2param.enableClockGate
+    val reqBufOutLatch        = l2param.reqBufOutLatch
+    val rxsnpHasLatch         = l2param.rxsnpHasLatch
+    val sinkcHasLatch         = l2param.sinkcHasLatch
+    val sourcebHasLatch       = l2param.sourcebHasLatch
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry
     val nrNonDataSourceDEntry = l2param.nrNonDataSourceDEntry
     val nrTXRSPEntry          = l2param.nrTXRSPEntry
+    val nrReplayEntrySinkA    = l2param.nrReplayEntrySinkA
+    val nrReplayEntrySnoop    = l2param.nrReplayEntrySnoop
 
     val rxrspCreditMAX = l2param.rxrspCreditMAX
     val rxsnpCreditMAX = l2param.rxsnpCreditMAX
@@ -89,7 +97,7 @@ trait HasL2Param {
 
     val replacementPolicy = l2param.replacementPolicy
 
-    val deadlockThreshold = 10000 * 1
+    val deadlockThreshold = 10000 * 2
 
     val aliasBitsOpt = Some(2)
 
@@ -177,7 +185,7 @@ trait HasL2Param {
     def clientOHToSource(clientBitOH: UInt): UInt = {
         if (l2param.useDiplomacy) {
             if (nrClients <= 1) {
-                0.U
+                edgeIn.client.clients.filter(_.supports.probe).map(c => c.sourceId.start).head.U
             } else {
                 Mux1H(
                     clientBitOH,

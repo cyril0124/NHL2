@@ -40,14 +40,16 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val rxsnp = Module(new RXSNP)
 
     /** Other modules */
-    val reqBuf        = Module(new RequestBuffer)
-    val reqArb        = Module(new RequestArbiter)
-    val dir           = Module(new Directory)
-    val ds            = Module(new DataStorage)
-    val mainPipe      = Module(new MainPipe)
-    val tempDS        = Module(new TempDataStorage)
-    val missHandler   = Module(new MissHandler)
-    val replayStation = Module(new ReplayStation)
+    val reqBuf      = Module(new RequestBuffer)
+    val reqArb      = Module(new RequestArbiter)
+    val dir         = Module(new Directory)
+    val ds          = Module(new DataStorage)
+    val mainPipe    = Module(new MainPipe)
+    val tempDS      = Module(new TempDataStorage)
+    val missHandler = Module(new MissHandler)
+
+    val replayStationSinkA = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySinkA, nrSubEntry = nrClients + 1))                  // for SinkA
+    val replayStationSnoop = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySnoop, nrSubEntry = 2 /* TODO: parameterize it */ )) // for Snoop
 
     // TODO: sinkIdPool backpressure when full
     val sinkIdPool = Module(new IDPool((nrMSHR until (nrMSHR + nrExtraSinkId)).toSet))
@@ -63,17 +65,22 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     reqBuf.io.taskIn <> sinkA.io.task
 
-    reqArb.io                          <> DontCare // TODO: remove
+    val reqArbTaskSinkA = WireInit(0.U.asTypeOf(reqArb.io.taskSinkA_s1))
+    val reqArbTaskSnoop = WireInit(0.U.asTypeOf(reqArb.io.taskSnoop_s1))
+    arbTask(Seq(Queue(replayStationSinkA.io.req_s1, 1), reqBuf.io.taskOut), reqArbTaskSinkA)
+    arbTask(Seq(Queue(replayStationSnoop.io.req_s1, 1), rxsnp.io.task), reqArbTaskSnoop)
+
+    reqArb.io.taskCMO_s1               := DontCare // TODO: CMO Task
     reqArb.io.taskMSHR_s0              <> missHandler.io.tasks.mpTask
-    reqArb.io.taskReplay_s1            <> replayStation.io.req_s1
-    reqArb.io.taskSinkA_s1             <> reqBuf.io.taskOut
+    reqArb.io.taskSinkA_s1             <> reqArbTaskSinkA
+    reqArb.io.taskSnoop_s1             <> reqArbTaskSnoop
     reqArb.io.taskSinkC_s1             <> sinkC.io.task
-    reqArb.io.taskSnoop_s1             <> rxsnp.io.task
     reqArb.io.dirRead_s1               <> dir.io.dirRead_s1
     reqArb.io.resetFinish              <> dir.io.resetFinish
     reqArb.io.mpStatus                 <> mainPipe.io.status
-    reqArb.io.replayFreeCnt            := replayStation.io.freeCnt
-    reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCnt
+    reqArb.io.replayFreeCntSinkA       := replayStationSinkA.io.freeCnt
+    reqArb.io.replayFreeCntSnoop       := replayStationSnoop.io.freeCnt
+    reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCntSinkC
     reqArb.io.mshrStatus               <> missHandler.io.mshrStatus
     reqArb.io.bufferStatus             := sourceD.io.bufferStatus
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
@@ -83,9 +90,14 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
     mainPipe.io.mshrFreeOH_s3  := missHandler.io.mshrFreeOH_s3
-    mainPipe.io.replay_s4      <> replayStation.io.replay_s4
-    mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCnt
+    mainPipe.io.replay_s4      <> replayStationSinkA.io.replay_s4
+    mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCntMp
     mainPipe.io.txrspCnt       := txrsp.io.txrspCnt
+
+    replayStationSinkA.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelA
+    replayStationSinkA.io.replay_s4.bits  := mainPipe.io.replay_s4.bits
+    replayStationSnoop.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelB
+    replayStationSnoop.io.replay_s4.bits  := mainPipe.io.replay_s4.bits
 
     val cancelRefillWrite_s2 = mainPipe.io.retryTasks.stage2.fire && mainPipe.io.retryTasks.stage2.bits.isRetry_s2
     ds.io.dsWrite_s2                  <> sinkC.io.dsWrite_s2
@@ -113,26 +125,28 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.fromReqArb.mayReadDS_s2    := reqArb.io.toSinkC.mayReadDS_s2
     sinkC.io.fromReqArb.willRefillDS_s2 := reqArb.io.toSinkC.willRefillDS_s2
 
-    missHandler.io.mshrAlloc_s3 <> mainPipe.io.mshrAlloc_s3
-    missHandler.io.resps.rxdat  <> rxdat.io.resp
-    missHandler.io.resps.rxrsp  <> rxrsp.io.resp
-    missHandler.io.resps.sinke  <> sinkE.io.resp
-    missHandler.io.resps.sinkc  <> sinkC.io.resp
-    missHandler.io.mshrStatus   <> dir.io.mshrStatus
-    missHandler.io.replResp_s3  <> dir.io.replResp_s3
-    missHandler.io.retryTasks   <> mainPipe.io.retryTasks
-    missHandler.io.mshrNested   <> mainPipe.io.mshrNested
+    missHandler.io.mshrAlloc_s3       <> mainPipe.io.mshrAlloc_s3
+    missHandler.io.resps.rxdat        <> rxdat.io.resp
+    missHandler.io.resps.rxrsp        <> rxrsp.io.resp
+    missHandler.io.resps.sinke        <> sinkE.io.resp
+    missHandler.io.resps.sinkc        <> sinkC.io.resp
+    missHandler.io.mshrStatus         <> dir.io.mshrStatus
+    missHandler.io.replResp_s3        <> dir.io.replResp_s3
+    missHandler.io.retryTasks         <> mainPipe.io.retryTasks
+    missHandler.io.mshrEarlyNested_s2 <> mainPipe.io.mshrEarlyNested_s2
+    missHandler.io.mshrNested_s3      <> mainPipe.io.mshrNested_s3
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
-    sourceD.io.task_s2         <> mainPipe.io.sourceD_s2
-    sourceD.io.data_s2         <> tempDS.io.toSourceD.data_s2
-    sourceD.io.task_s4         <> mainPipe.io.sourceD_s4
-    sourceD.io.task_s6s7       <> mainPipe.io.sourceD_s6s7
-    sourceD.io.data_s6s7.valid := ds.io.toSourceD.dsResp_s6s7.valid
-    sourceD.io.data_s6s7.bits  := ds.io.toSourceD.dsResp_s6s7.bits.data
+    sourceD.io.task_s2          <> mainPipe.io.sourceD_s2
+    sourceD.io.data_s2          <> tempDS.io.toSourceD.data_s2
+    sourceD.io.task_s4          <> mainPipe.io.sourceD_s4
+    sourceD.io.task_s6s7        <> mainPipe.io.sourceD_s6s7
+    sourceD.io.data_s6s7.valid  := ds.io.toSourceD.dsResp_s6s7.valid
+    sourceD.io.data_s6s7.bits   := ds.io.toSourceD.dsResp_s6s7.bits.data
+    sourceD.io.grantMapWillFull := sinkE.io.grantMapWillFull
 
     txrsp.io.mshrTask  <> missHandler.io.tasks.txrsp
     txrsp.io.mpTask_s4 <> mainPipe.io.txrsp_s4
@@ -145,7 +159,11 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sinkE.io.allocGrantMap <> sourceD.io.allocGrantMap
 
-    sourceB.io.task           <> missHandler.io.tasks.sourceb
+    if (sourcebHasLatch) {
+        sourceB.io.task <> Queue(missHandler.io.tasks.sourceb, 1)
+    } else {
+        sourceB.io.task <> missHandler.io.tasks.sourceb
+    }
     sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
     sourceB.io.mpStatus       <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
@@ -169,7 +187,11 @@ object Slice extends App {
     val config = new Config((_, _, _) => {
         case L2ParamKey =>
             L2Param(
-                nrClients = CFG_CLIENT.toInt
+                nrClients = CFG_CLIENT.toInt,
+                reqBufOutLatch = false,
+                rxsnpHasLatch = false,
+                sinkcHasLatch = false,
+                sourcebHasLatch = false
             )
         case DebugOptionsKey => DebugOptions()
     })

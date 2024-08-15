@@ -44,10 +44,11 @@ def test_all_summary(test_targets):
     for index, (package, target, cmd) in enumerate(test_targets):
         with open(f".verilua/{target}/run.log", 'r') as file:
             content = file.read()
+            package_target_str = f"{package}.{target}"
             if ">>>TEST_SUCCESS!<<<" in content:
-                print(f"[{index:2}] {f"{package}.{target}":40} test {GREEN}SUCCESS!{RESET} |")
+                print(f"[{index:2}] {package_target_str:40} test {GREEN}SUCCESS!{RESET} |")
             else:
-                print(f"[{index:2}] {f"{package}.{target}":40} test  {RED}FAILED!{RESET} |")
+                print(f"[{index:2}] {package_target_str:40} test  {RED}FAILED!{RESET} |")
             
             if "total_test_cases" in content:
                 match = re.search(r'<(\d+)>', content)
