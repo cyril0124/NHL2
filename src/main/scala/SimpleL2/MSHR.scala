@@ -301,9 +301,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             !state.s_wb    -> WriteBackFull
         )
     )
-    io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_evict || !state.s_wb, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
-    io.tasks.txreq.bits.allowRetry := true.B                                                                        // TODO: Retry
-    io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique                                          // TODO: only for Read not for EvictS
+    io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_read || !state.s_makeunique, req.tag, meta.tag), req.set, 0.U(6.W))
+    io.tasks.txreq.bits.allowRetry := false.B                                                                        // TODO: Retry
+    io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique                                          // TODO: only for Read not for Evict
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
     io.tasks.txreq.bits.order      := Order.None                                                                    // No ordering required
     io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
