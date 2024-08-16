@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import xs.utils.LatchFastArbiter
+import xs.utils.FastArbiter
 import Utils.GenerateVerilog
 import SimpleL2.chi.Resp
 import SimpleL2.Configs._
@@ -122,7 +122,7 @@ class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Par
         }
     }
 
-    val arb = Module(new LatchFastArbiter(new TaskBundle, nrReplayEntry)) // opt for timing
+    val arb = Module(new FastArbiter(new TaskBundle, nrReplayEntry))
     arb.io.in.zipWithIndex.foreach { case (in, i) =>
         val entry    = entries(i)
         val deqOH    = UIntToOH(entry.bits.deqIdx.value)
