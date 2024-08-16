@@ -589,7 +589,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.replay_s4.bits.task   := task_s4
     io.replay_s4.bits.reason := DontCare
 
-    if (sinkaStallOnReqArb) {
+    if (!sinkaStallOnReqArb) {
         io.reqBufReplay_s4.valid             := valid_reqbuf_s4
         io.reqBufReplay_s4.bits.shouldReplay := valid_replay_s4
         io.reqBufReplay_s4.bits.source       := task_s4.source

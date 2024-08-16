@@ -40,7 +40,7 @@ case class L2Param(
     rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
     sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
     sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
-    sinkaStallOnReqArb: Boolean = true,
+    sinkaStallOnReqArb: Boolean = false,
     mshrStallOnReqArb: Boolean = false,
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,

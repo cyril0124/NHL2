@@ -64,7 +64,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val reqArbTaskSnoop    = WireInit(0.U.asTypeOf(reqArb.io.taskSnoop_s1))
     arbTask(Seq(Queue(replayStationSnoop.io.req_s1, 1), rxsnp.io.task), reqArbTaskSnoop)
 
-    if (sinkaStallOnReqArb) {
+    if (!sinkaStallOnReqArb) {
         val reqBuf = Module(new RequestBufferV2)
 
         reqBuf.io.taskIn         <> sinkA.io.task
@@ -212,7 +212,7 @@ object Slice extends App {
                 rxsnpHasLatch = false,
                 sinkcHasLatch = false,
                 sourcebHasLatch = false,
-                sinkaStallOnReqArb = false,
+                sinkaStallOnReqArb = true,
                 mshrStallOnReqArb = true
             )
         case DebugOptionsKey => DebugOptions()
