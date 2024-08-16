@@ -194,6 +194,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val datDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
     val gotCompData     = RegInit(false.B)
     val gotDirty        = RegInit(false.B)
+    val getSnpNestedReq = if (mshrStallOnReqArb) None else Some(RegInit(false.B))
     val releaseGotDirty = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
@@ -253,6 +254,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         probeAckClients := 0.U
         finishedProbes  := 0.U
         probeAckParams.foreach(_ := NtoN)
+        getSnpNestedReq.foreach(_ := false.B)
     }
 
     when(io.alloc_s3.fire && io.alloc_s3.bits.realloc) {
@@ -389,6 +391,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         task.bits.set        := req.set
         task.bits.tag        := req.tag
         task.bits.wayOH      := dirResp.wayOH // TODO:
+
+        task.bits.getSnpNestedReq.foreach(_ := getSnpNestedReq.getOrElse(false.B))
     }
 
     /** Send the final refill response to the upper level */
@@ -1039,6 +1043,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val nested = io.nested.snoop
 
         when(nested.toN) {
+            getSnpNestedReq.foreach(_ := true.B)
+
             when(needRead && state.s_compack) {
                 state.s_read          := false.B
                 state.w_compdat       := false.B
@@ -1056,6 +1062,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         }
 
         when(nested.toB) {
+            getSnpNestedReq.foreach(_ := true.B)
+
             when(needRead && state.s_compack) {
                 when(reqNeedT) {
                     state.s_read          := false.B

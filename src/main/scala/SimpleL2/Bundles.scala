@@ -39,6 +39,8 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val snpHitReq       = Bool()
     val snpHitMshrId    = UInt(mshrBits.W)
 
+    val getSnpNestedReq = if (mshrStallOnReqArb) None else Some(Bool())
+
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true
     def chiOpcode = opcode       // alias to opcode, if isCHIOpcode is true

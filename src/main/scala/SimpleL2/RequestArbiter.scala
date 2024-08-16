@@ -40,7 +40,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val dsWrWayOH_s1  = Output(UInt(ways.W))
 
         /** Send task to [[MainPipe]] */
-        val mpReq_s2 = ValidIO(new TaskBundle)
+        val reqDrop_s2 = if (mshrStallOnReqArb) None else Some(Output(Bool()))
+        val mpReq_s2   = ValidIO(new TaskBundle)
 
         /** Other signals */
         val fromSinkC = new Bundle {
@@ -103,6 +104,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 0
     // -----------------------------------------------------------------------------------------
+    if (mshrStallOnReqArb) {
     val mshrSet_s0        = io.taskMSHR_s0.bits.set
     val mshrTag_s0        = io.taskMSHR_s0.bits.tag
     val hasSnpHitReq_s1   = arbTaskSnoop_dup_s1.bits.snpHitReq && arbTaskSnoop_dup_s1.bits.set === mshrSet_s0 && arbTaskSnoop_dup_s1.bits.tag === mshrTag_s0 && arbTaskSnoop_dup_s1.valid
@@ -110,6 +112,9 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val hasSnpHitReq_s3   = valid_s3 && snpHitReq_s3 && set_s3 === mshrSet_s0 && tag_s3 === mshrTag_s0
     val blockSnpHitReq_s0 = hasSnpHitReq_s1 || hasSnpHitReq_s2 || hasSnpHitReq_s3 || RegNext(hasSnpHitReq_s3, false.B) // block mpTask_refill to wait snpHitReq which may need mshr reallocation or send snpresp directly
     io.taskMSHR_s0.ready := !mshrTaskFull_s1 && io.resetFinish && !(blockSnpHitReq_s0 && !io.taskMSHR_s0.bits.isCHIOpcode && !io.taskMSHR_s0.bits.isReplTask)
+    } else {
+        io.taskMSHR_s0.ready := !mshrTaskFull_s1 && io.resetFinish
+    }
 
     // -----------------------------------------------------------------------------------------
     // Stage 1
@@ -263,17 +268,20 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.taskSinkA_s1 <> arbTaskSinkA
     arb.io.out      <> chnlTask_s1
 
-    val snpHitWriteBackVec_s1 = snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag)
-    val snpGotDirtyVec_s1     = snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag)
-    val snpHitReqVec_s1       = snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag)
+    val hasPendingSnpHitReq_s2_dup = WireInit(false.B)
+    val stallOnPendingSnpHitReq_s2 = WireInit(false.B)
+    val snpHitWriteBackVec_s1      = snpHitWriteBack(taskSnoop_s1.set, taskSnoop_s1.tag)
+    val snpGotDirtyVec_s1          = snpGotDirty(taskSnoop_s1.set, taskSnoop_s1.tag)
+    val snpHitReqVec_s1            = snpHitReq(taskSnoop_s1.set, taskSnoop_s1.tag)
+    stallOnPendingSnpHitReq_s2        := hasPendingSnpHitReq_s2_dup && snpHitReqVec_s1.orR
     arbTaskSnoop_dup_s1               := arbTaskSnoop
     arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBackVec_s1.orR
     arbTaskSnoop.bits.snpGotDirty     := snpGotDirtyVec_s1.orR
     arbTaskSnoop.bits.snpHitReq       := snpHitReqVec_s1.orR
     arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReqVec_s1)
     arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc
-    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
-    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B)
+    arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B) && !stallOnPendingSnpHitReq_s2
+    io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B) && !stallOnPendingSnpHitReq_s2
     when(io.taskSnoop_s1.fire) {
         assert(!(arbTaskSnoop.valid && arbTaskSnoop.bits.snpHitWriteBack && arbTaskSnoop.bits.snpHitReq), "snpHitWriteBack and snpHitReq should not be both true")
         assert(PopCount(snpHitWriteBackVec_s1) <= 1.U, "snpHitWriteBackVec_s1: %b", snpHitWriteBackVec_s1)
@@ -338,6 +346,42 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_b_s2    = task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */
     val mayReadDS_mshr_s2 = task_s2.isMshrTask && !task_s2.readTempDs && !task_s2.isReplTask && (task_s2.channel === CHIChannel.TXDAT || (!task_s2.isCHIOpcode && (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData)))
 
+    if (!mshrStallOnReqArb) {
+
+        /**
+         * If there is an snpHitReq at stage 3, the incoming mshrTasks that match the set and tag of snpHitReq and without asserting the getSnpNestedReq flag on that task will be dropped at stage 2.
+         * The getSnpNestedReq flag is asserted when the incoming mshrTask has already nested the snoop which will be handled in stage 3.
+         * MSHR tasks with the purpose of refilling the upstream cache should not be sent if there is an snpHitReq nested on that mshr.
+         */
+        val validSnpHitReq_s2      = valid_s2 && snpHitReq_s2
+        val hasPendingSnpHitReq_s2 = RegInit(false.B)  // This flag signal will be set if stage 3 has snpHitReq and will remain unchanged until the mshr Task that matches the set and tag to unlock it.
+        val releaseCnt_s2          = RegInit(0.U(4.W)) // TODO: Parameterize this
+        val matchSet_s2            = RegEnable(task_s2.set, validSnpHitReq_s2)
+        val matchTag_s2            = RegEnable(task_s2.tag, validSnpHitReq_s2)
+        val getMatchedMshrReq_s2   = task_s2.isMshrTask && !task_s2.isCHIOpcode && !task_s2.isReplTask && matchSet_s2 === task_s2.set && matchTag_s2 === task_s2.tag
+        when(validSnpHitReq_s2) {
+            hasPendingSnpHitReq_s2 := true.B
+            assert(!hasPendingSnpHitReq_s2, "set: 0x%x tag: 0x%x addr: 0x%x", matchSet_s2, matchTag_s2, Cat(matchTag_s2, matchSet_s2, 0.U(6.W)))
+        }.elsewhen(getMatchedMshrReq_s2) {
+            hasPendingSnpHitReq_s2 := false.B
+        }.elsewhen(hasPendingSnpHitReq_s2) {
+
+            /**
+             * If hasPendingSnpHitReq_s2 is not being release by mshr Task for a long time(a few cycles), we should release it manually to prevent deadlock on Snoop channel.
+             * The reason for this action is that the entire pipeline can only hole one snpHitReq state at stage 2. 
+             * If stage 2 is not able to release the hasPendingSnpHitReq_s2 flag, the incoming Snoop request may result in deadlocks.
+             */
+            when(releaseCnt_s2 >= 15.U) { // TODO: Parameterize this
+                releaseCnt_s2          := 0.U
+                hasPendingSnpHitReq_s2 := false.B
+            }.otherwise {
+                releaseCnt_s2 := releaseCnt_s2 + 1.U
+            }
+        }
+        hasPendingSnpHitReq_s2_dup := hasPendingSnpHitReq_s2 || valid_s2 && snpHitReq_s2
+        io.reqDrop_s2.foreach(_ := getMatchedMshrReq_s2 && hasPendingSnpHitReq_s2 && !task_s2.getSnpNestedReq.getOrElse(false.B)) // reqDrop_s2 is used to drop the MSHR task which did not meet the certain condition and the correponding retry signal will be set at stage 2(MainPipe)
+    }
+
     mayReadDS_s2    := valid_s2 && (mayReadDS_a_s2 || mayReadDS_b_s2 || mayReadDS_mshr_s2)
     willRefillDS_s2 := valid_s2 && tempDsToDs_s2
     willWriteDS_s2  := io.fromSinkC.willWriteDS_s2
@@ -364,7 +408,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val channel_s3    = RegInit(0.U(L2Channel.width.W))
     willWriteDS_s3  := RegNext(willWriteDS_s2)
     willRefillDS_s3 := RegNext(willRefillDS_s2)
-    valid_s3        := fire_s2
+    valid_s3        := fire_s2 && !io.reqDrop_s2.getOrElse(false.B)
 
     when(fire_s2) {
         isMshrTask_s3 := task_s2.isMshrTask

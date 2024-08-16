@@ -105,6 +105,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
     reqArb.io.fromSinkC.willWriteDS_s2 := sinkC.io.toReqArb.willWriteDS_s2
 
+    mainPipe.io.reqDrop_s2.foreach(_ := reqArb.io.reqDrop_s2.getOrElse(false.B))
     mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
     mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
@@ -156,8 +157,10 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
+    val cancelData_s2 = reqArb.io.reqDrop_s2.getOrElse(false.B)
     sourceD.io.task_s2          <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2          <> tempDS.io.toSourceD.data_s2
+    sourceD.io.data_s2.valid    := tempDS.io.toSourceD.data_s2.valid && !cancelData_s2
     sourceD.io.task_s4          <> mainPipe.io.sourceD_s4
     sourceD.io.task_s6s7        <> mainPipe.io.sourceD_s6s7
     sourceD.io.data_s6s7.valid  := ds.io.toSourceD.dsResp_s6s7.valid
@@ -169,6 +172,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     txdat.io.task_s2         <> mainPipe.io.txdat_s2
     txdat.io.data_s2         <> tempDS.io.toTXDAT.data_s2
+    txdat.io.data_s2.valid   := tempDS.io.toTXDAT.data_s2.valid && !cancelData_s2
     txdat.io.task_s6s7       <> mainPipe.io.txdat_s6s7
     txdat.io.data_s6s7.valid := ds.io.toTXDAT.dsResp_s6s7.valid
     txdat.io.data_s6s7.bits  := ds.io.toTXDAT.dsResp_s6s7.bits.data
@@ -208,7 +212,8 @@ object Slice extends App {
                 rxsnpHasLatch = false,
                 sinkcHasLatch = false,
                 sourcebHasLatch = false,
-                sinkaStallOnReqArb = false
+                sinkaStallOnReqArb = false,
+                mshrStallOnReqArb = true
             )
         case DebugOptionsKey => DebugOptions()
     })
