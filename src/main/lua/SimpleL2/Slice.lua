@@ -5013,7 +5013,8 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             env.negedge()
                 chi_rxsnp.valid:set(0)
             env.expect_happen_until(10, function() return mp.valid_s3:is(1) end)
-            mp.io_dirResp_s3_valid:expect(0)
+            mp.task_s3_snpHitReq:expect(1)
+            -- mp.io_dirResp_s3_valid:expect(0)
             mp.io_mshrNested_s3_snoop_toN:expect(1)
             env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
 

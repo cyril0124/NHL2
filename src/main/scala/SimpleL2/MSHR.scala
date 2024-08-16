@@ -650,13 +650,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 assert(valid, "retry on an invalid mshr!")
             }
         }.otherwise {
-            when(io.retryTasks.stage4.bits.grant_s4) {
-                state.w_grant_sent := true.B
-                assert(!state.w_grant_sent)
-            }
             when(io.retryTasks.stage4.bits.accessack_s4) {
                 state.w_accessack_sent := true.B
                 assert(!state.w_accessack_sent)
+            }
+            when(io.retryTasks.stage4.bits.grant_s4) {
+                state.w_grant_sent := true.B
+                assert(!state.w_grant_sent)
             }
             when(io.retryTasks.stage4.bits.cbwrdata_s4) {
                 state.w_cbwrdata_sent := true.B
