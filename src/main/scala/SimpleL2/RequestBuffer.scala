@@ -56,9 +56,9 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
     taskOut.valid         := io.taskIn.fire || issueArb.io.out.valid
     issueArb.io.out.ready := taskOut.ready && !io.taskIn.fire
 
-    println(s"[${this.getClass().toString()}] reqBufOutLatch:${reqBufOutLatch}")
+    println(s"[${this.getClass().toString()}] reqBufOutLatch:${optParam.reqBufOutLatch}")
 
-    if (reqBufOutLatch) {
+    if (optParam.reqBufOutLatch) {
         io.taskOut <> Queue(taskOut, 1)
     } else {
         io.taskOut <> taskOut

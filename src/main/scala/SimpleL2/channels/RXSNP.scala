@@ -20,9 +20,9 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
     val snpFullAddr        = Cat(io.rxsnp.bits.addr, 0.U(3.W))
     val (tag, set, offset) = parseAddress(snpFullAddr)
 
-    println(s"[${this.getClass().toString()}] rxsnpHasLatch:${rxsnpHasLatch}")
+    println(s"[${this.getClass().toString()}] rxsnpHasLatch:${optParam.rxsnpHasLatch}")
 
-    if (rxsnpHasLatch == false) {
+    if (!optParam.rxsnpHasLatch) {
         io.rxsnp.ready           := io.task.ready
         io.task.valid            := io.rxsnp.valid
         io.task.bits             := DontCare

@@ -55,9 +55,9 @@ class SinkC()(implicit p: Parameters) extends L2Module {
         }
     })
 
-    println(s"[${this.getClass().toString()}] sinkcHasLatch:${sinkcHasLatch}")
+    println(s"[${this.getClass().toString()}] sinkcHasLatch:${optParam.sinkcHasLatch}")
 
-    val c = if (sinkcHasLatch) {
+    val c = if (optParam.sinkcHasLatch) {
         Queue(io.c, 1)
     } else {
         io.c

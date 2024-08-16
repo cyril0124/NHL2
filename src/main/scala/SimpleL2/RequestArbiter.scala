@@ -40,7 +40,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val dsWrWayOH_s1  = Output(UInt(ways.W))
 
         /** Send task to [[MainPipe]] */
-        val reqDrop_s2 = if (mshrStallOnReqArb) None else Some(Output(Bool()))
+        val reqDrop_s2 = if (optParam.mshrStallOnReqArb) None else Some(Output(Bool()))
         val mpReq_s2   = ValidIO(new TaskBundle)
 
         /** Other signals */
@@ -104,7 +104,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 0
     // -----------------------------------------------------------------------------------------
-    if (mshrStallOnReqArb) {
+    if (optParam.mshrStallOnReqArb) {
         val mshrSet_s0        = io.taskMSHR_s0.bits.set
         val mshrTag_s0        = io.taskMSHR_s0.bits.tag
         val hasSnpHitReq_s1   = arbTaskSnoop_dup_s1.bits.snpHitReq && arbTaskSnoop_dup_s1.bits.set === mshrSet_s0 && arbTaskSnoop_dup_s1.bits.tag === mshrTag_s0 && arbTaskSnoop_dup_s1.valid
@@ -191,7 +191,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     }
 
     val mayReadDS_a_s1_dup = WireInit(false.B)
-    if (!sinkaStallOnReqArb) {
+    if (!optParam.sinkaStallOnReqArb) {
 
         /** 
          * We need to check if stage2 will read the [[DataStorage]]. 
@@ -292,8 +292,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
 
-    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !blockA_s1 && Mux(sinkaStallOnReqArb.B, !noSpaceForReplay_a_s1, true.B)
-    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !blockA_s1 && Mux(sinkaStallOnReqArb.B, !noSpaceForReplay_a_s1, true.B)
+    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !blockA_s1 && Mux(optParam.sinkaStallOnReqArb.B, !noSpaceForReplay_a_s1, true.B)
+    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !blockA_s1 && Mux(optParam.sinkaStallOnReqArb.B, !noSpaceForReplay_a_s1, true.B)
 
     chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && Mux(!chnlTask_s1.bits.snpHitReq, io.dirRead_s1.ready, true.B)
     task_s1 := Mux(
@@ -346,7 +346,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_b_s2    = task_s2.isChannelB /* TODO: filter snoop opcode, some opcode does not need Data */
     val mayReadDS_mshr_s2 = task_s2.isMshrTask && !task_s2.readTempDs && !task_s2.isReplTask && (task_s2.channel === CHIChannel.TXDAT || (!task_s2.isCHIOpcode && (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData)))
 
-    if (!mshrStallOnReqArb) {
+    if (!optParam.mshrStallOnReqArb) {
 
         /**
          * If there is an snpHitReq at stage 3, the incoming mshrTasks that match the set and tag of snpHitReq and without asserting the getSnpNestedReq flag on that task will be dropped at stage 2.
@@ -419,7 +419,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     }
 
     // Channel C does not need to replay
-    if (sinkaStallOnReqArb) {
+    if (optParam.sinkaStallOnReqArb) {
         val mayReplayCnt_a = WireInit(0.U(io.replayFreeCntSinkA.getWidth.W))
         val mayReplay_a_s2 = valid_s2 && !task_s2.isMshrTask && !task_s2.isChannelC && task_s2.isChannelA
         val mayReplay_a_s3 = valid_s3 && !isMshrTask_s3 && !(channel_s3 === L2Channel.ChannelC) && channel_s3 === L2Channel.ChannelA

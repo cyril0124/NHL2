@@ -64,7 +64,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val reqArbTaskSnoop    = WireInit(0.U.asTypeOf(reqArb.io.taskSnoop_s1))
     arbTask(Seq(Queue(replayStationSnoop.io.req_s1, 1), rxsnp.io.task), reqArbTaskSnoop)
 
-    if (!sinkaStallOnReqArb) {
+    if (!optParam.sinkaStallOnReqArb) {
         val reqBuf = Module(new RequestBufferV2)
 
         reqBuf.io.taskIn         <> sinkA.io.task
@@ -179,7 +179,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     sinkE.io.allocGrantMap <> sourceD.io.allocGrantMap
 
-    if (sourcebHasLatch) {
+    if (optParam.sourcebHasLatch) {
         sourceB.io.task <> Queue(missHandler.io.tasks.sourceb, 1)
     } else {
         sourceB.io.task <> missHandler.io.tasks.sourceb
@@ -208,12 +208,14 @@ object Slice extends App {
         case L2ParamKey =>
             L2Param(
                 nrClients = CFG_CLIENT.toInt,
-                reqBufOutLatch = false,
-                rxsnpHasLatch = false,
-                sinkcHasLatch = false,
-                sourcebHasLatch = false,
-                sinkaStallOnReqArb = true,
-                mshrStallOnReqArb = true
+                optParam = L2OptimizationParam(
+                    reqBufOutLatch = false,
+                    rxsnpHasLatch = false,
+                    sinkcHasLatch = false,
+                    sourcebHasLatch = false,
+                    sinkaStallOnReqArb = true,
+                    mshrStallOnReqArb = true
+                )
             )
         case DebugOptionsKey => DebugOptions()
     })

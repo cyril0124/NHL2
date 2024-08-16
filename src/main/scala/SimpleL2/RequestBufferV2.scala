@@ -131,9 +131,9 @@ class RequestBufferV2()(implicit p: Parameters) extends L2Module {
 
     taskOut <> issueArb.io.out
 
-    println(s"[${this.getClass().toString()}] reqBufOutLatch:${reqBufOutLatch}")
+    println(s"[${this.getClass().toString()}] reqBufOutLatch:${optParam.reqBufOutLatch}")
 
-    if (reqBufOutLatch) {
+    if (optParam.reqBufOutLatch) {
         val chosenQ = Module(
             new Queue(
                 new Bundle {

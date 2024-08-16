@@ -41,7 +41,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
 
         /** Stage 2 */
-        val reqDrop_s2         = if (mshrStallOnReqArb) None else Some(Input(Bool()))
+        val reqDrop_s2         = if (optParam.mshrStallOnReqArb) None else Some(Input(Bool()))
         val mpReq_s2           = Flipped(ValidIO(new TaskBundle))
         val sourceD_s2         = Decoupled(new TaskBundle)
         val txdat_s2           = DecoupledIO(new CHIBundleDAT(chiBundleParams))
@@ -116,7 +116,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s2.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s2.bits.opcode := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
 
-    val dropMshrTask_s2 = if (mshrStallOnReqArb) {
+    val dropMshrTask_s2 = if (optParam.mshrStallOnReqArb) {
         false.B
     } else {
         task_s2.isMshrTask && !task_s2.isCHIOpcode && !task_s2.isReplTask && io.reqDrop_s2.getOrElse(false.B)
@@ -589,7 +589,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.replay_s4.bits.task   := task_s4
     io.replay_s4.bits.reason := DontCare
 
-    if (!sinkaStallOnReqArb) {
+    if (!optParam.sinkaStallOnReqArb) {
         io.reqBufReplay_s4.valid             := valid_reqbuf_s4
         io.reqBufReplay_s4.bits.shouldReplay := valid_replay_s4
         io.reqBufReplay_s4.bits.source       := task_s4.source

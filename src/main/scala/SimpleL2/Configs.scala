@@ -18,6 +18,15 @@ case object L2ParamKey extends Field[L2Param](L2Param())
 
 case object EdgeInKey extends Field[TLEdgeIn]
 
+case class L2OptimizationParam(
+    reqBufOutLatch: Boolean = true,
+    rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
+    sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
+    sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
+    sinkaStallOnReqArb: Boolean = false,
+    mshrStallOnReqArb: Boolean = false
+)
+
 case class L2Param(
     name: String = "L2",
     ways: Int = 4,
@@ -36,12 +45,7 @@ case class L2Param(
     nrTXRSPEntry: Int = 4,
     nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
-    reqBufOutLatch: Boolean = true,
-    rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
-    sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
-    sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
-    sinkaStallOnReqArb: Boolean = false,
-    mshrStallOnReqArb: Boolean = false,
+    optParam: L2OptimizationParam = L2OptimizationParam(),
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -81,12 +85,7 @@ trait HasL2Param {
     val nrBeat        = l2param.blockBytes / l2param.beatBytes
     val idsAll        = 256
 
-    val reqBufOutLatch        = l2param.reqBufOutLatch
-    val rxsnpHasLatch         = l2param.rxsnpHasLatch
-    val sinkcHasLatch         = l2param.sinkcHasLatch
-    val sourcebHasLatch       = l2param.sourcebHasLatch
-    val sinkaStallOnReqArb    = l2param.sinkaStallOnReqArb
-    val mshrStallOnReqArb     = l2param.mshrStallOnReqArb
+    val optParam              = l2param.optParam
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry

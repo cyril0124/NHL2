@@ -194,7 +194,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val datDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
     val gotCompData     = RegInit(false.B)
     val gotDirty        = RegInit(false.B)
-    val getSnpNestedReq = if (mshrStallOnReqArb) None else Some(RegInit(false.B))
+    val getSnpNestedReq = if (optParam.mshrStallOnReqArb) None else Some(RegInit(false.B))
     val releaseGotDirty = RegInit(false.B)
     val gotT            = RegInit(false.B)
     val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
