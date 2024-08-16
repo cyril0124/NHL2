@@ -11,6 +11,12 @@ import SimpleL2.Bundles._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import SimpleL2.chi.CHIOpcodeDAT._
 
+class MpStatus123(implicit p: Parameters) extends L2Bundle {
+    val stage1 = new MpStageInfo
+    val stage2 = new MpStageInfo
+    val stage3 = new MpStageInfo
+}
+
 class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
 
@@ -47,6 +53,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             val mayReadDS_s2    = Output(Bool())
             val willRefillDS_s2 = Output(Bool())
         }
+
+        val status = Output(new MpStatus123) // Output status signals for RequestArbiterV2
 
         val mshrStatus         = Vec(nrMSHR, Input(new MshrStatus))
         val replayFreeCntSinkA = Input(UInt((log2Ceil(nrReplayEntrySinkA) + 1).W))
@@ -177,16 +185,24 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         sameSet_s2 || sameSet_s3
     }
 
-    val addrConflict_forSinkA = addrConflict(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
-    val addrConflict_forSnoop = addrConflict(io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
+    val mayReadDS_a_s1_dup = WireInit(false.B)
+    if (sinkaStallOnReqArb) {
 
-    val mayReadDS_a_s1_dup   = WireInit(false.B)
-    val noFreeWay_forSinkA   = noFreeWay(io.taskSinkA_s1.bits.set) // If there is no free way, requests with the same set should not enter MainPipe and finally go into MSHR to prevent frequent repl task from MSHR which may seriously affect MainPipe bandwidth.
-    val setConflict_forSinkA = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
-    val blockA_addrConflict  = (io.taskSinkA_s1.bits.set === task_s2.set && io.taskSinkA_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskSinkA_s1.bits.set === set_s3 && io.taskSinkA_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
+        /** 
+         * We need to check if stage2 will read the [[DataStorage]]. 
+         * If it is, we should not allow the stage1 request that will read the [[DataStorage]] go further to meet the requirement of multi-cycle path of DataSRAM. 
+         */
+        val blockA_mayReadDS_forSinkA = mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2)
+        blockA_s1 := blockA_mayReadDS_forSinkA || io.fromSinkC.willWriteDS_s1
+    } else {
+    val addrConflict_forSinkA = addrConflict(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
+        val noFreeWay_forSinkA    = noFreeWay(io.taskSinkA_s1.bits.set) // If there is no free way, requests with the same set should not enter MainPipe and finally go into MSHR to prevent frequent repl task from MSHR which may seriously affect MainPipe bandwidth.
+        val setConflict_forSinkA  = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
+        val blockA_addrConflict   = (io.taskSinkA_s1.bits.set === task_s2.set && io.taskSinkA_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskSinkA_s1.bits.set === set_s3 && io.taskSinkA_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
     val blockA_mayReadDS_forSinkA =
         mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
     blockA_s1 := blockA_addrConflict || blockA_mayReadDS_forSinkA || io.fromSinkC.willWriteDS_s1 || noFreeWay_forSinkA || setConflict_forSinkA
+    }
 
     def mshrBlockSnp(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { s =>
@@ -268,8 +284,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arbTaskSinkC.valid    := io.taskSinkC_s1.valid && !blockC_s1
     io.taskSinkC_s1.ready := arbTaskSinkC.ready && !blockC_s1
 
-    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !noSpaceForReplay_a_s1 && !blockA_s1
-    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !noSpaceForReplay_a_s1 && !blockA_s1
+    arbTaskSinkA.valid    := io.taskSinkA_s1.valid && !blockA_s1 && Mux(sinkaStallOnReqArb.B, true.B, !noSpaceForReplay_a_s1)
+    io.taskSinkA_s1.ready := arbTaskSinkA.ready && !blockA_s1 && Mux(sinkaStallOnReqArb.B, true.B, !noSpaceForReplay_a_s1)
 
     chnlTask_s1.ready := io.resetFinish && !mshrTaskFull_s1 && Mux(!chnlTask_s1.bits.snpHitReq, io.dirRead_s1.ready, true.B)
     task_s1 := Mux(
@@ -359,17 +375,34 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     }
 
     // Channel C does not need to replay
+    if (sinkaStallOnReqArb) {
     val mayReplayCnt_a = WireInit(0.U(io.replayFreeCntSinkA.getWidth.W))
     val mayReplay_a_s2 = valid_s2 && !task_s2.isMshrTask && !task_s2.isChannelC && task_s2.isChannelA
     val mayReplay_a_s3 = valid_s3 && !isMshrTask_s3 && !(channel_s3 === L2Channel.ChannelC) && channel_s3 === L2Channel.ChannelA
     mayReplayCnt_a        := PopCount(Cat(1.U, mayReplay_a_s2, mayReplay_a_s3)) // TODO:
     noSpaceForReplay_a_s1 := mayReplayCnt_a >= io.replayFreeCntSinkA
+    }
 
     val mayReplayCnt_snp = WireInit(0.U(io.replayFreeCntSnoop.getWidth.W))
     val mayReplay_snp_s2 = valid_s2 && !task_s2.isMshrTask && task_s2.isChannelB
     val mayReplay_snp_s3 = valid_s3 && !isMshrTask_s3 && channel_s3 === L2Channel.ChannelB
     mayReplayCnt_snp        := PopCount(Cat(1.U, mayReplay_snp_s2, mayReplay_snp_s3)) // TODO:
     noSpaceForReplay_snp_s1 := mayReplayCnt_snp >= io.replayFreeCntSnoop
+
+    io.status.stage1.valid    := fire_s1
+    io.status.stage1.set      := task_s1.set
+    io.status.stage1.tag      := task_s1.tag
+    io.status.stage1.isRefill := DontCare
+
+    io.status.stage2.valid    := valid_s2
+    io.status.stage2.set      := task_s2.set
+    io.status.stage2.tag      := task_s2.tag
+    io.status.stage2.isRefill := DontCare
+
+    io.status.stage3.valid    := valid_s3
+    io.status.stage3.set      := set_s3
+    io.status.stage3.tag      := tag_s3
+    io.status.stage3.isRefill := DontCare
 
     dontTouch(io)
 }

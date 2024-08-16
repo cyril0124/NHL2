@@ -40,16 +40,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
     val rxsnp = Module(new RXSNP)
 
     /** Other modules */
-    val reqBuf      = Module(new RequestBuffer)
     val reqArb      = Module(new RequestArbiter)
     val dir         = Module(new Directory)
     val ds          = Module(new DataStorage)
     val mainPipe    = Module(new MainPipe)
     val tempDS      = Module(new TempDataStorage)
     val missHandler = Module(new MissHandler)
-
-    val replayStationSinkA = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySinkA, nrSubEntry = nrClients + 1))                  // for SinkA
-    val replayStationSnoop = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySnoop, nrSubEntry = 2 /* TODO: parameterize it */ )) // for Snoop
 
     // TODO: sinkIdPool backpressure when full
     val sinkIdPool = Module(new IDPool((nrMSHR until (nrMSHR + nrExtraSinkId)).toSet))
@@ -63,12 +59,36 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sinkC.io.c <> io.tl.c
     sinkE.io.e <> io.tl.e
 
-    reqBuf.io.taskIn <> sinkA.io.task
-
-    val reqArbTaskSinkA = WireInit(0.U.asTypeOf(reqArb.io.taskSinkA_s1))
-    val reqArbTaskSnoop = WireInit(0.U.asTypeOf(reqArb.io.taskSnoop_s1))
-    arbTask(Seq(Queue(replayStationSinkA.io.req_s1, 1), reqBuf.io.taskOut), reqArbTaskSinkA)
+    val replayStationSnoop = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySnoop, nrSubEntry = 2 /* TODO: parameterize it */ )) // for Snoop
+    val reqArbTaskSinkA    = WireInit(0.U.asTypeOf(reqArb.io.taskSinkA_s1))
+    val reqArbTaskSnoop    = WireInit(0.U.asTypeOf(reqArb.io.taskSnoop_s1))
     arbTask(Seq(Queue(replayStationSnoop.io.req_s1, 1), rxsnp.io.task), reqArbTaskSnoop)
+
+    if (sinkaStallOnReqArb) {
+        val reqBuf = Module(new RequestBufferV2)
+
+        reqBuf.io.taskIn         <> sinkA.io.task
+        reqBuf.io.mpStatus_s123  <> reqArb.io.status
+        reqBuf.io.mpStatus_s4567 <> mainPipe.io.status
+        reqBuf.io.mshrStatus     <> missHandler.io.mshrStatus
+        reqBuf.io.bufferStatus   := sourceD.io.bufferStatus
+        reqBuf.io.replay_s4      <> mainPipe.io.reqBufReplay_s4
+
+        reqArb.io.replayFreeCntSinkA := DontCare
+
+        reqArbTaskSinkA <> reqBuf.io.taskOut
+    } else {
+        val replayStationSinkA = Module(new ReplayStation(nrReplayEntry = nrReplayEntrySinkA, nrSubEntry = nrClients + 1)) // for SinkA
+        val reqBuf             = Module(new RequestBuffer)
+
+        reqBuf.io.taskIn                      <> sinkA.io.task
+        replayStationSinkA.io.replay_s4       <> mainPipe.io.replay_s4
+        replayStationSinkA.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelA
+        replayStationSinkA.io.replay_s4.bits  := mainPipe.io.replay_s4.bits
+
+        reqArb.io.replayFreeCntSinkA := replayStationSinkA.io.freeCnt
+        arbTask(Seq(Queue(replayStationSinkA.io.req_s1, 1), reqBuf.io.taskOut), reqArbTaskSinkA)
+    }
 
     reqArb.io.taskCMO_s1               := DontCare // TODO: CMO Task
     reqArb.io.taskMSHR_s0              <> missHandler.io.tasks.mpTask
@@ -78,7 +98,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.dirRead_s1               <> dir.io.dirRead_s1
     reqArb.io.resetFinish              <> dir.io.resetFinish
     reqArb.io.mpStatus_s4567           <> mainPipe.io.status
-    reqArb.io.replayFreeCntSinkA       := replayStationSinkA.io.freeCnt
     reqArb.io.replayFreeCntSnoop       := replayStationSnoop.io.freeCnt
     reqArb.io.nonDataRespCnt           := sourceD.io.nonDataRespCntSinkC
     reqArb.io.mshrStatus               <> missHandler.io.mshrStatus
@@ -90,12 +109,9 @@ class Slice()(implicit p: Parameters) extends L2Module {
     mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
     mainPipe.io.mshrFreeOH_s3  := missHandler.io.mshrFreeOH_s3
-    mainPipe.io.replay_s4      <> replayStationSinkA.io.replay_s4
     mainPipe.io.nonDataRespCnt := sourceD.io.nonDataRespCntMp
     mainPipe.io.txrspCnt       := txrsp.io.txrspCnt
 
-    replayStationSinkA.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelA
-    replayStationSinkA.io.replay_s4.bits  := mainPipe.io.replay_s4.bits
     replayStationSnoop.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelB
     replayStationSnoop.io.replay_s4.bits  := mainPipe.io.replay_s4.bits
 
@@ -191,7 +207,8 @@ object Slice extends App {
                 reqBufOutLatch = false,
                 rxsnpHasLatch = false,
                 sinkcHasLatch = false,
-                sourcebHasLatch = false
+                sourcebHasLatch = false,
+                sinkaStallOnReqArb = false
             )
         case DebugOptionsKey => DebugOptions()
     })

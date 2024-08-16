@@ -40,6 +40,7 @@ case class L2Param(
     rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
     sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
     sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
+    sinkaStallOnReqArb: Boolean = true,
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -83,6 +84,7 @@ trait HasL2Param {
     val rxsnpHasLatch         = l2param.rxsnpHasLatch
     val sinkcHasLatch         = l2param.sinkcHasLatch
     val sourcebHasLatch       = l2param.sourcebHasLatch
+    val sinkaStallOnReqArb    = l2param.sinkaStallOnReqArb
     val nrTempDataEntry       = l2param.nrTempDataEntry
     val dataIdBits            = log2Ceil(nrTempDataEntry)
     val nrReqBufEntry         = l2param.nrReqBufEntry
