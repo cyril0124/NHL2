@@ -266,6 +266,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 1(dir read) / Stage 3(dir write)
     // -----------------------------------------------------------------------------------------
+    val fire_s1     = io.dirRead_s1.fire
     val sramRdReady = metaSRAMs.map(_.io.r.req.ready).reduce(_ & _)
     metaSRAMs.zipWithIndex.foreach { case (sram, i) =>
         sram.io.r.req.valid       := io.dirRead_s1.fire
@@ -285,11 +286,11 @@ class Directory()(implicit p: Parameters) extends L2Module {
     // Stage 2(dir read)
     // -----------------------------------------------------------------------------------------
     val metaRead_s2     = Wire(Vec(ways, new DirectoryMetaEntry()))
-    val reqValid_s2     = RegNext(io.dirRead_s1.fire, false.B)
-    val replReqValid_s2 = RegNext(io.dirRead_s1.fire && io.dirRead_s1.bits.replTask, false.B)
-    val mshrId_s2       = RegEnable(io.dirRead_s1.bits.mshrId, io.dirRead_s1.fire && io.dirRead_s1.bits.replTask)
-    val reqTag_s2       = RegEnable(io.dirRead_s1.bits.tag, io.dirRead_s1.fire)
-    val reqSet_s2       = RegEnable(io.dirRead_s1.bits.set, io.dirRead_s1.fire)
+    val reqValid_s2     = RegNext(fire_s1, false.B)
+    val replReqValid_s2 = reqValid_s2 && RegEnable(io.dirRead_s1.bits.replTask, false.B, fire_s1)
+    val mshrId_s2       = RegEnable(io.dirRead_s1.bits.mshrId, fire_s1)
+    val reqTag_s2       = RegEnable(io.dirRead_s1.bits.tag, fire_s1)
+    val reqSet_s2       = RegEnable(io.dirRead_s1.bits.set, fire_s1)
     val occWayMask_s2 = VecInit(io.mshrStatus.map { mshr =>
         /* Only those set match and dirHit mshr can occupy a way */
         Mux(mshr.valid && mshr.set === reqSet_s2 && (mshr.dirHit || mshr.lockWay), mshr.wayOH, 0.U(ways.W))
@@ -304,8 +305,8 @@ class Directory()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     val metaRead_s3     = RegEnable(metaRead_s2, reqValid_s2)
     val reqValid_s3     = RegNext(reqValid_s2, false.B)
-    val replReqValid_s3 = RegNext(replReqValid_s2, false.B)
-    val mshrId_s3       = RegEnable(mshrId_s2, replReqValid_s2)
+    val replReqValid_s3 = reqValid_s3 && RegEnable(replReqValid_s2, false.B, reqValid_s2)
+    val mshrId_s3       = RegEnable(mshrId_s2, reqValid_s2)
     val reqTag_s3       = RegEnable(reqTag_s2, reqValid_s2)
     val reqSet_s3       = RegEnable(reqSet_s2, reqValid_s2)
     val occWayMask_s3   = RegEnable(occWayMask_s2, reqValid_s2)

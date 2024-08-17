@@ -102,15 +102,17 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
+    val wen_sinkC_s2     = io.dsWrite_s2.fire
     val wrSet_sinkC_s2   = io.dsWrite_s2.bits.set
     val wrWayOH_sinkC_s2 = io.dsWrite_s2.bits.wayOH
     val wrData_sinkC_s2  = io.dsWrite_s2.bits.data
-    val wen_sinkC_s2     = io.dsWrite_s2.fire
 
     val wen_refill_s2     = io.refillWrite_s2.valid
     val wrData_refill_s2  = io.refillWrite_s2.bits.data
     val wrSet_refill_s2   = io.refillWrite_s2.bits.set
     val wrWayOH_refill_s2 = io.refillWrite_s2.bits.wayOH
+
+    val fire_s2 = wen_sinkC_s2 || wen_refill_s2
     // TODO: calculate ECC
 
     _assert(!(RegNext(io.dsWrite_s2.fire, false.B) && io.dsWrite_s2.fire), "continuous write!")
@@ -124,12 +126,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdSet_s3     = io.fromMainPipe.dsRead_s3.bits.set
     val rdMshrIdx_s3 = io.fromMainPipe.mshrId_s3
 
-    val wen_sinkC_s3     = RegNext(wen_sinkC_s2, false.B)
-    val wrData_sinkC_s3  = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
-    val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
-    val wrWayOH_sinkC_s3 = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
-
-    val wen_refill_s3     = RegNext(wen_refill_s2, false.B)
+    val wen_s3            = RegNext(fire_s2, false.B)
+    val wen_sinkC_s3      = wen_s3 && RegEnable(wen_sinkC_s2, false.B, fire_s2)
+    val wrData_sinkC_s3   = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
+    val wrSet_sinkC_s3    = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
+    val wrWayOH_sinkC_s3  = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
+    val wen_refill_s3     = wen_s3 && RegEnable(wen_refill_s2, false.B, fire_s2)
     val wrData_refill_s3  = RegEnable(wrData_refill_s2, wen_refill_s2)
     val wrSet_refill_s3   = RegEnable(wrSet_refill_s2, wen_refill_s2)
     val wrWayOH_refill_s3 = RegEnable(wrWayOH_refill_s2, wen_refill_s2)
@@ -137,10 +139,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val wrSet_s3   = Mux(wen_refill_s3, wrSet_refill_s3, wrSet_sinkC_s3)
     val wrWayOH_s3 = Mux(wen_refill_s3, wrWayOH_refill_s3, wrWayOH_sinkC_s3)
     val wrData_s3  = Mux(wen_refill_s3, wrData_refill_s3, wrData_sinkC_s3)
-    val wenVec_s3  = Cat(wen_sinkC_s3, wen_refill_s3)
-    val wen_s3     = wenVec_s3.orR
 
-    _assert(PopCount(wenVec_s3) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
+    val fire_s3 = ren_s3 || wen_s3
+
+    _assert(PopCount(Cat(wen_sinkC_s3, wen_refill_s3)) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     assert(!(wen_s3 && ren_s3 && wayConflict), "read and write at the same time with wayConflict! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     // TODO: allow write different way during conetious cycles
     // TODO: allow read different way during conetious cycles
@@ -168,9 +170,10 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 4 (read accept)
     // -----------------------------------------------------------------------------------------
-    val wen_s4       = RegNext(wen_s3, false.B)
+    val valid_s4     = RegNext(fire_s3, false.B)
+    val wen_s4       = valid_s4 && RegEnable(wen_s3, false.B, fire_s3)
+    val ren_s4       = valid_s4 && RegEnable(ren_s3, false.B, fire_s3)
     val wrWayOH_s4   = RegEnable(wrWayOH_s3, wen_s3)
-    val ren_s4       = RegNext(ren_s3, false.B)
     val rdWayOH_s4   = RegEnable(rdWayOH_s3, ren_s3)
     val rdDest_s4    = RegEnable(rdDest_s3, ren_s3)
     val rdMshrIdx_s4 = RegEnable(rdMshrIdx_s3, ren_s3)

@@ -4227,7 +4227,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4304,7 +4304,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4365,7 +4365,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4442,7 +4442,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toB:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4504,7 +4504,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4581,7 +4581,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end
@@ -4644,7 +4644,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
                     mp.io_mshrNested_s3_snoop_toN:expect(1)
                 env.negedge()
                     mp.valid_snpresp_s4:is(1)
-                    mp.valid_s4:expect(0)
+                    mp.fire_s4:expect(0)
                 env.negedge()
                     mp.valid_s5:expect(0)
             end

@@ -145,13 +145,14 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 3
     // -----------------------------------------------------------------------------------------
-    val dirResp_s3  = io.dirResp_s3.bits
-    val task_s3     = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
-    val hasRetry_s3 = RegEnable(hasRetry_s2, valid_s2)
-    val valid_s3    = RegNext(valid_s2, false.B)
-    val hit_s3      = dirResp_s3.hit && io.dirResp_s3.valid
-    val meta_s3     = dirResp_s3.meta
-    val state_s3    = meta_s3.state
+    val dirResp_s3     = io.dirResp_s3.bits
+    val task_s3        = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
+    val hasRetry_s3    = RegEnable(hasRetry_s2, valid_s2)
+    val valid_s3       = RegNext(valid_s2 && !io.reqDrop_s2.getOrElse(false.B), false.B)
+    val isSnpHitReq_s3 = task_s3.snpHitReq && valid_s3
+    val hit_s3         = dirResp_s3.hit && io.dirResp_s3.valid // && !isSnpHitReq_s3 // hit is invalid for snpHitReq request
+    val meta_s3        = dirResp_s3.meta
+    val state_s3       = meta_s3.state
     assert(!(valid_s3 && !task_s3.isMshrTask && !task_s3.snpHitReq && !io.dirResp_s3.fire), "Directory response should be valid!")
 
     val snpNeedMshr_s3        = RegEnable(snpNeedMshr_s2, valid_s2)
@@ -540,32 +541,34 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 4
     // -----------------------------------------------------------------------------------------
-    val task_s4               = RegInit(0.U.asTypeOf(new TaskBundle))
-    val replRespNeedProbe_s4  = RegEnable(replRespNeedProbe_s3, fire_s3)
-    val replRespTag_s4        = RegEnable(replRespTag_s3, fire_s3)
-    val replRespWayOH_s4      = RegEnable(replRespWayOH_s3, fire_s3)
-    val allocMshrIdx_s4       = RegEnable(allocMshrIdx_s3, fire_s3)
-    val sinkDataToTempDS_s4   = RegEnable(sinkDataToTempDS_s3, fire_s3)
-    val sinkDataToDS_s4       = RegEnable(sinkDataToDS_s3, fire_s3)
-    val dirRespWayOH_s4       = RegEnable(io.dirResp_s3.bits.wayOH, fire_s3)
-    val respOpcode_s4         = RegEnable(respOpcode_s3, fire_s3)
-    val respParam_s4          = RegEnable(respParam_s3, fire_s3)
-    val snpResp_s4            = RegEnable(snpResp_s3, fire_s3)
-    val snpRetry_s4           = RegEnable(snpRetry_s3, fire_s3)
-    val refillRetry_s4        = RegEnable(refillRetry_s3, fire_s3)
-    val copyBackRetry_s4      = RegEnable(copyBackRetry_s3, fire_s3)
-    val needAllocDestSinkC_s4 = RegNext(needAllocDestSinkC_s3 && !valid_replay_s3, false.B)
-    val valid_cbwrdata_mp_s4  = RegNext(valid_cbwrdata_mp_s3, false.B)
-    val valid_snpdata_s4      = RegNext(valid_snpdata_s3, false.B)
-    val valid_snpdata_mp_s4   = RegNext(valid_snpdata_mp_s3, false.B)
-    val valid_snpresp_s4      = RegNext(valid_snpresp_s3, false.B)
-    val valid_snpresp_mp_s4   = RegNext(valid_snpresp_mp_s3, false.B)
-    val valid_reqbuf_s4       = RegNext(valid_reqbuf_s3, false.B)
-    val valid_replay_s4       = RegNext(valid_replay_s3, false.B)
-    val valid_refill_mp_s4    = RegNext(valid_refill_mp_s3, false.B)
-    val valid_refill_s4       = RegNext(valid_refill_s3, false.B)
+    val task_s4              = RegInit(0.U.asTypeOf(new TaskBundle))
+    val replRespNeedProbe_s4 = RegEnable(replRespNeedProbe_s3, fire_s3)
+    val replRespTag_s4       = RegEnable(replRespTag_s3, fire_s3)
+    val replRespWayOH_s4     = RegEnable(replRespWayOH_s3, fire_s3)
+    val allocMshrIdx_s4      = RegEnable(allocMshrIdx_s3, fire_s3)
+    val sinkDataToTempDS_s4  = RegEnable(sinkDataToTempDS_s3, fire_s3)
+    val sinkDataToDS_s4      = RegEnable(sinkDataToDS_s3, fire_s3)
+    val dirRespWayOH_s4      = RegEnable(io.dirResp_s3.bits.wayOH, fire_s3)
+    val respOpcode_s4        = RegEnable(respOpcode_s3, fire_s3)
+    val respParam_s4         = RegEnable(respParam_s3, fire_s3)
+    val snpResp_s4           = RegEnable(snpResp_s3, fire_s3)
+    val snpRetry_s4          = RegEnable(snpRetry_s3, fire_s3)
+    val refillRetry_s4       = RegEnable(refillRetry_s3, fire_s3)
+    val copyBackRetry_s4     = RegEnable(copyBackRetry_s3, fire_s3)
 
-    val valid_s4        = valid_cbwrdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || valid_refill_mp_s4
+    val valid_s4              = RegNext(fire_s3, false.B)
+    val needAllocDestSinkC_s4 = valid_s4 && RegEnable(needAllocDestSinkC_s3 && !valid_replay_s3, false.B, fire_s3)
+    val valid_cbwrdata_mp_s4  = valid_s4 && RegEnable(valid_cbwrdata_mp_s3, false.B, fire_s3)
+    val valid_snpdata_s4      = valid_s4 && RegEnable(valid_snpdata_s3, false.B, fire_s3)
+    val valid_snpdata_mp_s4   = valid_s4 && RegEnable(valid_snpdata_mp_s3, false.B, fire_s3)
+    val valid_snpresp_s4      = valid_s4 && RegEnable(valid_snpresp_s3, false.B, fire_s3)
+    val valid_snpresp_mp_s4   = valid_s4 && RegEnable(valid_snpresp_mp_s3, false.B, fire_s3)
+    val valid_reqbuf_s4       = valid_s4 && RegEnable(valid_reqbuf_s3, false.B, fire_s3)
+    val valid_replay_s4       = valid_s4 && RegEnable(valid_replay_s3, false.B, fire_s3)
+    val valid_refill_mp_s4    = valid_s4 && RegEnable(valid_refill_mp_s3, false.B, fire_s3)
+    val valid_refill_s4       = valid_s4 && RegEnable(valid_refill_s3, false.B, fire_s3)
+
+    val fire_s4         = valid_cbwrdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || valid_refill_mp_s4
     val needsDataBuf_s4 = valid_cbwrdata_mp_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || ((valid_refill_s4 || valid_refill_mp_s4) && (task_s4.opcode === AccessAckData || task_s4.opcode === GrantData)) // TODO: refill mp not retry
 
     val validVec_s4 = Cat(
@@ -637,15 +640,16 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // Stage 5
     // -----------------------------------------------------------------------------------------
     val task_s5              = RegInit(0.U.asTypeOf(new TaskBundle))
-    val valid_snpdata_s5     = RegNext(valid_snpdata_s4, false.B)
-    val valid_snpdata_mp_s5  = RegNext(valid_snpdata_mp_s4 && !snpRetry_s4, false.B)
-    val valid_cbwrdata_mp_s5 = RegNext(valid_cbwrdata_mp_s4 && !copyBackRetry_s4, false.B)
-    val valid_refill_s5      = RegNext(valid_refill_s4 && refillNeedData_s4, false.B)
-    val valid_refill_mp_s5   = RegNext(valid_refill_mp_s4 && !refillRetry_s4 && refillNeedData_s4, false.B)
-    val valid_s5             = valid_refill_s5 || valid_cbwrdata_mp_s5 || valid_snpdata_s5 || valid_snpdata_mp_s5 || valid_refill_mp_s5
+    val valid_s5             = RegNext(fire_s4, false.B)
+    val valid_snpdata_s5     = valid_s5 && RegEnable(valid_snpdata_s4, false.B, fire_s4)
+    val valid_snpdata_mp_s5  = valid_s5 && RegEnable(valid_snpdata_mp_s4 && !snpRetry_s4, false.B, fire_s4)
+    val valid_cbwrdata_mp_s5 = valid_s5 && RegEnable(valid_cbwrdata_mp_s4 && !copyBackRetry_s4, false.B, fire_s4)
+    val valid_refill_s5      = valid_s5 && RegEnable(valid_refill_s4 && refillNeedData_s4, false.B, fire_s4)
+    val valid_refill_mp_s5   = valid_s5 && RegEnable(valid_refill_mp_s4 && !refillRetry_s4 && refillNeedData_s4, false.B, fire_s4)
+    val fire_s5              = valid_refill_s5 || valid_cbwrdata_mp_s5 || valid_snpdata_s5 || valid_snpdata_mp_s5 || valid_refill_mp_s5
     val needsDataBuf_s5      = valid_snpdata_s5 || valid_snpdata_mp_s5 || valid_cbwrdata_mp_s5 || ((valid_refill_s5 || valid_refill_mp_s5) && (task_s5.opcode === AccessAckData || task_s5.opcode === GrantData))
 
-    when(valid_s4) {
+    when(fire_s4) {
         task_s5 := task_s4
         when(!task_s4.isMshrTask) {
             task_s5.wayOH  := dirRespWayOH_s4
@@ -661,19 +665,19 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isSourceD_s7_dup = WireInit(false.B)
     val isTXDAT_s7_dup   = WireInit(false.B)
 
-    val task_s6      = RegEnable(task_s5, 0.U.asTypeOf(new TaskBundle), valid_s5)
+    val task_s6      = RegEnable(task_s5, 0.U.asTypeOf(new TaskBundle), fire_s5)
     val valid_s6     = RegInit(false.B)
     val isSourceD_s6 = !task_s6.isCHIOpcode
     val isTXDAT_s6   = task_s6.isCHIOpcode
     val fire_s6      = valid_s6 && ready_s7 && (io.sourceD_s6s7.valid && !io.sourceD_s6s7.ready || io.txdat_s6s7.valid && !io.txdat_s6s7.ready)
 
-    when(valid_s5) {
+    when(fire_s5) {
         valid_s6 := true.B
         assert(!(valid_s7_dup && isSourceD_s7_dup && valid_s6 && isSourceD_s6), "stage6 is full!")
         assert(!(valid_s7_dup && isTXDAT_s7_dup && valid_s6 && isTXDAT_s6), "stage6 is full!")
-    }.elsewhen((io.sourceD_s6s7.fire && isSourceD_s6 && !(valid_s7_dup && isSourceD_s7_dup) || io.txdat_s6s7.fire && isTXDAT_s6 && !(valid_s7_dup && isTXDAT_s7_dup)) && !valid_s5 && valid_s6) {
+    }.elsewhen((io.sourceD_s6s7.fire && isSourceD_s6 && !(valid_s7_dup && isSourceD_s7_dup) || io.txdat_s6s7.fire && isTXDAT_s6 && !(valid_s7_dup && isTXDAT_s7_dup)) && !fire_s5 && valid_s6) {
         valid_s6 := false.B
-    }.elsewhen(fire_s6 && !valid_s5) {
+    }.elsewhen(fire_s6 && !fire_s5) {
         valid_s6 := false.B
     }
 

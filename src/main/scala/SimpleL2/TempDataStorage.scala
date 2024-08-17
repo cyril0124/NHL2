@@ -129,6 +129,8 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     val dsWrWayOH_ts1 = io.fromReqArb.dsWrWayOH_s1
     val dsWrSet_ts1   = io.fromReqArb.dsWrSet_s1
 
+    val fire_ts1 = wen_ts1 || ren_ts1
+
     /**
      * Priority:
      *          fromDS.write_s5 > fromRXDAT.write > fromSinkC.write > fromReqArb.read_s1
@@ -154,8 +156,9 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 2
     // -----------------------------------------------------------------------------------------
-    val wen_ts2       = RegNext(wen_ts1, false.B)
-    val ren_ts2       = RegNext(ren_ts1, false.B)
+    val valid_s2      = RegNext(fire_ts1, false.B)
+    val wen_ts2       = valid_s2 && RegEnable(wen_ts1, false.B, fire_ts1)
+    val ren_ts2       = valid_s2 && RegEnable(ren_ts1, false.B, fire_ts1)
     val rDest_ts2     = RegEnable(rDest_ts1, ren_ts1)
     val dsWrWayOH_ts2 = RegEnable(dsWrWayOH_ts1, ren_ts1)
     val dsWrSet_ts2   = RegEnable(dsWrSet_ts1, ren_ts1)
