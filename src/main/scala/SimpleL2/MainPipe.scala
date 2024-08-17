@@ -41,7 +41,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
 
         /** Stage 2 */
-        val reqDrop_s2         = if (optParam.mshrStallOnReqArb) None else Some(Input(Bool()))
+        val reqDrop_s2_opt     = if (optParam.mshrStallOnReqArb) None else Some(Input(Bool()))
         val mpReq_s2           = Flipped(ValidIO(new TaskBundle))
         val sourceD_s2         = Decoupled(new TaskBundle)
         val txdat_s2           = DecoupledIO(new CHIBundleDAT(chiBundleParams))
@@ -96,7 +96,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isMshrSourceD_data_s2 = (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData) && task_s2.readTempDs
     val isMshrSourceD_s2      = !task_s2.isCHIOpcode && task_s2.isMshrTask && !task_s2.isReplTask && (isMshrSourceD_resp_s2 || isMshrSourceD_data_s2)
     val isSourceD_s2          = !task_s2.isCHIOpcode && !task_s2.isMshrTask && task_s2.isChannelC && (task_s2.opcode === Release || task_s2.opcode === ReleaseData)
-    io.sourceD_s2.valid := valid_s2 && !io.reqDrop_s2.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
+    io.sourceD_s2.valid := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
     io.sourceD_s2.bits  <> task_s2
     when(isSourceD_s2) {
         io.sourceD_s2.bits.opcode := ReleaseAck
@@ -108,7 +108,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isMshrTXDAT_s2 = task_s2.isMshrTask && !task_s2.isReplTask && task_s2.isCHIOpcode && task_s2.readTempDs && task_s2.channel === CHIChannel.TXDAT
     val isTXDAT_s2     = task_s2.isChannelB && task_s2.readTempDs && task_s2.snpHitReq
     val snpNeedMshr_s2 = isTXDAT_s2 && io.txdat_s2.valid && !io.txdat_s2.ready // If txdat is not ready, we should let this req enter mshr, the mshrId is task_s2.snpHitMshrId
-    io.txdat_s2.valid       := valid_s2 && !io.reqDrop_s2.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
+    io.txdat_s2.valid       := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
     io.txdat_s2.bits        := DontCare
     io.txdat_s2.bits.txnID  := task_s2.txnID
     io.txdat_s2.bits.dbID   := Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId)                                         // TODO:
@@ -119,7 +119,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val dropMshrTask_s2 = if (optParam.mshrStallOnReqArb) {
         false.B
     } else {
-        task_s2.isMshrTask && !task_s2.isCHIOpcode && !task_s2.isReplTask && io.reqDrop_s2.getOrElse(false.B)
+        task_s2.isMshrTask && !task_s2.isCHIOpcode && !task_s2.isReplTask && io.reqDrop_s2_opt.getOrElse(false.B)
     }
     val sourcedStall_s2 = io.sourceD_s2.valid && !io.sourceD_s2.ready
     val txdatStall_s2   = io.txdat_s2.valid && !io.txdat_s2.ready
@@ -148,7 +148,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val dirResp_s3     = io.dirResp_s3.bits
     val task_s3        = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
     val hasRetry_s3    = RegEnable(hasRetry_s2, valid_s2)
-    val valid_s3       = RegNext(valid_s2 && !io.reqDrop_s2.getOrElse(false.B), false.B)
+    val valid_s3       = RegNext(valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B), false.B)
     val isSnpHitReq_s3 = task_s3.snpHitReq && valid_s3
     val hit_s3         = dirResp_s3.hit && io.dirResp_s3.valid // && !isSnpHitReq_s3 // hit is invalid for snpHitReq request
     val meta_s3        = dirResp_s3.meta

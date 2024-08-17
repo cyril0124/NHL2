@@ -40,8 +40,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val dsWrWayOH_s1  = Output(UInt(ways.W))
 
         /** Send task to [[MainPipe]] */
-        val reqDrop_s2 = if (optParam.mshrStallOnReqArb) None else Some(Output(Bool()))
-        val mpReq_s2   = ValidIO(new TaskBundle)
+        val reqDrop_s2_opt = if (optParam.mshrStallOnReqArb) None else Some(Output(Bool()))
+        val mpReq_s2       = ValidIO(new TaskBundle)
 
         /** Other signals */
         val fromSinkC = new Bundle {
@@ -349,8 +349,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     if (!optParam.mshrStallOnReqArb) {
 
         /**
-         * If there is an snpHitReq at stage 3, the incoming mshrTasks that match the set and tag of snpHitReq and without asserting the getSnpNestedReq flag on that task will be dropped at stage 2.
-         * The getSnpNestedReq flag is asserted when the incoming mshrTask has already nested the snoop which will be handled in stage 3.
+         * If there is an snpHitReq at stage 3, the incoming mshrTasks that match the set and tag of snpHitReq and without asserting the getSnpNestedReq_opt flag on that task will be dropped at stage 2.
+         * The getSnpNestedReq_opt flag is asserted when the incoming mshrTask has already nested the snoop which will be handled in stage 3.
          * MSHR tasks with the purpose of refilling the upstream cache should not be sent if there is an snpHitReq nested on that mshr.
          */
         val validSnpHitReq_s2      = valid_s2 && snpHitReq_s2
@@ -379,7 +379,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             }
         }
         hasPendingSnpHitReq_s2_dup := hasPendingSnpHitReq_s2 || valid_s2 && snpHitReq_s2
-        io.reqDrop_s2.foreach(_ := getMatchedMshrReq_s2 && hasPendingSnpHitReq_s2 && !task_s2.getSnpNestedReq.getOrElse(false.B)) // reqDrop_s2 is used to drop the MSHR task which did not meet the certain condition and the correponding retry signal will be set at stage 2(MainPipe)
+        io.reqDrop_s2_opt.foreach(_ := getMatchedMshrReq_s2 && hasPendingSnpHitReq_s2 && !task_s2.getSnpNestedReq_opt.getOrElse(false.B)) // reqDrop_s2_opt is used to drop the MSHR task which did not meet the certain condition and the correponding retry signal will be set at stage 2(MainPipe)
     }
 
     mayReadDS_s2    := valid_s2 && (mayReadDS_a_s2 || mayReadDS_b_s2 || mayReadDS_mshr_s2)
@@ -408,7 +408,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val channel_s3    = RegInit(0.U(L2Channel.width.W))
     willWriteDS_s3  := RegNext(willWriteDS_s2)
     willRefillDS_s3 := RegNext(willRefillDS_s2)
-    valid_s3        := fire_s2 && !io.reqDrop_s2.getOrElse(false.B)
+    valid_s3        := fire_s2 && !io.reqDrop_s2_opt.getOrElse(false.B)
 
     when(fire_s2) {
         isMshrTask_s3 := task_s2.isMshrTask

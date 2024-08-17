@@ -105,7 +105,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     reqArb.io.fromSinkC.willWriteDS_s1 := sinkC.io.toReqArb.willWriteDS_s1
     reqArb.io.fromSinkC.willWriteDS_s2 := sinkC.io.toReqArb.willWriteDS_s2
 
-    mainPipe.io.reqDrop_s2.foreach(_ := reqArb.io.reqDrop_s2.getOrElse(false.B))
+    mainPipe.io.reqDrop_s2_opt.foreach(_ := reqArb.io.reqDrop_s2_opt.getOrElse(false.B))
     mainPipe.io.mpReq_s2       <> reqArb.io.mpReq_s2
     mainPipe.io.dirResp_s3     <> dir.io.dirResp_s3
     mainPipe.io.replResp_s3    <> dir.io.replResp_s3
@@ -157,7 +157,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
-    val cancelData_s2 = reqArb.io.reqDrop_s2.getOrElse(false.B)
+    val cancelData_s2 = reqArb.io.reqDrop_s2_opt.getOrElse(false.B)
     sourceD.io.task_s2          <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2          <> tempDS.io.toSourceD.data_s2
     sourceD.io.data_s2.valid    := tempDS.io.toSourceD.data_s2.valid && !cancelData_s2
@@ -220,5 +220,5 @@ object Slice extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
-    GenerateVerilog(args, () => new Slice()(config), name = "Slice", split = true)
+    GenerateVerilog(args, () => new Slice()(config), name = "Slice", release = false, split = true)
 }

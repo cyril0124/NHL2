@@ -190,26 +190,26 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reallocOpcode   = RegInit(0.U(req.opcode.getWidth.W))
     val reallocRetToSrc = RegInit(false.B)
 
-    val rspDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
-    val datDBID         = RegInit(0.U(chiBundleParams.DBID_WIDTH.W))
-    val gotCompData     = RegInit(false.B)
-    val gotDirty        = RegInit(false.B)
-    val getSnpNestedReq = if (optParam.mshrStallOnReqArb) None else Some(RegInit(false.B))
-    val releaseGotDirty = RegInit(false.B)
-    val gotT            = RegInit(false.B)
-    val replGotDirty    = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
-    val needProbe       = RegInit(false.B)
-    val needRead        = RegInit(false.B)
-    val needPromote     = RegInit(false.B)
-    val needWb          = RegInit(false.B)
-    val nestedRelease   = RegInit(false.B)
-    val probeGotDirty   = RegInit(false.B)
-    val snpGotDirty     = RegInit(false.B)                                                                                                // for reallocation
-    val probeAckParams  = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
-    val probeAckClients = RegInit(0.U(nrClients.W))
-    val probeFinish     = WireInit(false.B)
-    val probeClients    = Mux(!state.w_rprobeack || !state.w_sprobeack || req.isAliasTask, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
-    val finishedProbes  = RegInit(0.U(nrClients.W))
+    val rspDBID             = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val datDBID             = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val gotCompData         = RegInit(false.B)
+    val gotDirty            = RegInit(false.B)
+    val getSnpNestedReq_opt = if (optParam.mshrStallOnReqArb) None else Some(RegInit(false.B))
+    val releaseGotDirty     = RegInit(false.B)
+    val gotT                = RegInit(false.B)
+    val replGotDirty        = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
+    val needProbe           = RegInit(false.B)
+    val needRead            = RegInit(false.B)
+    val needPromote         = RegInit(false.B)
+    val needWb              = RegInit(false.B)
+    val nestedRelease       = RegInit(false.B)
+    val probeGotDirty       = RegInit(false.B)
+    val snpGotDirty         = RegInit(false.B)                                                                                                // for reallocation
+    val probeAckParams      = RegInit(VecInit(Seq.fill(nrClients)(0.U.asTypeOf(chiselTypeOf(io.resps.sinkc.bits.param)))))
+    val probeAckClients     = RegInit(0.U(nrClients.W))
+    val probeFinish         = WireInit(false.B)
+    val probeClients        = Mux(!state.w_rprobeack || !state.w_sprobeack || req.isAliasTask, meta.clientsOH, ~reqClientOH & meta.clientsOH) // TODO: multiple clients, for now only support up to 2 clients(core 0 and core 1)
+    val finishedProbes      = RegInit(0.U(nrClients.W))
     assert(
         !(!state.s_aprobe && !req.isAliasTask && !nestedRelease && PopCount(probeClients) === 0.U), // It is possible that probeClients is 0 if mshr is nested by Relase.
         "Acquire Probe has no probe clients! probeClients: 0b%b reqClientOH: 0b%b meta.clientOH: 0b%b dirHit:%b isAliasTask:%b nestedRelease:%b addr:%x",
@@ -391,7 +391,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         task.bits.tag        := req.tag
         task.bits.wayOH      := dirResp.wayOH // TODO:
 
-        task.bits.getSnpNestedReq.foreach(_ := getSnpNestedReq.getOrElse(false.B))
+        task.bits.getSnpNestedReq_opt.foreach(_ := getSnpNestedReq_opt.getOrElse(false.B))
     }
 
     /** Send the final refill response to the upper level */
@@ -1087,11 +1087,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Available when [[L2OptimizationParam]].mshrStallOnReqArb is FALSE.
      */
     when(io.alloc_s3.fire) {
-        getSnpNestedReq.foreach(_ := false.B)
+        getSnpNestedReq_opt.foreach(_ := false.B)
     }.elsewhen(snoopMatchReqAddr && (io.nested.snoop.toN || io.nested.snoop.toB)) {
-        getSnpNestedReq.foreach(_ := true.B)
-    }.elsewhen(getSnpNestedReq.getOrElse(false.B) || state.w_snpresp_sent) {
-        getSnpNestedReq.foreach(_ := false.B)
+        getSnpNestedReq_opt.foreach(_ := true.B)
+    }.elsewhen(getSnpNestedReq_opt.getOrElse(false.B) || state.w_snpresp_sent) {
+        getSnpNestedReq_opt.foreach(_ := false.B)
     }
 
     /**

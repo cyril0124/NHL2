@@ -7,19 +7,19 @@ import freechips.rocketchip.tilelink._
 import scala.collection.immutable.ListMap
 import SimpleL2._
 import SimpleL2.Configs._
-import SimpleL2.chi.Resp
+import SimpleL2.chi._
 
 class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val isCHIOpcode = Bool()
-    val opcode      = UInt(5.W)                                           // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
-    val param       = UInt(math.max(3, Resp.width).W)                     // if isCHIOpcode is true, param is equals to the resp field in CHI
+    val opcode      = UInt(5.W)                                                              // TL Opcode ==> 3.W    CHI RXRSP Opcode ==> 5.W
+    val param       = UInt(math.max(3, Resp.width).W)                                        // if isCHIOpcode is true, param is equals to the resp field in CHI
     val channel     = UInt(L2Channel.width.W)
     val set         = UInt(setBits.W)
     val tag         = UInt(tagBits.W)
-    val source      = UInt(math.max(tlBundleParams.sourceBits, 12).W)     // CHI RXRSP TxnID ==> 12.W, if isCHIOpcode is true, source is equals to the resp field in CHI
+    val source      = UInt(math.max(tlBundleParams.sourceBits, chiBundleParams.txnIdBits).W) // CHI RXRSP TxnID ==> 12.W, if isCHIOpcode is true, source is equals to the resp field in CHI
     val isPrefetch  = Bool()
     val corrupt     = Bool()
-    val sink        = UInt(math.max(tlBundleParams.sinkBits, mshrBits).W) // also the alias name for mshrId
+    val sink        = UInt(math.max(tlBundleParams.sinkBits, mshrBits).W)                    // also the alias name for mshrId
     val wayOH       = UInt(ways.W)
     val retToSrc    = Bool()
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
@@ -39,7 +39,7 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val snpHitReq       = Bool()
     val snpHitMshrId    = UInt(mshrBits.W)
 
-    val getSnpNestedReq = if (optParam.mshrStallOnReqArb) None else Some(Bool())
+    val getSnpNestedReq_opt = if (optParam.mshrStallOnReqArb) None else Some(Bool())
 
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true

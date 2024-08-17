@@ -11,11 +11,11 @@ case class CHIBundleParameters(
     nodeIdBits: Int,
     addressBits: Int,
     dataBits: Int,
-    dataCheck: Boolean
+    dataCheck: Boolean,
+    txnIdBits: Int = 12, // TODO: 8-bit for issueB, 12-bit for issueE or higher
+    dbIdBits: Int = 12
 // TODO: has snoop
 ) {
-    def TXNID_WIDTH = 12 // TODO: 8-bit for issueB, 12-bit for issueE or higher
-    def DBID_WIDTH = TXNID_WIDTH
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
     require(addressBits >= 44 && addressBits <= 52)
     require(isPow2(dataBits))
@@ -27,12 +27,16 @@ object CHIBundleParameters {
         nodeIdBits: Int = 7,
         addressBits: Int = 44,
         dataBits: Int = 256,
-        dataCheck: Boolean = false
+        dataCheck: Boolean = false,
+        txnIdBits: Int = 12,
+        dbIdBits: Int = 12
     ): CHIBundleParameters = new CHIBundleParameters(
         nodeIdBits = nodeIdBits,
         addressBits = addressBits,
         dataBits = dataBits,
-        dataCheck = dataCheck
+        dataCheck = dataCheck,
+        txnIdBits = txnIdBits,
+        dbIdBits = dbIdBits
     )
 }
 
