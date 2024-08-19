@@ -43,22 +43,22 @@ case class L2Param(
     nrReplayEntrySnoop: Int = 4,
     nrNonDataSourceDEntry: Int = 4,
     nrTXRSPEntry: Int = 4,
-    nrTempDataEntry: Int = 16,
     nrReqBufEntry: Int = 4,
     optParam: L2OptimizationParam = L2OptimizationParam(),
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
-    replacementPolicy: String = "random", // TODO: plru
-    useDiplomacy: Boolean = false         // If use diplomacy, EdgeInKey should be passed in
+    replacementPolicy: String = "random",         // TODO: plru
+    dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
+    useDiplomacy: Boolean = false                 // If use diplomacy, EdgeInKey should be passed in
 ) {
     require(isPow2(ways))
     require(isPow2(sets))
     require(dataBits == 64 * 8)
     require(nrSlice >= 1)
-    require(nrMSHR == nrTempDataEntry)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
     require(nrClients >= 1)
+    dataEccCode.foreach(code => require(code == "none" || code == "identity" || code == "parity" || code == "sec" || code == "secded"))
 }
 
 trait HasL2Param {
@@ -99,6 +99,7 @@ trait HasL2Param {
     val rxdatCreditMAX = l2param.rxdatCreditMAX
 
     val replacementPolicy = l2param.replacementPolicy
+    val dataEccCode       = l2param.dataEccCode
 
     val deadlockThreshold = 10000 * 2
 

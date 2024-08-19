@@ -3,6 +3,7 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
+import xs.utils.Code
 import xs.utils.sram.SRAMTemplate
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, LeakChecker}
@@ -25,11 +26,6 @@ class DSWrite()(implicit p: Parameters) extends L2Bundle {
 
 class DSResp()(implicit p: Parameters) extends L2Bundle {
     val data = UInt(dataBits.W)
-}
-
-class DSEntry(bytes: Int)(implicit p: Parameters) extends L2Bundle {
-    // TODO: ECC
-    val data = UInt((bytes * 8).W)
 }
 
 class DataStorage()(implicit p: Parameters) extends L2Module {
@@ -69,16 +65,25 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val sramReady   = WireInit(false.B)
     val wayConflict = WireInit(false.B)
 
+    def dataCode: Code = Code.fromString(dataEccCode)
+    val eccProtectBytes = 8
+    val eccProtectBits  = eccProtectBytes * 8
+    val dataWithECCBits = dataCode.width(eccProtectBits)
+    val dataEccBits     = dataWithECCBits - eccProtectBits
+
+    println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits}")
+
     /**
-     * Each cacheline(64-byte) should be seperated into groups of 16-byte(128-bit) beacuse SRAM provided by foundary is typically less than 144-bit wide. 
-     *                                   way_0                                                                            way_1                                         ...
-     *        SRAM_0            SRAM_1             SRAM_2             SRAM_3                 SRAM_4            SRAM_5             SRAM_6             SRAM_7             ...
-     * |---------------------------------------------------------------------------|  |---------------------------------------------------------------------------|        
-     * | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) |  | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) | 16-byte(128-bit) |     ...
-     * |---------------------------------------------------------------------------|  |---------------------------------------------------------------------------| 
-     *                                       .                                                                              .  
-     *                                       .                                                                              .
-     *                                       .                                                                              .
+     * Each cacheline(64-byte) should be seperated into groups of 16-bytes(128-bits) beacuse SRAM provided by foundary is typically less than 144-bits wide.
+     * And we also need extra 8-bits for every 8-bytes to store ECC bits. The final SRAM bits = [8-bytes + 8-bits(ECC)] * 2 = 144-bits.
+     *                                   way_0                                                          way_1                        ...
+     *        SRAM_0                                SRAM_1    SRAM_2    SRAM_3         SRAM_4      SRAM_5    SRAM_6     SRAM_7       ...
+     * |-------------------------------------------------------------------------|  |-------------------------------------------|        
+     * | [8-bytes + 8-bits(ECC)] * 2 = 144-bits | 144-bits | 144-bits | 144-bits |  | 144-bits | 144-bits | 144-bits | 144-bits |    ...
+     * |-------------------------------------------------------------------------|  |-------------------------------------------| 
+     *                                       .                                                   .  
+     *                                       .                                                   .
+     *                                       .                                                   .
      * 
      */
     val groupBytes = 16                      // TODO: parameterize
@@ -87,7 +92,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         Seq.fill(group) {
             Module(
                 new SRAMTemplate(
-                    gen = new DSEntry(groupBytes),
+                    gen = Vec(groupBytes / 8, UInt(dataWithECCBits.W)),
                     set = sets,
                     way = 1,
                     singlePort = true,
@@ -97,7 +102,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
     }
 
-    println(s"[${this.getClass().toString()}] DSEntry group bits: ${(new DSEntry(groupBytes)).getWidth}")
+    println(s"[${this.getClass().toString()}] dataSRAMs entry bits: ${Vec(groupBytes / 8, UInt(dataWithECCBits.W)).getWidth}")
 
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
@@ -113,7 +118,6 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val wrWayOH_refill_s2 = io.refillWrite_s2.bits.wayOH
 
     val fire_s2 = wen_sinkC_s2 || wen_refill_s2
-    // TODO: calculate ECC
 
     _assert(!(RegNext(io.dsWrite_s2.fire, false.B) && io.dsWrite_s2.fire), "continuous write!")
 
@@ -126,11 +130,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdSet_s3     = io.fromMainPipe.dsRead_s3.bits.set
     val rdMshrIdx_s3 = io.fromMainPipe.mshrId_s3
 
-    val wen_s3            = RegNext(fire_s2, false.B)
-    val wen_sinkC_s3      = wen_s3 && RegEnable(wen_sinkC_s2, false.B, fire_s2)
-    val wrData_sinkC_s3   = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
-    val wrSet_sinkC_s3    = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
-    val wrWayOH_sinkC_s3  = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
+    val wen_s3           = RegNext(fire_s2, false.B)
+    val wen_sinkC_s3     = wen_s3 && RegEnable(wen_sinkC_s2, false.B, fire_s2)
+    val wrData_sinkC_s3  = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
+    val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
+    val wrWayOH_sinkC_s3 = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
+
     val wen_refill_s3     = wen_s3 && RegEnable(wen_refill_s2, false.B, fire_s2)
     val wrData_refill_s3  = RegEnable(wrData_refill_s2, wen_refill_s2)
     val wrSet_refill_s3   = RegEnable(wrSet_refill_s2, wen_refill_s2)
@@ -144,18 +149,19 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     _assert(PopCount(Cat(wen_sinkC_s3, wen_refill_s3)) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     assert(!(wen_s3 && ren_s3 && wayConflict), "read and write at the same time with wayConflict! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
-    // TODO: allow write different way during conetious cycles
-    // TODO: allow read different way during conetious cycles
 
     dataSRAMs.zipWithIndex.foreach { case (srams, wayIdx) =>
         val wrWayEn = wrWayOH_s3(wayIdx)
         val rdWayEn = rdWayOH_s3(wayIdx)
 
         srams.zipWithIndex.foreach { case (sram, groupIdx) =>
-            sram.io.w.req.valid             := wen_s3 && wrWayEn
-            sram.io.w.req.bits.data(0).data := wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx) // TODO: ECC
-            sram.io.w.req.bits.setIdx       := wrSet_s3
+            sram.io.w.req.valid       := wen_s3 && wrWayEn
+            sram.io.w.req.bits.setIdx := wrSet_s3
             sram.io.w.req.bits.waymask.foreach(_ := 1.U)
+            (0 until (groupBytes / eccProtectBytes)).foreach { i =>
+                val wrGroupDatas = wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx)
+                sram.io.w.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
+            }
 
             sram.io.r.req.valid       := ren_s3 && rdWayEn
             sram.io.r.req.bits.setIdx := rdSet_s3
@@ -206,24 +212,29 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     // -----------------------------------------------------------------------------------------
     // Stage 5 (read finish && ECC)
     // -----------------------------------------------------------------------------------------
-    val ren_s5       = RegNext(ren_s4, false.B)
-    val rdWayOH_s5   = RegEnable(rdWayOH_s4, ren_s4)
-    val rdData_s5    = WireInit(0.U(dataBits.W))
-    val rdDest_s5    = RegEnable(rdDest_s4, ren_s4)
-    val rdMshrIdx_s5 = RegEnable(rdMshrIdx_s4, ren_s4)
-    val fire_s5      = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
-    val rdDataVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) =>
-        VecInit(srams.map(_.io.r.resp.data(0).data)).asUInt
+    val ren_s5          = RegNext(ren_s4, false.B)
+    val rdWayOH_s5      = RegEnable(rdWayOH_s4, ren_s4)
+    val rdData_s5       = WireInit(0.U(dataBits.W))
+    val rdDest_s5       = RegEnable(rdDest_s4, ren_s4)
+    val rdMshrIdx_s5    = RegEnable(rdMshrIdx_s4, ren_s4)
+    val fire_s5         = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
+    val rdDataRawVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.r.resp.data(0))) })
+    val rdDataRaw_s5    = Mux1H(rdWayOH_s5, rdDataRawVec_s5)
+    val rdDataHasErr_s5 = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).error)).asUInt)).asUInt.orR
+    val rdDataVec_s5 = VecInit(rdDataRaw_s5.map { dataVec =>
+        VecInit(dataVec.map { d =>
+            val decodeData = dataCode.decode(d)
+            Mux(decodeData.correctable, decodeData.corrected, decodeData.uncorrected)
+        }).asUInt
     })
-    dontTouch(rdDataVec_s5)
+    assert(!(ren_s5 && rdDataHasErr_s5), "TODO: Data has error rdDataVec_s5:%x, rdDataHasErr_s5:%d", rdDataVec_s5.asUInt, rdDataHasErr_s5)
+    // TODO: ECC Error report
 
-    rdData_s5 := Mux1H(rdWayOH_s5, rdDataVec_s5)
+    rdData_s5 := rdDataVec_s5.asUInt
 
     io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
     io.toTempDS.write_s5.bits.data := rdData_s5
     io.toTempDS.write_s5.bits.idx  := rdMshrIdx_s5
-
-    // TODO: ECC Check
 
     // -----------------------------------------------------------------------------------------
     // Stage 6 (data output)
