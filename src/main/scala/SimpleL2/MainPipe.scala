@@ -110,6 +110,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val snpNeedMshr_s2 = isTXDAT_s2 && io.txdat_s2.valid && !io.txdat_s2.ready // If txdat is not ready, we should let this req enter mshr, the mshrId is task_s2.snpHitMshrId
     io.txdat_s2.valid       := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
     io.txdat_s2.bits        := DontCare
+    io.txdat_s2.bits.tgtID  := task_s2.tgtID
     io.txdat_s2.bits.txnID  := task_s2.txnID
     io.txdat_s2.bits.dbID   := Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId)                                         // TODO:
     io.txdat_s2.bits.resp   := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp) // TODO:
@@ -614,6 +615,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     )
 
     io.txrsp_s4.valid        := valid_snpresp_s4 || valid_snpresp_mp_s4
+    io.txrsp_s4.bits.tgtID   := Mux(valid_snpresp_s4, task_s4.srcID, task_s4.tgtID)
     io.txrsp_s4.bits.txnID   := task_s4.txnID
     io.txrsp_s4.bits.dbID    := task_s4.txnID // TODO:
     io.txrsp_s4.bits.opcode  := SnpResp
@@ -706,6 +708,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     io.txdat_s6s7.valid       := valid_s6 && isTXDAT_s6 || valid_s7 && isTXDAT_s7
     io.txdat_s6s7.bits        := DontCare
+    io.txdat_s6s7.bits.tgtID  := Mux(valid_s7 && isTXDAT_s7, task_s7.tgtID, task_s6.tgtID)
     io.txdat_s6s7.bits.txnID  := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID)
     io.txdat_s6s7.bits.dbID   := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID) // TODO:
     io.txdat_s6s7.bits.be     := Fill(beatBytes, 1.U)

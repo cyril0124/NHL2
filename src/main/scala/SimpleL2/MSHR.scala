@@ -186,12 +186,16 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reqNeedB      = needB(req.opcode, req.param)
 
     val isRealloc       = RegInit(false.B)
+    val reallocSrcID    = RegInit(0.U(chiBundleParams.nodeIdBits.W))
     val reallocTxnID    = RegInit(0.U(req.txnID.getWidth.W))
     val reallocOpcode   = RegInit(0.U(req.opcode.getWidth.W))
     val reallocRetToSrc = RegInit(false.B)
 
-    val rspDBID             = RegInit(0.U(chiBundleParams.dbIdBits.W))
-    val datDBID             = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val rspDBID  = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val rspSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val datDBID  = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val datSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+
     val gotCompData         = RegInit(false.B)
     val gotDirty            = RegInit(false.B)
     val getSnpNestedReq_opt = if (optParam.mshrStallOnReqArb) None else Some(RegInit(false.B))
@@ -242,8 +246,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         isRealloc := false.B
 
-        rspDBID         := 0.U
-        datDBID         := 0.U
+        rspDBID  := 0.U
+        rspSrcID := 0.U
+        datDBID  := 0.U
+        datSrcID := 0.U
+
         gotCompData     := false.B
         gotT            := false.B
         gotDirty        := false.B
@@ -260,6 +267,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val allocState = io.alloc_s3.bits.fsmState
 
         isRealloc       := true.B
+        reallocSrcID    := io.alloc_s3.bits.req.srcID
         reallocTxnID    := io.alloc_s3.bits.req.txnID
         reallocOpcode   := io.alloc_s3.bits.req.opcode
         reallocRetToSrc := io.alloc_s3.bits.req.retToSrc
@@ -474,6 +482,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
     mpTask_wbdata.valid            := !state.s_cbwrdata && state.s_snpresp && state.w_compdbid
+    mpTask_wbdata.bits.tgtID       := rspSrcID
     mpTask_wbdata.bits.txnID       := rspDBID
     mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.opcode      := CopyBackWrData
@@ -521,6 +530,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     }
 
     /** Send SnpRespData/SnpResp task to [[MainPipe]] */
+    val snpSrcID          = Mux(isRealloc, reallocSrcID, req.srcID)
     val snpTxnID          = Mux(isRealloc, reallocTxnID, req.txnID)
     val snpOpcode         = Mux(isRealloc, reallocOpcode, req.opcode)
     val snpRetToSrc       = Mux(isRealloc, reallocRetToSrc, req.retToSrc)
@@ -533,6 +543,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ ) && !isSnpMakeInvalidX
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
+    mpTask_snpresp.bits.tgtID       := snpSrcID
     mpTask_snpresp.bits.txnID       := snpTxnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(snprespNeedData, SnpRespData, SnpResp)
@@ -686,6 +697,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
                 gotDirty := rxdat.bits.resp === Resp.UC_PD
                 datDBID  := rxdat.bits.dbID
+                datSrcID := rxdat.bits.srcID
             }
         }.otherwise {
             state.w_compdat_first := true.B
@@ -696,7 +708,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
     when(rxrsp.fire && rxrsp.bits.last) {
-        rspDBID := rxrsp.bits.dbID
+        rspDBID  := rxrsp.bits.dbID
+        rspSrcID := rxrsp.bits.srcID
 
         val opcode = rxrsp.bits.chiOpcode
         when(opcode === Comp) {

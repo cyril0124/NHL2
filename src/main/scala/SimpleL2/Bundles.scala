@@ -41,6 +41,10 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
 
     val getSnpNestedReq_opt = if (optParam.mshrStallOnReqArb) None else Some(Bool())
 
+    val srcID = UInt(chiBundleParams.nodeIdBits.W)
+    val tgtID = UInt(chiBundleParams.nodeIdBits.W)
+    val dbID  = UInt(chiBundleParams.dbIdBits.W)
+
     def resp = param             // alias to opcode, if isCHIOpcode is true
     def txnID = source           // alias to source, if isCHIOpcode is true
     def chiOpcode = opcode       // alias to opcode, if isCHIOpcode is true

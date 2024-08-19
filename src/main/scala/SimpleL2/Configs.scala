@@ -45,6 +45,7 @@ case class L2Param(
     nrTXRSPEntry: Int = 4,
     nrReqBufEntry: Int = 4,
     optParam: L2OptimizationParam = L2OptimizationParam(),
+    supportDCT: Boolean = false,
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
@@ -86,8 +87,7 @@ trait HasL2Param {
     val idsAll        = 256
 
     val optParam              = l2param.optParam
-    val nrTempDataEntry       = l2param.nrTempDataEntry
-    val dataIdBits            = log2Ceil(nrTempDataEntry)
+    val supportDCT            = l2param.supportDCT
     val nrReqBufEntry         = l2param.nrReqBufEntry
     val nrNonDataSourceDEntry = l2param.nrNonDataSourceDEntry
     val nrTXRSPEntry          = l2param.nrTXRSPEntry

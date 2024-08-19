@@ -208,8 +208,9 @@ class CHILinkCtrlIO extends Bundle {
 
 class CHIRespBundle(params: CHIBundleParameters)(implicit p: Parameters) extends L2Bundle {
     val last      = Bool()
-    val txnID     = UInt(12.W)
-    val dbID      = UInt(12.W)
+    val srcID     = UInt(chiBundleParams.nodeIdBits.W)
+    val txnID     = UInt(chiBundleParams.txnIdBits.W)
+    val dbID      = UInt(chiBundleParams.dbIdBits.W)
     val chiOpcode = UInt(7.W)
     val respErr   = UInt(2.W)
     val resp      = UInt(3.W)

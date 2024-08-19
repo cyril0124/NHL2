@@ -32,20 +32,8 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
         io.task.bits.opcode      := io.rxsnp.bits.opcode
         io.task.bits.isCHIOpcode := true.B
         io.task.bits.txnID       := io.rxsnp.bits.txnID
-
-        /**
-         * from IHI0050G: P269
-         * For Non-forwarding snoops, except SnpMakeInvalid, the rules for returning a copy of the cache line to the Home are:
-         *  - Irrespective of the value of RetToSrc, must return a copy if the cache line is Dirty
-         *  - Irrespective of the value of RetToSrc, optionally can return a copy if the cache line is Unique Clean([[MixedState.TC]] / [[MixedState.TTC]]).
-         *  - If the RetToSrc value is 1, must return a copy if the cache line is Shared Clean([[MixedState.SC]]).
-         *  - If the RetToSrc value is 0, must not return a copy if the cache line is Shared Clean([[MixedState.SC]]).
-         * For Forwarding snoops where data is being forwarded, the rules for returning a copy of the cache line to the Home are:
-         *  - Irrespective of the value of RetToSrc, must return a copy if a Dirty cache line cannot be forwarded or kept.
-         *  - If the RetToSrc value is 1, must return a copy if the cache line is Dirty or Clean.
-         *  - If the RetToSrc value is 0, must not return a copy if the cache line is Clean
-         */
-        io.task.bits.retToSrc := io.rxsnp.bits.retToSrc
+        io.task.bits.srcID       := io.rxsnp.bits.srcID
+        io.task.bits.retToSrc    := io.rxsnp.bits.retToSrc
     } else {
         // latch one cycle for better timing
 
