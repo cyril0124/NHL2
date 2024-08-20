@@ -72,7 +72,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
         reqBuf.io.mpStatus_s4567 <> mainPipe.io.status
         reqBuf.io.mshrStatus     <> missHandler.io.mshrStatus
         reqBuf.io.bufferStatus   := sourceD.io.bufferStatus
-        reqBuf.io.replay_s4      <> mainPipe.io.reqBufReplay_s4
+        reqBuf.io.replay_s4      <> mainPipe.io.reqBufReplay_s4_opt.getOrElse(DontCare)
 
         reqArb.io.replayFreeCntSinkA := DontCare
 

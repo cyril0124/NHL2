@@ -61,11 +61,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         }
 
         /** Stage 4 */
-        val replay_s4         = ValidIO(new ReplayRequest)
-        val reqBufReplay_s4   = ValidIO(new ReqBufReplay)
-        val allocDestSinkC_s4 = ValidIO(new RespDataDestSinkC)                 // Alloc SinkC resps(ProbeAckData) data destination, ProbeAckData can be either saved into DataStorage or TempDataStorage
-        val sourceD_s4        = DecoupledIO(new TaskBundle)                    // SourceD for non-data resp
-        val txrsp_s4          = DecoupledIO(new CHIBundleRSP(chiBundleParams)) // Snp* hit and does not require data will be sent to txrsp_s4
+        val replay_s4           = ValidIO(new ReplayRequest)
+        val reqBufReplay_s4_opt = if (!optParam.sinkaStallOnReqArb) Some(ValidIO(new ReqBufReplay)) else None
+        val allocDestSinkC_s4   = ValidIO(new RespDataDestSinkC)                 // Alloc SinkC resps(ProbeAckData) data destination, ProbeAckData can be either saved into DataStorage or TempDataStorage
+        val sourceD_s4          = DecoupledIO(new TaskBundle)                    // SourceD for non-data resp
+        val txrsp_s4            = DecoupledIO(new CHIBundleRSP(chiBundleParams)) // Snp* hit and does not require data will be sent to txrsp_s4
 
         /** Stage 6 & Stage 7*/
         val sourceD_s6s7 = DecoupledIO(new TaskBundle) // Acquire* hit will send SourceD resp
@@ -486,7 +486,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_snpdata_mp_s3  = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT && valid_s3
     val valid_snpresp_s3     = !snpNeedData_b_s3 && snpChnlReqOK_s3 && !snpReplay_s3
     val valid_snpresp_mp_s3  = mpTask_snpresp_s3 && task_s3.channel === CHIChannel.TXRSP
-    val valid_reqbuf_s3      = valid_s3 && task_s3.isChannelA
+    val valid_reqbuf_s3      = valid_s3 && task_s3.isChannelA && !optParam.sinkaStallOnReqArb.B
     val valid_replay_s3      = mshrReplay_s3 || snpReplay_s3 || acquireReplay_s3 || getReplay_s3
     val valid_refill_mp_s3   = mpTask_refill_s3
     val valid_refill_s3      = !mshrAlloc_s3 && task_s3.isChannelA && !acquireReplay_s3 && !getReplay_s3 && valid_s3
@@ -564,7 +564,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_snpdata_mp_s4   = valid_s4 && RegEnable(valid_snpdata_mp_s3, false.B, fire_s3)
     val valid_snpresp_s4      = valid_s4 && RegEnable(valid_snpresp_s3, false.B, fire_s3)
     val valid_snpresp_mp_s4   = valid_s4 && RegEnable(valid_snpresp_mp_s3, false.B, fire_s3)
-    val valid_reqbuf_s4       = valid_s4 && RegEnable(valid_reqbuf_s3, false.B, fire_s3)
+    val valid_reqbuf_s4       = valid_s4 && RegEnable(valid_reqbuf_s3, false.B, fire_s3) && !optParam.sinkaStallOnReqArb.B
     val valid_replay_s4       = valid_s4 && RegEnable(valid_replay_s3, false.B, fire_s3)
     val valid_refill_mp_s4    = valid_s4 && RegEnable(valid_refill_mp_s3, false.B, fire_s3)
     val valid_refill_s4       = valid_s4 && RegEnable(valid_refill_s3, false.B, fire_s3)
@@ -593,12 +593,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.replay_s4.bits.task   := task_s4
     io.replay_s4.bits.reason := DontCare
 
-    if (!optParam.sinkaStallOnReqArb) {
-        io.reqBufReplay_s4.valid             := valid_reqbuf_s4
-        io.reqBufReplay_s4.bits.shouldReplay := valid_replay_s4
-        io.reqBufReplay_s4.bits.source       := task_s4.source
-    } else {
-        io.reqBufReplay_s4 <> DontCare
+    io.reqBufReplay_s4_opt.foreach { reqBufReplay_s4 =>
+        reqBufReplay_s4.valid             := valid_reqbuf_s4
+        reqBufReplay_s4.bits.shouldReplay := valid_replay_s4
+        reqBufReplay_s4.bits.source       := task_s4.source
     }
 
     io.allocDestSinkC_s4.valid         := needAllocDestSinkC_s4
