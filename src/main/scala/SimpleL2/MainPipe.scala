@@ -105,17 +105,20 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     val isSnpToN_s2    = CHIOpcodeSNP.isSnpToN(task_s2.opcode) && task_s2.isChannelB
     val isSnpToB_s2    = CHIOpcodeSNP.isSnpToB(task_s2.opcode) && task_s2.isChannelB
+    val isSnpFwd_s2    = CHIOpcodeSNP.isSnpXFwd(task_s2.opcode) && task_s2.isChannelB && supportDCT.B
     val isMshrTXDAT_s2 = task_s2.isMshrTask && !task_s2.isReplTask && task_s2.isCHIOpcode && task_s2.readTempDs && task_s2.channel === CHIChannel.TXDAT
-    val isTXDAT_s2     = task_s2.isChannelB && task_s2.readTempDs && task_s2.snpHitReq
+    val isCompData_s2  = isMshrTXDAT_s2 && task_s2.opcode === CompData && supportDCT.B
+    val isTXDAT_s2     = task_s2.isChannelB && task_s2.readTempDs && task_s2.snpHitReq && !isSnpFwd_s2
     val snpNeedMshr_s2 = isTXDAT_s2 && io.txdat_s2.valid && !io.txdat_s2.ready // If txdat is not ready, we should let this req enter mshr, the mshrId is task_s2.snpHitMshrId
-    io.txdat_s2.valid       := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
-    io.txdat_s2.bits        := DontCare
-    io.txdat_s2.bits.tgtID  := task_s2.tgtID
-    io.txdat_s2.bits.txnID  := task_s2.txnID
-    io.txdat_s2.bits.dbID   := Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId)                                         // TODO:
-    io.txdat_s2.bits.resp   := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp) // TODO:
-    io.txdat_s2.bits.be     := Fill(beatBytes, 1.U)
-    io.txdat_s2.bits.opcode := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
+    io.txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
+    io.txdat_s2.bits         := DontCare
+    io.txdat_s2.bits.tgtID   := task_s2.tgtID
+    io.txdat_s2.bits.txnID   := task_s2.txnID
+    io.txdat_s2.bits.homeNID := task_s2.srcID
+    io.txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
+    io.txdat_s2.bits.resp    := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp)
+    io.txdat_s2.bits.be      := Fill(beatBytes, 1.U)
+    io.txdat_s2.bits.opcode  := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
 
     val dropMshrTask_s2 = if (optParam.mshrStallOnReqArb) {
         false.B
@@ -132,6 +135,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.retryTasks.stage2.bits.accessack_s2 := !task_s2.isCHIOpcode && (task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData)
     io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
     io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
+    io.retryTasks.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
 
     /**
       * Notify [[MSHR]]s that the stage 2 task may nested [[MSHR]] in stage 3.
@@ -174,7 +178,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isSnpToB_s3       = CHIOpcodeSNP.isSnpToB(task_s3.opcode) && task_s3.isChannelB
     val isSnpOnceX_s3     = CHIOpcodeSNP.isSnpOnceX(task_s3.opcode) && task_s3.isChannelB
     val isSnoop_s3        = isSnpToB_s3 || isSnpToN_s3 || isSnpOnceX_s3                                                                     // TODO: Other opcode
-    val isFwdSnoop_s3     = CHIOpcodeSNP.isSnpXFwd(task_s3.opcode)
+    val isFwdSnoop_s3     = CHIOpcodeSNP.isSnpXFwd(task_s3.opcode) && supportDCT.B
     val isReleaseData_s3  = task_s3.opcode === ReleaseData && task_s3.isChannelC
     val isRelease_s3      = task_s3.opcode === Release && task_s3.isChannelC
 
@@ -205,12 +209,13 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val needProbe_snpToB_s3   = (CHIOpcodeSNP.isSnpToB(task_s3.opcode) || task_s3.opcode === SnpCleanShared) && dirResp_s3.hit && meta_s3.isTrunk
     val needProbe_snpToN_s3   = (CHIOpcodeSNP.isSnpUniqueX(task_s3.opcode) || CHIOpcodeSNP.isSnpMakeInvalidX(task_s3.opcode) || task_s3.opcode === SnpCleanInvalid) && dirResp_s3.hit && meta_s3.clientsOH.orR
     val needProbe_b_s3        = task_s3.isChannelB && hit_s3 && (needProbe_snpOnceX_s3 || needProbe_snpToB_s3 || needProbe_snpToN_s3)
+    val needDCT_s3            = isFwdSnoop_s3 && hit_s3 && supportDCT.B
 
     val canAllocMshr_s3 = !task_s3.isMshrTask && valid_s3
-    val mshrRealloc_s3  = (snpNeedMshr_s3 && task_s3.snpHitReq) && canAllocMshr_s3
+    val mshrRealloc_s3  = (snpNeedMshr_s3 || isFwdSnoop_s3) && task_s3.snpHitReq && canAllocMshr_s3
     val mshrAlloc_a_s3  = (needReadDownward_a_s3 || needProbe_a_s3 || cacheAlias_s3) && canAllocMshr_s3
-    val mshrAlloc_b_s3  = (needProbe_b_s3 && !task_s3.snpHitWriteBack && !task_s3.snpHitReq) && canAllocMshr_s3 // if snoop hit mshr that is scheduling writeback(MSHR_A), we should not update directory since MSHR_A will overwrite the whole cacheline
-    val mshrAlloc_c_s3  = false.B                                                                               // for inclusive cache, Release/ReleaseData always hit
+    val mshrAlloc_b_s3  = ((needProbe_b_s3 || needDCT_s3) && !task_s3.snpHitWriteBack && !task_s3.snpHitReq) && canAllocMshr_s3 // if snoop hit mshr that is scheduling writeback(MSHR_A), we should not update directory since MSHR_A will overwrite the whole cacheline
+    val mshrAlloc_c_s3  = false.B                                                                                               // for inclusive cache, Release/ReleaseData always hit
     val mshrAlloc_s3    = mshrAlloc_a_s3 || mshrAlloc_b_s3 || mshrAlloc_c_s3 || mshrRealloc_s3
 
     val mshrAllocStates = WireInit(0.U.asTypeOf(new MshrFsmState))
@@ -266,6 +271,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             mshrAllocStates.s_sprobe          := false.B
             mshrAllocStates.w_sprobeack       := false.B
             mshrAllocStates.w_sprobeack_first := false.B
+        }
+
+        when(needDCT_s3) {
+            mshrAllocStates.s_compdat      := false.B
+            mshrAllocStates.w_compdat_sent := false.B
         }
     }.elsewhen(task_s3.isChannelC) {
         // TODO: Release should always hit
@@ -340,12 +350,24 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     // TODO: FwdSnoop => Irrespective of the value of RetToSrc, must return a copy if a Dirty cache line cannot be forwarded or kept.
     val txrspWillFull_s3 = io.txrspCnt >= (nrTXRSPEntry - 1).U
     val snpNeedData_b_s3 = !task_s3.isMshrTask && task_s3.isChannelB && hit_s3 && Mux(
+        /**
+         * from IHI0050G: P269
+         * For Non-forwarding snoops, except SnpMakeInvalid, the rules for returning a copy of the cache line to the Home are:
+         *  - Irrespective of the value of RetToSrc, must return a copy if the cache line is Dirty
+         *  - Irrespective of the value of RetToSrc, optionally can return a copy if the cache line is Unique Clean([[MixedState.TC]] / [[MixedState.TTC]]).
+         *  - If the RetToSrc value is 1, must return a copy if the cache line is Shared Clean([[MixedState.SC]]).
+         *  - If the RetToSrc value is 0, must not return a copy if the cache line is Shared Clean([[MixedState.SC]]).
+         * For Forwarding snoops where data is being forwarded, the rules for returning a copy of the cache line to the Home are:
+         *  - Irrespective of the value of RetToSrc, must return a copy if a Dirty cache line cannot be forwarded or kept.
+         *  - If the RetToSrc value is 1, must return a copy if the cache line is Dirty or Clean.
+         *  - If the RetToSrc value is 0, must not return a copy if the cache line is Clean
+         */
         isFwdSnoop_s3,
         task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty /* snpHitWriteBack needs to read Directory but snpHitReq does not */,
         meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty
     )
     val snpNeedData_mshr_s3 = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT
-    val snpChnlReqOK_s3     = !task_s3.isMshrTask && !(task_s3.snpHitReq && task_s3.readTempDs) && isSnoop_s3 && task_s3.isChannelB && !mshrAlloc_b_s3 && valid_s3 // Can ack snoop request without allocating MSHR, Snoop miss did not need mshr, response with SnpResp_I
+    val snpChnlReqOK_s3     = !task_s3.isMshrTask && !(task_s3.snpHitReq && task_s3.readTempDs) && isSnoop_s3 && task_s3.isChannelB && !mshrAlloc_b_s3 && !mshrRealloc_s3 && valid_s3 // Can ack snoop request without allocating MSHR, Snoop miss did not need mshr, response with SnpResp_I
     val snpReplay_s3        = task_s3.isChannelB && !mshrAlloc_b_s3 && (!snpNeedData_b_s3 && txrspWillFull_s3 || snpNeedData_b_s3 && !hasValidDataBuf_s6s7) && valid_s3
     val snpRetry_s3         = task_s3.isMshrTask && snpNeedData_mshr_s3 && !hasValidDataBuf_s6s7 && valid_s3
     snpReplay_dup_s3 := snpReplay_s3
@@ -363,13 +385,17 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val refillNeedData_mp_s3 = mpTask_refill_s3 && (task_s3.opcode === GrantData || task_s3.opcode === AccessAckData)
     val refillRetry_s3       = mpTask_refill_s3 && Mux(refillNeedData_mp_s3, !hasValidDataBuf_s6s7, noSpaceForNonDataResp_s3)
 
+    /** Deal with mshr compdata */
+    val isCompData_s3    = task_s3.isMshrTask && task_s3.isCHIOpcode && task_s3.opcode === CompData && supportDCT.B
+    val compDataRetry_s3 = isCompData_s3 && !hasValidDataBuf_s6s7 && valid_s3 && supportDCT.B
+
     /** 
      * Get/Prefetch is not required to writeback [[Directory]].
      *     => Get is a TL-UL message which will not modify the coherent state
      *     => Prefetch only change the L2 state and not response upwards to L1
      */
     val snpNotUpdateDir_s3 = {
-        val opcodes       = VecInit(SnpShared, SnpNotSharedDirty, SnpSharedFwd, SnpNotSharedDirtyFwd)
+        val opcodes       = VecInit(SnpShared, SnpNotSharedDirty) ++ { if (supportDCT) Seq(SnpSharedFwd, SnpNotSharedDirtyFwd) else Nil }
         val opcodeMatchOH = VecInit(opcodes.map(_ === task_s3.opcode))
         dirResp_s3.hit && meta_s3.isBranch && !meta_s3.isDirty && opcodeMatchOH.asUInt.orR || !dirResp_s3.hit || task_s3.snpHitWriteBack || task_s3.snpHitReq
     }
@@ -443,9 +469,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val replRespNeedProbe_s3  = replRespValid_s3 && io.replResp_s3.bits.meta.clientsOH.orR
     val replRespTag_s3        = io.replResp_s3.bits.meta.tag
     val replRespWayOH_s3      = io.replResp_s3.bits.wayOH
-    val allocMshrIdx_s3       = OHToUInt(io.mshrFreeOH_s3)                                                      // TODO: consider OneHot?
-    val needAllocDestSinkC_s3 = (needProbeOnHit_a_s3 || needProbe_b_s3) && mshrAlloc_s3 || replRespNeedProbe_s3 // TODO: Snoop
-    val sinkDataToTempDS_s3   = needProbe_b_s3 || (isGet_s3 || isAcquire_s3) && needProbeOnHit_a_s3             // AcquireBlock need GrantData response, nested ReleaseData will be saved into the TempDataStorage
+    val allocMshrIdx_s3       = OHToUInt(io.mshrFreeOH_s3)                                                                    // TODO: consider OneHot?
+    val needAllocDestSinkC_s3 = (needProbeOnHit_a_s3 || needProbe_b_s3 || needDCT_s3) && mshrAlloc_s3 || replRespNeedProbe_s3 // TODO: Snoop
+    val sinkDataToTempDS_s3   = needProbe_b_s3 || (isGet_s3 || isAcquire_s3) && needProbeOnHit_a_s3                           // AcquireBlock need GrantData response, nested ReleaseData will be saved into the TempDataStorage
 
     /**
      *  If L2 is TRUNK, L1 migh owns a dirty cacheline, any dirty data should be updated in L2. GrantData must contain clean cacheline data.
@@ -455,24 +481,25 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     assert(!(io.replResp_s3.fire && !task_s3.isMshrTask), "replResp_s3 should only be valid when task_s3.isMshrTask")
 
     /** read data from [[DataStorage]] */
-    val readToTempDS_s3   = io.mshrAlloc_s3.fire && (needProbeOnHit_a_s3 || needReadOnHit_a_s3 || needProbe_b_s3) // Read data into TempDataStorage
+    val readToTempDS_s3   = io.mshrAlloc_s3.fire && (needProbeOnHit_a_s3 || needReadOnHit_a_s3 || needProbe_b_s3 || needDCT_s3) // Read data into TempDataStorage
     val readOnHit_s3      = hit_s3 && (isAcquireBlock_s3 && !acquireReplay_s3 || isGet_s3 && !getReplay_s3) && !mshrAlloc_s3
     val readOnCopyBack_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && !copyBackRetry_s3
+    val readOnCompData_s3 = isCompData_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT && !compDataRetry_s3 && supportDCT.B
     val readOnSnpOK_s3    = snpNeedData_b_s3 && !mshrAlloc_s3 && !snpReplay_s3
     val readOnMpTask_s3   = !task_s3.readTempDs && (mpTask_snpresp_s3 && task_s3.channel === CHIChannel.TXDAT && !snpRetry_s3 || mpTask_refill_s3 && refillNeedData_mp_s3 && !refillRetry_s3)
     io.toDS.dsWrWayOH_s3.valid   := valid_s3 && !task_s3.isMshrTask && task_s3.opcode === ReleaseData && task_s3.isChannelC
     io.toDS.dsWrWayOH_s3.bits    := dirResp_s3.wayOH // provide WayOH for SinkC(ReleaseData) to write DataStorage
-    io.toDS.mshrId_s3            := Mux(readOnCopyBack_s3, task_s3.mshrId, allocMshrIdx_s3)
-    io.toDS.dsRead_s3.valid      := valid_s3 && (readOnHit_s3 || readToTempDS_s3 || readOnCopyBack_s3 || readOnSnpOK_s3 || readOnMpTask_s3)
+    io.toDS.mshrId_s3            := Mux(readOnCopyBack_s3 || readOnCompData_s3, task_s3.mshrId, allocMshrIdx_s3)
+    io.toDS.dsRead_s3.valid      := valid_s3 && (readOnHit_s3 || readToTempDS_s3 || readOnCopyBack_s3 || readOnCompData_s3 || readOnSnpOK_s3 || readOnMpTask_s3)
     io.toDS.dsRead_s3.bits.set   := task_s3.set
-    io.toDS.dsRead_s3.bits.wayOH := Mux(readOnCopyBack_s3 || readOnMpTask_s3, task_s3.wayOH, io.dirResp_s3.bits.wayOH)
+    io.toDS.dsRead_s3.bits.wayOH := Mux(readOnCopyBack_s3 || readOnCompData_s3 || readOnMpTask_s3, task_s3.wayOH, io.dirResp_s3.bits.wayOH)
     io.toDS.dsRead_s3.bits.dest := MuxCase(
         DataDestination.SourceD,
         Seq(
-            (readOnCopyBack_s3 || readOnMpTask_s3 && mpTask_snpresp_s3)                  -> DataDestination.TXDAT,
-            (needProbeOnHit_a_s3 || (readOnSnpOK_s3 || readToTempDS_s3) && mshrAlloc_s3) -> DataDestination.TempDataStorage,
-            readOnSnpOK_s3                                                               -> DataDestination.TXDAT,
-            mpTask_refill_s3                                                             -> DataDestination.SourceD
+            (readOnCopyBack_s3 || readOnCompData_s3 || readOnMpTask_s3 && mpTask_snpresp_s3) -> DataDestination.TXDAT,
+            (needProbeOnHit_a_s3 || (readOnSnpOK_s3 || readToTempDS_s3) && mshrAlloc_s3)     -> DataDestination.TempDataStorage,
+            readOnSnpOK_s3                                                                   -> DataDestination.TXDAT,
+            mpTask_refill_s3                                                                 -> DataDestination.SourceD
         )
     )
     assert(
@@ -482,6 +509,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     )
 
     val valid_cbwrdata_mp_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && valid_s3
+    val valid_compdata_mp_s3 = isFwdSnoop_s3 && task_s3.channel === CHIChannel.TXDAT && valid_s3 && supportDCT.B
     val valid_snpdata_s3     = snpNeedData_b_s3 && !task_s3.isMshrTask && !mshrAlloc_s3 && !snpReplay_s3 && valid_s3
     val valid_snpdata_mp_s3  = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT && valid_s3
     val valid_snpresp_s3     = !snpNeedData_b_s3 && snpChnlReqOK_s3 && !snpReplay_s3
@@ -536,7 +564,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             )
         )
 
-    val fire_s3 = valid_reqbuf_s3 || needAllocDestSinkC_s3 || valid_replay_s3 || valid_refill_s3 || valid_cbwrdata_mp_s3 || valid_snpresp_s3 || valid_snpresp_mp_s3 || valid_snpdata_s3 || valid_snpdata_mp_s3 || valid_snpresp_mp_s3 || valid_refill_mp_s3
+    val fire_s3 = valid_reqbuf_s3 || needAllocDestSinkC_s3 || valid_replay_s3 || valid_refill_s3 || valid_cbwrdata_mp_s3 || valid_compdata_mp_s3 || valid_snpresp_s3 || valid_snpresp_mp_s3 || valid_snpdata_s3 || valid_snpdata_mp_s3 || valid_snpresp_mp_s3 || valid_refill_mp_s3
     assert(!(valid_replay_s3 && valid_refill_s3), "Only one of valid_replay_s3 and valid_refill_s3 can be true!")
 
     // -----------------------------------------------------------------------------------------
@@ -560,6 +588,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_s4              = RegNext(fire_s3, false.B)
     val needAllocDestSinkC_s4 = valid_s4 && RegEnable(needAllocDestSinkC_s3 && !valid_replay_s3, false.B, fire_s3)
     val valid_cbwrdata_mp_s4  = valid_s4 && RegEnable(valid_cbwrdata_mp_s3, false.B, fire_s3)
+    val valid_compdata_mp_s4  = valid_s4 && RegEnable(valid_compdata_mp_s3, false.B, fire_s3) && supportDCT.B
     val valid_snpdata_s4      = valid_s4 && RegEnable(valid_snpdata_s3, false.B, fire_s3)
     val valid_snpdata_mp_s4   = valid_s4 && RegEnable(valid_snpdata_mp_s3, false.B, fire_s3)
     val valid_snpresp_s4      = valid_s4 && RegEnable(valid_snpresp_s3, false.B, fire_s3)
@@ -569,12 +598,13 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val valid_refill_mp_s4    = valid_s4 && RegEnable(valid_refill_mp_s3, false.B, fire_s3)
     val valid_refill_s4       = valid_s4 && RegEnable(valid_refill_s3, false.B, fire_s3)
 
-    val fire_s4         = valid_cbwrdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || valid_refill_mp_s4
-    val needsDataBuf_s4 = valid_cbwrdata_mp_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || ((valid_refill_s4 || valid_refill_mp_s4) && (task_s4.opcode === AccessAckData || task_s4.opcode === GrantData)) // TODO: refill mp not retry
+    val fire_s4         = valid_cbwrdata_mp_s4 || valid_compdata_mp_s4 || valid_refill_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || valid_refill_mp_s4
+    val needsDataBuf_s4 = valid_cbwrdata_mp_s4 || valid_compdata_mp_s4 || valid_snpdata_s4 || valid_snpdata_mp_s4 || ((valid_refill_s4 || valid_refill_mp_s4) && (task_s4.opcode === AccessAckData || task_s4.opcode === GrantData)) // TODO: refill mp not retry
 
     val validVec_s4 = Cat(
         needAllocDestSinkC_s4,
         valid_cbwrdata_mp_s4,
+        valid_compdata_mp_s4,
         valid_snpdata_s4,
         valid_snpdata_mp_s4,
         valid_snpresp_s4,

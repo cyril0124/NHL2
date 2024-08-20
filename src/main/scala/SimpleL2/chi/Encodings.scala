@@ -11,6 +11,29 @@ object LinkState {
     val DEACTIVATE = "b01".U(width.W)
 }
 
+object CHICohState {
+    val width = 3
+
+    val I  = "b000".U(width.W)
+    val SC = "b001".U(width.W)
+    val UC = "b010".U(width.W)
+    val UD = "b010".U(width.W)
+    val SD = "b011".U(width.W)
+
+    val PassDirty = "b100".U(width.W)
+
+    val I_PD  = setPassDirty(I)
+    val SC_PD = setPassDirty(SC)
+    val UC_PD = setPassDirty(UC)
+    val UD_PD = setPassDirty(UD)
+    val SD_PD = setPassDirty(SD)
+
+    def setPassDirty(state: UInt, pd: Bool = true.B): UInt = {
+        require(state.getWidth == width)
+        state | Mux(pd, PassDirty, 0.U)
+    }
+}
+
 object RespErr {
     val width = 2
 

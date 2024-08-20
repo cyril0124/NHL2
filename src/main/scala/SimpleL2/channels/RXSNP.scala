@@ -34,6 +34,9 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
         io.task.bits.txnID       := io.rxsnp.bits.txnID
         io.task.bits.srcID       := io.rxsnp.bits.srcID
         io.task.bits.retToSrc    := io.rxsnp.bits.retToSrc
+
+        io.task.bits.fwdNID_opt.foreach(_ := io.rxsnp.bits.fwdNID)
+        io.task.bits.fwdTxnID_opt.foreach(_ := io.rxsnp.bits.fwdTxnID)
     } else {
         // latch one cycle for better timing
 
@@ -97,7 +100,7 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
     val opcodeMatchVec = VecInit(Seq.fill(checkOpcodes.length)(opcode).zip(checkOpcodes).map(x => x._1 === x._2)).asUInt
     assert(!(io.rxsnp.fire && opcodeMatchVec.orR && io.rxsnp.bits.retToSrc =/= 0.U), "RetToSrc is inapplicable for this opcode and must be set to 0")
 
-    val implOpcodes        = Seq(SnpShared, SnpUnique, SnpCleanInvalid, SnpNotSharedDirty, SnpNotSharedDirtyFwd, SnpMakeInvalid)
+    val implOpcodes        = Seq(SnpShared, SnpUnique, SnpCleanInvalid, SnpNotSharedDirty, SnpMakeInvalid) ++ { if (supportDCT) Seq(SnpSharedFwd, SnpNotSharedDirtyFwd, SnpUniqueFwd) else Nil }
     val implOpcodeMatchVec = VecInit(Seq.fill(implOpcodes.length)(opcode).zip(implOpcodes).map(x => x._1 === x._2)).asUInt
     assert(!(io.rxsnp.fire && !implOpcodeMatchVec.orR), "Snp opcode: 0x%x is not implemented", opcode)
 

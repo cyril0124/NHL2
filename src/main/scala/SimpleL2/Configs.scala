@@ -45,7 +45,7 @@ case class L2Param(
     nrTXRSPEntry: Int = 4,
     nrReqBufEntry: Int = 4,
     optParam: L2OptimizationParam = L2OptimizationParam(),
-    supportDCT: Boolean = false,
+    supportDCT: Boolean = true,
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,

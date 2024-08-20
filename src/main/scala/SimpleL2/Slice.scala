@@ -18,6 +18,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val sliceId     = Input(UInt(bankBits.W))
     })
 
+    println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
+    println(s"[${this.getClass().toString()}] optParam:${optParam}")
     println(s"[${this.getClass().toString()}] TaskBundle bits:${(new TaskBundle).getWidth}")
 
     io.tl          <> DontCare
@@ -208,6 +210,7 @@ object Slice extends App {
         case L2ParamKey =>
             L2Param(
                 nrClients = CFG_CLIENT.toInt,
+                supportDCT = true,
                 optParam = L2OptimizationParam(
                     reqBufOutLatch = false,
                     rxsnpHasLatch = false,

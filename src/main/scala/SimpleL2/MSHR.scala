@@ -28,6 +28,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_accessack  = Bool()
     val s_cbwrdata   = Bool()
     val s_snpresp    = Bool() // resposne SnpResp downwards
+    val s_compdat    = Bool() // send CompData for DCT
     val s_evict      = Bool() // evict downwards(for clean state)
     val s_wb         = Bool() // writeback downwards(for dirty state)
     val s_compack    = Bool() // response CompAck downwards
@@ -39,6 +40,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val w_accessack_sent  = Bool()
     val w_cbwrdata_sent   = Bool()
     val w_snpresp_sent    = Bool()
+    val w_compdat_sent    = Bool()
     val w_grantack        = Bool()
     val w_compdat         = Bool()
     val w_compdat_first   = Bool()
@@ -100,19 +102,21 @@ class MshrResps()(implicit p: Parameters) extends L2Bundle {
 }
 
 class MshrRetryStage2()(implicit p: Parameters) extends L2Bundle {
-    val isRetry_s2   = Bool()
-    val grant_s2     = Bool() // GrantData
-    val accessack_s2 = Bool() // AccessAckData
-    val cbwrdata_s2  = Bool() // CopyBackWrData
-    val snpresp_s2   = Bool() // SnpRespData
+    val isRetry_s2     = Bool()
+    val grant_s2       = Bool()                                 // GrantData
+    val accessack_s2   = Bool()                                 // AccessAckData
+    val cbwrdata_s2    = Bool()                                 // CopyBackWrData
+    val snpresp_s2     = Bool()                                 // SnpRespData
+    val compdat_opt_s2 = if (supportDCT) Some(Bool()) else None // CompData for DCT
 }
 
 class MshrRetryStage4()(implicit p: Parameters) extends L2Bundle {
-    val isRetry_s4   = Bool()
-    val grant_s4     = Bool() // GrantData
-    val accessack_s4 = Bool() // AccessAckData
-    val cbwrdata_s4  = Bool() // CopyBackWrData
-    val snpresp_s4   = Bool() // SnpResp / SnpRespData
+    val isRetry_s4     = Bool()
+    val grant_s4       = Bool()                                 // GrantData
+    val accessack_s4   = Bool()                                 // AccessAckData
+    val cbwrdata_s4    = Bool()                                 // CopyBackWrData
+    val snpresp_s4     = Bool()                                 // SnpResp / SnpRespData
+    val compdat_opt_s4 = if (supportDCT) Some(Bool()) else None // CompData for DCT
 }
 
 class MshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
@@ -389,8 +393,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Send [[MainPipe]] task
      * -------------------------------------------------------
      */
-    val mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp = WireInit(0.U.asTypeOf(Valid(new TaskBundle)))
-    Seq(mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp).foreach { task =>
+    val mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp, mpTask_compdat = WireInit(0.U.asTypeOf(Valid(new TaskBundle))) // mpTask_compdat is for DCT
+    Seq(mpTask_refill, mpTask_repl, mpTask_wbdata, mpTask_snpresp, mpTask_compdat).foreach { task =>
         /** Assignment signal values to common fields */
         task.bits.isMshrTask := true.B
         task.bits.sink       := io.id
@@ -529,29 +533,51 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Resp.setPassDirty(resp, passDirty)
     }
 
+    /** Send CompData task to [[MainPipe]] for DCT */
+    val fwdCacheState = Mux(
+        isSnpToBFwd(req.chiOpcode),
+        CHICohState.SC,
+        Mux(req.chiOpcode === SnpUniqueFwd, Mux(meta.isDirty || probeGotDirty, CHICohState.UD, CHICohState.UC), CHICohState.I)
+    )
+    val fwdPassDirty = req.chiOpcode === SnpUniqueFwd && (meta.isDirty || probeGotDirty)
+    mpTask_compdat.valid            := !state.s_compdat && state.w_sprobeack && supportDCT.B
+    mpTask_compdat.bits.isCHIOpcode := true.B
+    mpTask_compdat.bits.opcode      := CHIOpcodeDAT.CompData
+    mpTask_compdat.bits.channel     := CHIChannel.TXDAT
+    mpTask_compdat.bits.readTempDs  := true.B
+    mpTask_compdat.bits.tempDsDest  := DataDestination.TXDAT
+    mpTask_compdat.bits.resp        := CHICohState.setPassDirty(fwdCacheState, fwdPassDirty)
+    mpTask_compdat.bits.updateDir   := false.B   // Directory write-back is written by SnpResp[Data]Fwded, not CompData
+    mpTask_compdat.bits.srcID       := req.srcID // This field will be assigned to homeNID field of txdat channel
+    mpTask_compdat.bits.tgtID       := req.fwdNID_opt.getOrElse(0.U)
+    mpTask_compdat.bits.txnID       := req.fwdTxnID_opt.getOrElse(0.U)
+    mpTask_compdat.bits.dbID        := req.txnID
+
     /** Send SnpRespData/SnpResp task to [[MainPipe]] */
     val snpSrcID          = Mux(isRealloc, reallocSrcID, req.srcID)
     val snpTxnID          = Mux(isRealloc, reallocTxnID, req.txnID)
     val snpOpcode         = Mux(isRealloc, reallocOpcode, req.opcode)
     val snpRetToSrc       = Mux(isRealloc, reallocRetToSrc, req.retToSrc)
+    val isSnpFwd          = CHIOpcodeSNP.isSnpXFwd(snpOpcode) && supportDCT.B
     val isSnpOnceX        = CHIOpcodeSNP.isSnpOnceX(snpOpcode)
     val isSnpMakeInvalidX = CHIOpcodeSNP.isSnpMakeInvalidX(snpOpcode)
     val isSnpToB          = CHIOpcodeSNP.isSnpToB(snpOpcode)
+    val isSnpToN          = CHIOpcodeSNP.isSnpToN(snpOpcode)
     val snprespPassDirty  = !isSnpOnceX && !isSnpMakeInvalidX && (meta.isDirty || gotDirty) || isRealloc && snpGotDirty
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpToB, BRANCH, INVALID))
     val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ ) && !isSnpMakeInvalidX
     val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
-    mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack
+    mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack && state.s_compdat && state.w_compdat_sent
     mpTask_snpresp.bits.tgtID       := snpSrcID
     mpTask_snpresp.bits.txnID       := snpTxnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(snprespNeedData, SnpRespData, SnpResp)
-    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty) // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
+    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)                            // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
     mpTask_snpresp.bits.channel     := Mux(snprespNeedData, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := snprespNeedData && !releaseGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
-    mpTask_snpresp.bits.updateDir   := hasValidProbeAck && !isRealloc                                      // Update directory info when then received ProbeAck params are not all NtoN.
+    mpTask_snpresp.bits.updateDir   := hasValidProbeAck && !isRealloc || isSnpFwd && (isSnpToB && !dirResp.meta.isBranch || isSnpToN) // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = snprespFinalDirty,
         state = snprespFinalState,
@@ -559,7 +585,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         clientsOH = Mux(isSnpToB || isSnpOnceX, meta.clientsOH, Fill(nrClients, false.B)),
         fromPrefetch = false.B
     )
+    mpTask_snpresp.bits.fwdState_opt.foreach(_ := CHICohState.setPassDirty(fwdCacheState, fwdPassDirty))
     assert(!(valid && snprespPassDirty && snprespFinalDirty))
+    assert(!(isSnpFwd && req.isChannelB && !dirResp.hit), "Snp[*]Fwd must hit!")
 
     mpTask_repl.valid           := !state.s_repl && !state.w_replResp && state.s_read && state.s_makeunique && state.w_comp && state.w_compdat && state.s_compack
     mpTask_repl.bits.isReplTask := true.B
@@ -567,12 +595,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_repl.bits.updateDir  := false.B
 
     /** Arbitration between multiple [[MainPipe]] tasks */
-    io.tasks.mpTask.valid := mpTask_refill.valid || mpTask_wbdata.valid || mpTask_repl.valid || mpTask_snpresp.valid
+    io.tasks.mpTask.valid := mpTask_refill.valid || mpTask_wbdata.valid || mpTask_repl.valid || mpTask_snpresp.valid || mpTask_compdat.valid
     io.tasks.mpTask.bits := PriorityMux(
         Seq(
             mpTask_refill.valid  -> mpTask_refill.bits,
             mpTask_wbdata.valid  -> mpTask_wbdata.bits,
             mpTask_snpresp.valid -> mpTask_snpresp.bits,
+            mpTask_compdat.valid -> mpTask_compdat.bits,
             mpTask_repl.valid    -> mpTask_repl.bits
         )
     )
@@ -596,7 +625,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.s_snpresp := true.B
         }
 
-        assert(PopCount(Cat(mpTask_refill.valid, mpTask_wbdata.valid, mpTask_repl.valid, mpTask_snpresp.valid)) <= 1.U, "only one mpTask can fire at a time")
+        when(mpTask_compdat.valid && supportDCT.B) {
+            state.s_compdat := true.B
+        }
+
+        assert(
+            PopCount(Cat(mpTask_refill.valid, mpTask_wbdata.valid, mpTask_repl.valid, mpTask_snpresp.valid, mpTask_compdat.valid)) <= 1.U,
+            "multiple mpTasks are valid at the same time"
+        )
     }
 
     /** mpTask needs to be retried due to insufficent resources  */
@@ -622,6 +658,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 assert(state.s_snpresp, "try to retry an already activated task!")
                 assert(valid, "retry on an invalid mshr!")
             }
+            when(io.retryTasks.stage2.bits.compdat_opt_s2.getOrElse(false.B)) {
+                state.s_compdat := false.B
+                assert(state.s_compdat, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
         }.otherwise {
             when(io.retryTasks.stage2.bits.accessack_s2) {
                 state.w_accessack_sent := true.B
@@ -638,6 +679,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             when(io.retryTasks.stage2.bits.snpresp_s2) {
                 state.w_snpresp_sent := true.B
                 assert(!state.w_snpresp_sent)
+            }
+            when(io.retryTasks.stage2.bits.compdat_opt_s2.getOrElse(false.B)) {
+                state.w_compdat_sent := true.B
+                assert(!state.w_compdat_sent)
             }
         }
     }
@@ -663,6 +708,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 assert(state.s_snpresp, "try to retry an already activated task!")
                 assert(valid, "retry on an invalid mshr!")
             }
+            when(io.retryTasks.stage4.bits.compdat_opt_s4.getOrElse(false.B)) {
+                state.s_compdat := false.B
+                assert(state.s_compdat, "try to retry an already activated task!")
+                assert(valid, "retry on an invalid mshr!")
+            }
         }.otherwise {
             when(io.retryTasks.stage4.bits.accessack_s4) {
                 state.w_accessack_sent := true.B
@@ -679,6 +729,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             when(io.retryTasks.stage4.bits.snpresp_s4) {
                 state.w_snpresp_sent := true.B
                 assert(!state.w_snpresp_sent)
+            }
+            when(io.retryTasks.stage4.bits.compdat_opt_s4.getOrElse(false.B)) {
+                state.w_compdat_sent := true.B
+                assert(!state.w_compdat_sent)
             }
         }
     }
