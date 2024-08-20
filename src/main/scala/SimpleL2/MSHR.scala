@@ -224,7 +224,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         req.isAliasTask,
         nestedRelease,
         Cat(req.tag, req.set, 0.U(6.W))
-    ) // TODO:
+    )
 
     val promoteT_normal = dirResp.hit && metaNoClients && meta.isTip
     val promoteT_l3     = !dirResp.hit && gotT
@@ -439,7 +439,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_refill.bits.isReplTask  := !dirResp.hit && !meta.isInvalid && !state.w_replResp
     mpTask_refill.bits.updateDir   := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
     mpTask_refill.bits.tempDsDest := Mux(
-        io.status.gotDirtyData,
+        gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty,
         /** For TRUNK state, dirty data will be written into [[DataStorage]] after receiving ProbeAckData */
         DataDestination.SourceD | DataDestination.DataStorage,
         DataDestination.SourceD
@@ -695,7 +695,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 gotCompData := true.B
 
                 gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
-                gotDirty := rxdat.bits.resp === Resp.UC_PD
+                gotDirty := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
                 datDBID  := rxdat.bits.dbID
                 datSrcID := rxdat.bits.srcID
             }
@@ -1055,6 +1055,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val nested = io.nested.snoop
 
         when(nested.toN) {
+            gotT := false.B
+
             when(needRead && state.s_compack) {
                 state.s_read          := false.B
                 state.w_compdat       := false.B
@@ -1072,6 +1074,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         }
 
         when(nested.toB) {
+            gotT := false.B
+
             when(needRead && state.s_compack) {
                 when(reqNeedT) {
                     state.s_read          := false.B
@@ -1158,7 +1162,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         !(needWb && gotWbResp) &&         // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
         !io.status.waitProbeAck           // Does not wait for any ProbeAck
     }
-    io.status.gotDirtyData := gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
+    io.status.gotDirtyData := gotDirty || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))
