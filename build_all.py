@@ -2,6 +2,7 @@
 import subprocess
 import argparse
 import json
+import os
 
 json_file_path = 'module_info.json'
 
@@ -37,7 +38,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--target', '-t', dest="target", type=str, help='build target')
     parser.add_argument('--package', '-p', dest="package", type=str, default="SimpleL2", help='build target package')
+    parser.add_argument('--release', '-r', dest="release", action='store_true', help='Build with release option')
     args = parser.parse_args()
+
+    if args.release:
+        os.environ['GEN_RELEASE'] = '1'
     
     if args.target != None:
         package = args.package

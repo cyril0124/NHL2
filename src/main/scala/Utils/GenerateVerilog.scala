@@ -8,12 +8,21 @@ import chisel3.stage.ChiselGeneratorAnnotation
 object GenerateVerilog {
     def apply(args: Array[String], gen: () => RawModule, release: Boolean = false, name: String = "Unknown", split: Boolean = false) {
 
+        val GEN_RELEASE = sys.env.get("GEN_RELEASE")
+        val isRelease = if (GEN_RELEASE.isEmpty) {
+            release
+        } else {
+            val _isRelease = GEN_RELEASE.get == "1"
+            println(s"[GenerateVerilog][${name}] get GEN_RELEASE => ${GEN_RELEASE.get} isRelease => ${_isRelease}")
+            _isRelease
+        }
+
         var extraFirtoolOptions = Seq(FirtoolOption("--export-module-hierarchy"))
         if (split) {
             extraFirtoolOptions = extraFirtoolOptions ++ Seq(FirtoolOption("--split-verilog"), FirtoolOption("-o=./build/" + name))
         }
 
-        val buildOpt = if (release) {
+        val buildOpt = if (isRelease) {
             FirtoolOption("-O=release")
         } else {
             FirtoolOption("-O=debug")
