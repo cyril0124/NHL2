@@ -360,6 +360,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val matchTag_s2            = RegEnable(task_s2.tag, validSnpHitReq_s2)
         val getMatchedMshrReq_s2   = task_s2.isMshrTask && !task_s2.isCHIOpcode && !task_s2.isReplTask && matchSet_s2 === task_s2.set && matchTag_s2 === task_s2.tag
         when(validSnpHitReq_s2) {
+            releaseCnt_s2          := 0.U
             hasPendingSnpHitReq_s2 := true.B
             assert(!hasPendingSnpHitReq_s2, "set: 0x%x tag: 0x%x addr: 0x%x", matchSet_s2, matchTag_s2, Cat(matchTag_s2, matchSet_s2, 0.U(6.W)))
         }.elsewhen(getMatchedMshrReq_s2) {
