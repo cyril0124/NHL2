@@ -95,6 +95,8 @@ tl_a.acquire_block = function (this, addr, param, source)
         this.bits.source:set(source or 0)
         this.bits.user_alias:set(0)
         this.bits.size:set(6) -- 2^6 == 64
+        env.posedge()
+        this.ready:expect(1)
     env.negedge()
         this.valid:set(0)
     env.negedge()
@@ -263,6 +265,7 @@ local chi_txdat = ([[
     | resp
     | respErr
     | txnID
+    | tgtID
     | dbID
     | dataID
     | data
@@ -274,6 +277,7 @@ local chi_txrsp = ([[
     | ready
     | opcode
     | resp
+    | tgtID
     | txnID
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txrsp_", name = "chi_txrsp"}
 
@@ -339,7 +343,11 @@ local chi_rxsnp = ([[
     | ready
     | addr
     | opcode
+    | srcID
     | txnID
+    | fwdNID
+    | fwdTxnID
+    | doNotGoToSD
     | retToSrc
 ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxsnp_", name = "chi_rxsnp"}
 
@@ -351,6 +359,26 @@ chi_rxsnp.send_request = function(this, addr, opcode, txn_id, ret2src)
         chi_rxsnp.bits.addr:set(addr, true)
         chi_rxsnp.bits.opcode:set(opcode)
         chi_rxsnp.bits.retToSrc:set(ret2src)
+        chi_rxsnp.valid:set(1)
+        env.posedge()
+        chi_rxsnp.ready:expect(1)
+    env.negedge()
+        chi_rxsnp.valid:set(0)
+end
+
+chi_rxsnp.send_fwd_request = function(this, addr, opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+    local do_not_go_to_sd = do_not_go_to_sd or false
+    local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
+    env.negedge()
+        chi_rxsnp.ready:expect(1)
+        chi_rxsnp.bits.srcID:set(src_id)
+        chi_rxsnp.bits.txnID:set(txn_id)
+        chi_rxsnp.bits.addr:set(addr, true)
+        chi_rxsnp.bits.opcode:set(opcode)
+        chi_rxsnp.bits.retToSrc:set(ret2src)
+        chi_rxsnp.bits.fwdNID:set(fwd_nid)
+        chi_rxsnp.bits.fwdTxnID:set(fwd_txn_id)
+        chi_rxsnp.bits.doNotGoToSD:set(do_not_go_to_sd)
         chi_rxsnp.valid:set(1)
         env.posedge()
         chi_rxsnp.ready:expect(1)
@@ -5677,7 +5705,7 @@ local test_snoop_hit_req = env.register_test_case "test_snoop_hit_req" {
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
             env.posedge()
-                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC_PD) -- dbID = 5
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
         end
@@ -5780,7 +5808,7 @@ local test_mshr_realloc = env.register_test_case "test_mshr_realloc" {
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
             env.posedge()
-                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
+                chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC_PD) -- dbID = 5
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
         end
@@ -5950,17 +5978,32 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
             func(1, 3)
         end
 
-        local function do_test_SnpNotSharedDirty(test_opcode)
-            local test_opcode = test_opcode or OpcodeSNP.SnpNotSharedDirty
-
-            print(string.format("\nstart test %s\n", OpcodeSNP(test_opcode)))
+        local function do_test_SnpNotSharedDirty()
+            print("\nstart test OpcodeSNP.SnpNotSharedDirty\n")
             
             do
                 -- SnpNotSharedDirty on I
                 env.negedge()
                     write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, 0) -- txn_id = 0, ret2src = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 0) -- txn_id = 0, ret2src = 0
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            do
+                -- SnpNotSharedDirty on I
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+                env.negedge()
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, 1) -- txn_id = 0, ret2src = 1
                 verilua "appendTasks" {
                     function ()
                         env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
@@ -5982,7 +6025,7 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
                         {s = 256, e = 256 + 63, v = 0xbe1ef}
                     }, 512))
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, ret2src) -- txn_id = 0
                 verilua "appendTasks" {
                     function ()
                         if ret2src == 0 then
@@ -6011,7 +6054,7 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
                         {s = 256, e = 256 + 63, v = 0xbe1ef}
                     }, 512))
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, ret2src) -- txn_id = 0
                 verilua "appendTasks" {
                     function ()
                         if ret2src == 0 then
@@ -6040,7 +6083,7 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
                         {s = 256, e = 256 + 63, v = 0xbe1ef}
                     }, 512))
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, ret2src) -- txn_id = 0
                 verilua "appendTasks" {
                     function ()
                         env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
@@ -6066,7 +6109,7 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
                         {s = 256, e = 256 + 63, v = 0xbe1ef}
                     }, 512))
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, ret2src) -- txn_id = 0
                 verilua "appendTasks" {
                     function()
                         env.expect_happen_until(10, function() return mshrs[0].io_status_valid:is(1) end)
@@ -6128,7 +6171,7 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
                         {s = 256, e = 256 + 63, v = 0xbe1ef}
                     }, 512))
                 env.negedge()
-                    chi_rxsnp:send_request(to_address(0x01, 0x01), test_opcode, 0, ret2src) -- txn_id = 0
+                    chi_rxsnp:send_request(to_address(0x01, 0x01), OpcodeSNP.SnpNotSharedDirty, 0, ret2src) -- txn_id = 0
                 verilua "appendTasks" {
                     function()
                         env.expect_happen_until(10, function() return mshrs[0].io_status_valid:is(1) end)
@@ -6256,10 +6299,1131 @@ local test_other_snoop = env.register_test_case "test_other_snoop" {
             iterate_all({MixedState.BC, MixedState.TC, MixedState.TTC, MixedState.TTD}, SnpMakeInvalid_common)
         end
 
-        do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirty)
-        do_test_SnpNotSharedDirty(OpcodeSNP.SnpNotSharedDirtyFwd)
+        do_test_SnpNotSharedDirty()
 
         do_test_SnpMakeInvalid()
+    end
+}
+
+local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+        
+        local function iterate_all(func)
+            func(0, 0)
+            func(0, 1)
+            func(0, 2)
+            func(0, 3)
+            func(1, 0)
+            func(1, 1)
+            func(1, 2)
+            func(1, 3)
+        end
+
+        local function do_test_SnpNotSharedDirtyFwd(test_opcode)
+            assert(test_opcode == OpcodeSNP.SnpNotSharedDirtyFwd or test_opcode == OpcodeSNP.SnpSharedFwd)
+            local opcode_str = OpcodeSNP(test_opcode)
+            print("\nstart test OpcodeSNP." .. opcode_str .. "\n")
+            
+            do
+                -- SnpNotSharedDirtyFwd on I
+                local src_id = 4
+                local ret2src = 0
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                        chi_txrsp.bits.txnID:expect(txn_id)
+                        chi_txrsp.bits.tgtID:expect(src_id)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            local function SnpNotSharedDirtyFwd_BC(ret2src, client)
+                -- SnpNotSharedDirtyFwd on BC
+                print(opcode_str .. "_BC ret2src=" .. ret2src .. ", client=" .. client)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                            chi_txrsp.bits.txnID:expect(txn_id)
+                            chi_txrsp.bits.tgtID:expect(src_id)
+                        elseif ret2src == 1 then
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(txn_id)
+                            chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id)
+                        chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_not_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(15)
+                mshrs[0].io_status_valid:expect(0)
+            end
+            
+            local function SnpNotSharedDirtyFwd_TC(ret2src, client)
+                -- SnpNotSharedDirtyFwd on TC
+                print(opcode_str .. "_TC ret2src=" .. ret2src .. ", client=" .. client)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                            chi_txrsp.bits.txnID:expect(txn_id)
+                            chi_txrsp.bits.tgtID:expect(src_id)
+                        elseif ret2src == 1 then
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(txn_id)
+                            chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id)
+                        chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        mp.io_dirWrite_s3_valid:expect(0)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(15)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local function SnpNotSharedDirtyFwd_TD(ret2src, client)
+                -- SnpNotSharedDirtyFwd on TD
+                print(opcode_str .. "_TD ret2src=" .. ret2src .. ", client=" .. client)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 or ret2src == 1 then
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(txn_id)
+                            chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id)
+                        chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(10, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        mp.io_dirWrite_s3_valid:expect(0)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(15)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local function SnpNotSharedDirtyFwd_TTC(ret2src, client, probeack_data)
+                -- SnpNotSharedDirtyFwd on TTC
+                print(opcode_str .. "_TTC ret2src=" .. ret2src, "client=" .. client, "probeack_data=" .. tostring(probeack_data))
+
+                assert(client == 1 or client == 2)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTC, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            if probeack_data == true then
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                            else
+                                env.expect_happen_until(25, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                                chi_txrsp.bits.txnID:expect(txn_id)
+                                chi_txrsp.bits.tgtID:expect(src_id)
+                            end
+                        elseif ret2src == 1 then
+                            if probeack_data == true then
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                            else
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                            end
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        if probeack_data == true then
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                            chi_txdat.bits.txnID:expect(fwd_txn_id)
+                            chi_txdat.bits.tgtID:expect(fwd_nid)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                        else
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(fwd_txn_id)
+                            chi_txdat.bits.tgtID:expect(fwd_nid)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.needProbe_b_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        mp.io_dirWrite_s3_valid:expect(0)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+
+                        env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+                        if probeack_data == true then
+                            if client == 1 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 0)
+                            elseif client == 2 then 
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 28)
+                            end
+                        else
+                            if client == 1 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 0)
+                            elseif client == 2 then 
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 28)
+                            end
+                        end
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(30)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local function SnpNotSharedDirtyFwd_TTD(ret2src, client, probeack_data)
+                -- SnpNotSharedDirtyFwd on TTD
+                print(opcode_str .. "_TTD ret2src=" .. ret2src, "client=" .. client, "probeack_data=" .. tostring(probeack_data))
+
+                assert(client == 1 or client == 2)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TTD, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), test_opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            if probeack_data == true then
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                            else
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                            end
+                        elseif ret2src == 1 then
+                            if probeack_data == true then
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                            else
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                                chi_txdat.bits.txnID:expect(txn_id)
+                                chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(25, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                            end
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        if probeack_data == true then
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xabab end)
+                            chi_txdat.bits.txnID:expect(fwd_txn_id)
+                            chi_txdat.bits.tgtID:expect(fwd_nid)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xefef end)
+                        else
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(fwd_txn_id)
+                            chi_txdat.bits.tgtID:expect(fwd_nid)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.needProbe_b_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        mp.io_dirWrite_s3_valid:expect(0)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+
+                        env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toB) end)
+                        if probeack_data == true then
+                            if client == 1 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 0)
+                            elseif client == 2 then 
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 28)
+                            end
+                        else
+                            if client == 1 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 0)
+                            elseif client == 2 then 
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 28)
+                            end
+                        end
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(15, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.BC) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(client) end)
+                    end
+                }
+                env.negedge(30)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            iterate_all(SnpNotSharedDirtyFwd_BC)
+            iterate_all(SnpNotSharedDirtyFwd_TC)
+            iterate_all(SnpNotSharedDirtyFwd_TD)
+
+            local function iterate_all_1(func)
+                func(0, 1, false)
+                func(0, 2, false)
+                func(1, 1, false)
+                func(1, 2, false)
+                func(0, 1, true)
+                func(0, 2, true)
+                func(1, 1, true)
+                func(1, 2, true)
+            end
+
+            iterate_all_1(SnpNotSharedDirtyFwd_TTC)
+            iterate_all_1(SnpNotSharedDirtyFwd_TTD)
+        end
+
+        local function do_test_SnpUniqueFwd()
+            do
+                -- SnpUniqueFwd on I
+                local src_id = 4
+                local ret2src = 0
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                        chi_txrsp.bits.txnID:expect(txn_id)
+                        chi_txrsp.bits.tgtID:expect(src_id)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                    end
+                }
+                env.negedge(10)
+            end
+
+            local function SnpUniqueFwd_TC_BC(state, ret2src, client)
+                -- SnpUniqueFwd on TC or BC
+
+                assert(state == MixedState.TC or state == MixedState.BC)
+
+                if ret2src == 1 then
+                    -- 
+                    -- from IHI0050G: P269
+                    -- RetToSrc is inapplicable and must be set to 0 in:
+                    --      SnpCleanShared, SnpCleanInvalid, and SnpMakeInvalid
+                    --      SnpOnceFwd and SnpUniqueFwd
+                    --      SnpMakeInvalidStash, SnpStashUnique, and SnpStashShared
+                    --      SnpQuery
+                    -- 
+                    return
+                end
+
+                print("SnpUniqueFwd_" .. MixedState(state) .. " ret2src=" .. ret2src .. ", client=" .. client)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, state, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(20, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                            chi_txrsp.bits.txnID:expect(txn_id); chi_txrsp.bits.tgtID:expect(src_id)
+                        elseif ret2src == 1 then
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        else
+                            assert(false)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                        if client ~= 0 then
+                            env.expect_happen_until(15, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+                        end
+
+                        if client == 0 then
+                            -- do nothing
+                        elseif client == 1 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                        elseif client == 2 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 28)
+                        elseif client == 3 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                            env.negedge()
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 28)
+                        end
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(20, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0) end)
+                    end
+                }
+                env.negedge(30)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local SnpUniqueFwd_BC = function(ret2src, client)
+                SnpUniqueFwd_TC_BC(MixedState.BC, ret2src, client)
+            end
+
+            local SnpUniqueFwd_TC = function(ret2src, client)
+                SnpUniqueFwd_TC_BC(MixedState.TC, ret2src, client)
+            end
+
+            local function SnpUniqueFwd_TD(ret2src, client)
+                -- SnpUniqueFwd on TD
+
+                if ret2src == 1 then return end
+
+                print("SnpUniqueFwd_TD ret2src=" .. ret2src .. ", client=" .. client)
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TD, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                        env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC_PD) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC_PD) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                        if client ~= 0 then
+                            env.expect_happen_until(15, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+                        end
+
+                        if client == 0 then
+                            -- do nothing
+                        elseif client == 1 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                        elseif client == 2 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 28)
+                        elseif client == 3 then
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 0)
+                            env.negedge()
+                            tl_c:probeack(to_address(0x01, 0x01), TLParam.BtoN, 28)
+                        end
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(20, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0) end)
+                    end
+                }
+                env.negedge(30)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local function SnpUniqueFwd_TTC_TTD(state, ret2src, client, probeack_data)
+                -- SnpUniqueFwd on TTC or TTD
+
+                if ret2src == 1 then error("ret2src shoule be 0") end
+                if client == 0 or client == 3 then error("TTC/TTD should have only one client") end
+                assert(state == MixedState.TTC or state == MixedState.TTD)
+
+                print("SnpUniqueFwd_" .. MixedState(state) .. " ret2src=" .. ret2src .. ", client=" .. client .. ", probeack_data=" .. tostring(probeack_data))
+
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, state, client)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(to_address(0x01, 0x01), OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                local expect_compdat_resp = state == MixedState.TTC and CHIResp.UC or CHIResp.UC_PD
+                local expect_data_0, expect_data_1
+                if probeack_data == true then
+                    expect_compdat_resp = CHIResp.UC_PD
+                    expect_data_0 = 0xabab; expect_data_1 = 0xefef
+                else
+                    expect_data_0 = 0xde1ad; expect_data_1 = 0xbe1ef
+                end
+                verilua "appendTasks" {
+                    function ()
+                        if probeack_data == true then
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == expect_data_0 end)
+                            chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == expect_data_1 end)
+                        else
+                            if state == MixedState.TTC then
+                                env.expect_happen_until(20, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                                chi_txrsp.bits.txnID:expect(txn_id); chi_txrsp.bits.tgtID:expect(src_id)
+                            else
+                                env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == expect_data_0 end)
+                                chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I_PD) and chi_txdat.bits.data:get()[1] == expect_data_1 end)
+                            end
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(expect_compdat_resp) and chi_txdat.bits.data:get()[1] == expect_data_0 end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(expect_compdat_resp) and chi_txdat.bits.data:get()[1] == expect_data_1 end)
+                    end,
+                    function ()
+                        env.expect_not_happen_until(10, function() return mp.io_dirWrite_s3_valid:is(1) end)
+                    end,
+                    function ()
+                        env.expect_happen_until(10, function() return mp.io_mshrAlloc_s3_valid:is(1) end)
+                        mp.needDCT_s3:expect(1)
+                        mp.io_toDS_dsRead_s3_valid:expect(1)
+                        env.negedge()
+                            mp.io_allocDestSinkC_s4_valid:expect(1)
+                        if client ~= 0 then
+                            env.expect_happen_until(15, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) end)
+                        end
+
+                        if probeack_data == true then
+                            if client == 1 then
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 0)
+                            elseif client == 2 then 
+                                tl_c:probeack_data(to_address(0x01, 0x01), TLParam.TtoB, "0xabab", "0xefef", 28)
+                            end
+                        else
+                            if client == 1 then
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 0)
+                            elseif client == 2 then 
+                                tl_c:probeack(to_address(0x01, 0x01), TLParam.TtoB, 28)
+                            end
+                        end
+                    end,
+                    function ()
+                        -- Check writeback directory
+                        env.expect_happen_until(20, function () return mp.io_dirWrite_s3_valid:is(1) and mp.io_dirWrite_s3_bits_meta_state:is(MixedState.I) and mp.io_dirWrite_s3_bits_meta_clientsOH:is(0) end)
+                    end
+                }
+                env.negedge(30)
+                mshrs[0].io_status_valid:expect(0)
+            end
+
+            local SnpUniqueFwd_TTC = function(ret2src, client, probeack_data) 
+                SnpUniqueFwd_TTC_TTD(MixedState.TTC, ret2src, client, probeack_data)
+            end
+
+            local SnpUniqueFwd_TTD = function(ret2src, client, probeack_data)
+                SnpUniqueFwd_TTC_TTD(MixedState.TTD, ret2src, client, probeack_data)
+            end
+
+            iterate_all(SnpUniqueFwd_BC)
+            iterate_all(SnpUniqueFwd_TC)
+            iterate_all(SnpUniqueFwd_TD)
+
+            SnpUniqueFwd_TTC(0, 1, false)
+            SnpUniqueFwd_TTC(0, 1, true)
+            SnpUniqueFwd_TTC(0, 2, false)
+            SnpUniqueFwd_TTC(0, 2, true)
+            
+            SnpUniqueFwd_TTD(0, 1, false)
+            SnpUniqueFwd_TTD(0, 1, true)
+            SnpUniqueFwd_TTD(0, 2, false)
+            SnpUniqueFwd_TTD(0, 2, true)
+        end
+
+        local function do_test_SnpNotSharedDirtyFwd_nested()
+            -- 
+            -- normal nested (nested meta)
+            -- snpHitReq (nested req)
+            -- snpHitWriteBack (nested meta) (WriteBackFull, Evict)
+            -- 
+
+            -- 
+            -- I    I <-- [1] AcquireBlock.NtoB
+            --  \  /
+            --   BC <-- [2] SnpSharedFwd
+            -- TODO: Not a valid scenario because AcquireBlock is hit
+            -- 
+
+            -- 
+            -- I    I <-- [1] AcquireBlock/AcquirePerm.NtoT
+            --  \  /
+            --   BC <-- [2] SnpSharedFwd
+            -- 
+            do
+                local function test(ret2src)
+                    printf("ret2src = %d", ret2src)
+                    local addr = to_address(0x01, 0x01)
+                    local ret2src = ret2src or 0
+                    local src_id = 4
+                    local txn_id = 0
+                    local fwd_nid = 1
+                    local fwd_txn_id = 2
+                    local do_not_go_to_sd = 0
+                    env.negedge()
+                        write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, 0)
+                    env.negedge()
+                        write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                            {s = 0,   e = 63, v = 0xde1ad},
+                            {s = 256, e = 256 + 63, v = 0xbe1ef}
+                        }, 512))
+                    verilua "appendTasks" {
+                        function ()
+                            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                        end
+                    }
+                    env.negedge()
+                        tl_a:acquire_block(addr, TLParam.NtoT, 4)
+                    if ret2src == 1 then env.negedge(3) --[[ Wait for writing TempDS finish caused by AcquireBlock ]] end
+                    env.negedge()
+                        chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpSharedFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                    
+                    verilua "appendTasks" {
+                        function ()
+                            env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_channel:is(0x02) and mp.task_s3_isMshrTask:is(0) end)
+                            mp.task_s3_snpHitReq:expect(1)
+                            mp.task_s3_snpGotDirty:expect(0)
+                            mp.io_dirWrite_s3_valid:expect(0)
+                            mp.io_mshrAlloc_s3_valid:expect(1)
+                            mp.io_mshrAlloc_s3_bits_realloc:expect(1)
+                            if ret2src == 0 then
+                                env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(3) --[[ TXRSP Channel ]] end)
+                            else
+                                env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(5) --[[ TXDAT Channel ]] end)
+                            end
+                            mp.io_dirWrite_s3_valid:expect(0) -- Not necessary to update directory info
+                        end,
+                        function ()
+                            if ret2src == 0 then
+                                env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.txnID:is(txn_id) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                                chi_txrsp.bits.txnID:expect(txn_id); chi_txrsp.bits.tgtID:expect(src_id)
+                            elseif ret2src == 1 then
+                                env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                                chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                                env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                            end
+                        end,
+                        function ()
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+                            env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    }
+
+                    env.negedge(30)
+                    chi_rxrsp:comp(0, 0)
+                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xde1ad end)
+                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbe1ef end)
+                    tl_e:grantack(0)
+                    env.negedge(50)
+                    mshrs[0].io_status_valid:expect(0)
+                end
+                test(0)
+                test(1)
+            end
+
+            -- TODO: Snp and releaseGotDirty?
+
+            -- 
+            -- I      I <-- [1] AcquireBlock.NtoB
+            --  \    /
+            --   TC/TD  <-- [2] SnpSharedFwd
+            -- TODO: Not a valid scenario because AcquireBlock is hit
+            -- 
+            
+
+            -- 
+            -- BC      I <-- [1] AcquireBlock.NtoB
+            --  \     /
+            --   TC/TD  <-- [2] SnpSharedFwd
+            -- TODO: Not a valid scenario because AcquireBlock is hit
+            -- 
+
+            -- 
+            -- BC      I <-- [1] AcquireBlock/AcquirePerm.NtoT
+            --  \     /
+            --   TC/TD <-- [2] SnpSharedFwd
+            --
+            -- TODO: Not a valid scenario because Acquire hit on reqNeedT and reqNeedB will block snoop to avoid doing extra snoop
+            --
+            -- do
+            --     local function test(state, ret2src)
+            --         printf("state => %s, ret2src => %d", state, ret2src)
+            --         local addr = to_address(0x01, 0x01)
+            --         local ret2src = ret2src or 0
+            --         local src_id = 4
+            --         local txn_id = 0
+            --         local fwd_nid = 1
+            --         local fwd_txn_id = 2
+            --         local do_not_go_to_sd = 0
+            --         env.negedge()
+            --             write_dir(0x01, utils.uint_to_onehot(0), 0x01, state, 0x02)
+            --         env.negedge()
+            --             write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+            --                 {s = 0,   e = 63, v = 0xde1ad},
+            --                 {s = 256, e = 256 + 63, v = 0xbe1ef}
+            --             }, 512))
+            --         verilua "appendTasks" {
+            --             function ()
+            --                 env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.address:is(addr) and tl_b.bits.param:is(TLParam.toN) end)
+            --             end
+            --         }
+            --         env.negedge()
+            --             tl_a:acquire_block(addr, TLParam.NtoT, 4)
+            --         if ret2src == 1 then env.negedge(3) --[[ Wait for writing TempDS finish caused by AcquireBlock ]] end
+            --         env.negedge(5)
+            --         mshrs[0].io_tasks_mpTask_ready:set_force(0)
+            --         reqArb.io_taskMSHR_s0_ready:set_force(0)
+            --         reqArb.io_taskMSHR_s0_ready_0:set_force(0)
+            --             tl_c:probeack(addr, TLParam.BtoN, 16)
+            --         env.negedge(2)
+            --             chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpSharedFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+            --         mshrs[0].io_tasks_mpTask_ready:set_release()
+            --         reqArb.io_taskMSHR_s0_ready:set_release()
+            --         reqArb.io_taskMSHR_s0_ready_0:set_release()
+                    
+            --         verilua "appendTasks" {
+            --             function ()
+            --                 env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_channel:is(0x02) and mp.task_s3_isMshrTask:is(0) end)
+            --                 mp.task_s3_snpHitReq:expect(1)
+            --                 mp.task_s3_snpGotDirty:expect(0)
+            --                 mp.io_dirWrite_s3_valid:expect(0)
+            --                 mp.io_mshrAlloc_s3_valid:expect(1)
+            --                 mp.io_mshrAlloc_s3_bits_realloc:expect(1)
+            --                 if ret2src == 0 then
+            --                     env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(3) --[[ TXRSP Channel ]] end)
+            --                 else
+            --                     env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(5) --[[ TXDAT Channel ]] end)
+            --                 end
+            --                 mp.io_dirWrite_s3_valid:expect(0) -- Not necessary to update directory info
+            --             end,
+            --             function ()
+            --                 if ret2src == 0 then
+            --                     env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.txnID:is(txn_id) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+            --                     chi_txrsp.bits.txnID:expect(txn_id); chi_txrsp.bits.tgtID:expect(src_id)
+            --                 elseif ret2src == 1 then
+            --                     env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+            --                     chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+            --                     env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+            --                 end
+            --             end,
+            --             function ()
+            --                 env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+            --                 chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+            --                 env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.SC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+            --             end
+            --         }
+
+            --         env.negedge(30)
+            --         chi_rxrsp:comp(0, 0)
+            --         env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xde1ad end)
+            --         env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbe1ef end)
+            --         tl_e:grantack(0)
+            --         env.negedge(50)
+            --         mshrs[0].io_status_valid:expect(0)
+            --     end
+            --     test(MixedState.TC, 0)
+            --     test(MixedState.TD, 1)
+            -- end
+
+            -- 
+            -- BC       BC <-- [1] AcquirePerm.BtoT
+            --  \      /
+            --   TC/TD  <-- [2] SnpSharedFwd
+            -- 
+
+
+            -- 
+            -- TC/TD    I <-- [1] AcquireBlock.NtoB
+            --   \     /    
+            --  TTC/TTD <-- [2] SnpSharedFwd
+            -- 
+
+            -- 
+            -- TC/TD    I <-- [1] AcquireBlock/AcquirePerm.NtoT
+            --  \      / 
+            --  TTC/TTD <-- [2] SnpSharedFwd
+            -- 
+
+        end
+
+        local function do_test_SnpUniqueFwd_nested()
+            -- 
+            -- I    I <-- [1] AcquireBlock/AcquirePerm.NtoT
+            --  \  /
+            --   BC <-- [2] SnpUniqueFwd
+            -- 
+            do
+                local addr = to_address(0x01, 0x01)
+                local ret2src = 0 -- ret2src should be 0 for SnpUniqueFwd
+                local src_id = 4
+                local txn_id = 0
+                local fwd_nid = 1
+                local fwd_txn_id = 2
+                local do_not_go_to_sd = 0
+                env.negedge()
+                    write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, 0)
+                env.negedge()
+                    write_ds(0x01, ("0b0001"):number(), utils.bitpat_to_hexstr({
+                        {s = 0,   e = 63, v = 0xde1ad},
+                        {s = 256, e = 256 + 63, v = 0xbe1ef}
+                    }, 512))
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+                    end
+                }
+                env.negedge()
+                    tl_a:acquire_block(addr, TLParam.NtoT, 4)
+                if ret2src == 1 then env.negedge(3) --[[ Wait for writing TempDS finish caused by AcquireBlock ]] end
+                env.negedge()
+                    chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
+                
+                verilua "appendTasks" {
+                    function ()
+                        env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_channel:is(0x02) and mp.task_s3_isMshrTask:is(0) end)
+                        mp.task_s3_snpHitReq:expect(1)
+                        mp.task_s3_snpGotDirty:expect(0)
+                        mp.io_dirWrite_s3_valid:expect(0)
+                        mp.io_mshrAlloc_s3_valid:expect(1)
+                        mp.io_mshrAlloc_s3_bits_realloc:expect(1)
+                        if ret2src == 0 then
+                            env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(3) --[[ TXRSP Channel ]] end)
+                        else
+                            env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_isMshrTask:is(1) and mp.task_s3_isCHIOpcode:is(1) and mp.task_s3_channel:is(5) --[[ TXDAT Channel ]] end)
+                        end
+                        mp.io_dirWrite_s3_valid:expect(1)
+                    end,
+                    function ()
+                        if ret2src == 0 then
+                            env.expect_happen_until(15, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.txnID:is(txn_id) and chi_txrsp.bits.resp:is(CHIResp.I) end)
+                            chi_txrsp.bits.txnID:expect(txn_id); chi_txrsp.bits.tgtID:expect(src_id)
+                        elseif ret2src == 1 then
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                            chi_txdat.bits.txnID:expect(txn_id); chi_txdat.bits.tgtID:expect(src_id)
+                            env.expect_happen_until(20, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.I) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                        end
+                    end,
+                    function ()
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC) and chi_txdat.bits.data:get()[1] == 0xde1ad end)
+                        chi_txdat.bits.txnID:expect(fwd_txn_id); chi_txdat.bits.tgtID:expect(fwd_nid)
+                        env.expect_happen_until(15, function() return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CompData) and chi_txdat.bits.resp:is(CHIResp.UC) and chi_txdat.bits.data:get()[1] == 0xbe1ef end)
+                    end
+                }
+
+                env.negedge(30)
+                chi_rxrsp:comp(0, 0)
+                env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xde1ad end)
+                env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbe1ef end)
+                tl_e:grantack(0)
+                env.negedge(50)
+                mshrs[0].io_status_valid:expect(0)
+            end
+        end
+
+        -- Normal test cases without nested condition
+        do_test_SnpNotSharedDirtyFwd(OpcodeSNP.SnpNotSharedDirtyFwd)
+        do_test_SnpNotSharedDirtyFwd(OpcodeSNP.SnpSharedFwd) -- SnpSharedFwd and SnpNotSharedDirtyFwd are basically the same
+        do_test_SnpUniqueFwd()
+
+        -- TODO: nested scenarios
+        do_test_SnpNotSharedDirtyFwd_nested()
+        do_test_SnpUniqueFwd_nested()
+    end
+}
+
+local test_snpHitReq_block_mshrRefill = env.register_test_case "test_snpHitReq_block_mshrRefill" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function send_compdat_snp(addr, compdat_resp, snp_opcode)
+            assert(compdat_resp ~= nil)
+            assert(snp_opcode ~= nil)
+            env.negedge()
+                chi_rxdat.bits.txnID:set(0)
+                chi_rxdat.bits.dataID:set(0)
+                chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+                chi_rxdat.bits.data:set_str("0xaabb")
+                chi_rxdat.bits.dbID:set(0)
+                chi_rxdat.bits.resp:set(compdat_resp)
+                chi_rxdat.valid:set(1)
+            env.negedge()
+                chi_rxdat.bits.data:set_str("0xccdd")
+                chi_rxdat.bits.dataID:set(2) -- last data beat
+            env.negedge()
+                chi_rxdat.valid:set(0)
+                chi_rxsnp.ready:expect(1)
+                chi_rxsnp.bits.txnID:set(4)
+                chi_rxsnp.bits.addr:set(bit.rshift(addr, 3), true)
+                chi_rxsnp.bits.opcode:set(OpcodeSNP.SnpShared)
+                chi_rxsnp.bits.retToSrc:set(0)
+                chi_rxsnp.valid:set(1)
+                env.posedge()
+                chi_rxsnp.ready:expect(1)
+            env.negedge()
+                chi_rxsnp.valid:set(0)
+        end
+
+        local function test_snpshared_snpHitReq(compdat_resp)
+            print("test_snpshared_snpHitReq compdat_resp => " .. CHIResp(compdat_resp))
+
+            local addr = to_address(0x01, 0x01)
+            write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0)
+            tl_a:acquire_block(addr, TLParam.NtoB, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) end)
+            send_compdat_snp(addr, compdat_resp, OpcodeSNP.SnpShared)
+            
+            local snp_at_stage3 = false
+            verilua "appendTasks" {
+                function()
+                    repeat
+                        tl_d.valid:expect(0)
+                        mshrs[0].state_w_grant_sent:expect(0)
+                        env.negedge()
+                    until snp_at_stage3
+                    if compdat_resp == CHIResp.UC_PD then
+                        mshrs[0].gotDirty:expect(1)
+                    end
+                    env.expect_happen_until(8, function () return mshrs[0].state_w_grant_sent:is(1) end)
+                end,
+                function ()
+                    env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xaabb and tl_d.bits.param:is(TLParam.toB) end)
+                    env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xccdd and tl_d.bits.param:is(TLParam.toB) end)
+                    tl_e:grantack(0)
+                end
+            }
+
+            verilua "appendTasks" {
+                function ()
+                    if compdat_resp == CHIResp.SC or compdat_resp == CHIResp.UC then
+                        env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) and chi_txrsp.bits.resp:is(CHIResp.SC) end)
+                    elseif compdat_resp == CHIResp.UC_PD then
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xaabb end)
+                        env.expect_happen_until(10, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.SnpRespData) and chi_txdat.bits.resp:is(CHIResp.SC_PD) and chi_txdat.bits.data:get()[1] == 0xccdd end)
+                    end
+                end
+            }
+
+            env.expect_happen_until(10, function () return mp.valid_s3:is(1) and mp.task_s3_channel:is(0x02) and mp.task_s3_isMshrTask:is(0)  end)
+            mp.task_s3_snpHitReq:expect(1)
+            if compdat_resp == CHIResp.UC_PD then
+                mp.task_s3_snpGotDirty:expect(1)
+            else
+                mp.task_s3_snpGotDirty:expect(0)
+            end
+            snp_at_stage3 = true
+
+            env.negedge(30)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        test_snpshared_snpHitReq(CHIResp.SC)
+        test_snpshared_snpHitReq(CHIResp.UC)
+        test_snpshared_snpHitReq(CHIResp.UC_PD)
     end
 }
 
@@ -6277,9 +7441,6 @@ verilua "mainTask" { function ()
 
     -- local test_all = false
     local test_all = true
-
-    -- test_other_snoop()
-    -- test_snoop_nested_read()
 
     -- 
     -- normal test cases
@@ -6347,6 +7508,8 @@ verilua "mainTask" { function ()
     test_nested_cancel_req()
     test_reorder_rxdat()
     test_other_snoop()
+    test_fwd_snoop()
+    test_snpHitReq_block_mshrRefill()
     end
 
    
