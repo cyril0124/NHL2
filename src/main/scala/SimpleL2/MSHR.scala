@@ -279,6 +279,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         state.s_snpresp      := allocState.s_snpresp
         state.w_snpresp_sent := allocState.w_snpresp_sent
+        state.s_compdat      := allocState.s_compdat
+        state.w_compdat_sent := allocState.w_compdat_sent
+
+        req.fwdNID_opt.foreach(_ := io.alloc_s3.bits.req.fwdNID_opt.getOrElse(0.U))
+        req.fwdTxnID_opt.foreach(_ := io.alloc_s3.bits.req.fwdTxnID_opt.getOrElse(0.U))
 
         assert(valid, "mshr should already be valid when reallocating")
     }
@@ -534,10 +539,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     }
 
     /** Send CompData task to [[MainPipe]] for DCT */
+    val compdatOpcode = Mux(isRealloc, reallocOpcode, req.opcode)
+    val compdatSrcID  = Mux(isRealloc, reallocSrcID, req.srcID)
+    val compdatTxnID  = Mux(isRealloc, reallocTxnID, req.txnID)
     val fwdCacheState = Mux(
-        isSnpToBFwd(req.chiOpcode),
+        isSnpToBFwd(compdatOpcode),
         CHICohState.SC,
-        Mux(req.chiOpcode === SnpUniqueFwd, Mux(meta.isDirty || probeGotDirty, CHICohState.UD, CHICohState.UC), CHICohState.I)
+        Mux(compdatOpcode === SnpUniqueFwd, Mux(meta.isDirty || probeGotDirty, CHICohState.UD, CHICohState.UC), CHICohState.I)
     )
     val fwdPassDirty = req.chiOpcode === SnpUniqueFwd && (meta.isDirty || probeGotDirty)
     mpTask_compdat.valid            := !state.s_compdat && state.w_sprobeack && supportDCT.B
@@ -547,11 +555,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_compdat.bits.readTempDs  := true.B
     mpTask_compdat.bits.tempDsDest  := DataDestination.TXDAT
     mpTask_compdat.bits.resp        := CHICohState.setPassDirty(fwdCacheState, fwdPassDirty)
-    mpTask_compdat.bits.updateDir   := false.B   // Directory write-back is written by SnpResp[Data]Fwded, not CompData
-    mpTask_compdat.bits.srcID       := req.srcID // This field will be assigned to homeNID field of txdat channel
+    mpTask_compdat.bits.updateDir   := false.B      // Directory write-back is written by SnpResp[Data]Fwded, not CompData
+    mpTask_compdat.bits.srcID       := compdatSrcID // This field will be assigned to homeNID field of txdat channel
     mpTask_compdat.bits.tgtID       := req.fwdNID_opt.getOrElse(0.U)
     mpTask_compdat.bits.txnID       := req.fwdTxnID_opt.getOrElse(0.U)
-    mpTask_compdat.bits.dbID        := req.txnID
+    mpTask_compdat.bits.dbID        := compdatTxnID
 
     /** Send SnpRespData/SnpResp task to [[MainPipe]] */
     val snpSrcID          = Mux(isRealloc, reallocSrcID, req.srcID)
@@ -566,8 +574,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespPassDirty  = !isSnpOnceX && !isSnpMakeInvalidX && (meta.isDirty || gotDirty) || isRealloc && snpGotDirty
     val snprespFinalDirty = isSnpOnceX && meta.isDirty
     val snprespFinalState = Mux(isSnpOnceX, meta.rawState, Mux(isSnpToB, BRANCH, INVALID))
-    val snprespNeedData   = Mux(isRealloc, snpGotDirty, gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */ ) && !isSnpMakeInvalidX
-    val hasValidProbeAck  = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
+    val snprespNeedData = Mux(
+        isRealloc,
+        snpGotDirty || snpRetToSrc,
+        gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */
+    ) && !isSnpMakeInvalidX
+    val hasValidProbeAck = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack && state.s_compdat && state.w_compdat_sent
     mpTask_snpresp.bits.tgtID       := snpSrcID
     mpTask_snpresp.bits.txnID       := snpTxnID

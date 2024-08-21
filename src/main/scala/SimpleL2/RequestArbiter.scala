@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
+import SimpleL2.chi._
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import freechips.rocketchip.util.SeqToAugmentedSeq
@@ -279,7 +280,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     arbTaskSnoop.bits.snpGotDirty     := snpGotDirtyVec_s1.orR
     arbTaskSnoop.bits.snpHitReq       := snpHitReqVec_s1.orR
     arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReqVec_s1)
-    arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc
+    arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc && !CHIOpcodeSNP.isSnpXFwd(taskSnoop_s1.opcode)
     arbTaskSnoop.valid                := io.taskSnoop_s1.valid && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B) && !stallOnPendingSnpHitReq_s2
     io.taskSnoop_s1.ready             := arbTaskSnoop.ready && !noSpaceForReplay_snp_s1 && !blockB_s1 && Mux(arbTaskSnoop.bits.readTempDs, io.tempDsRead_s1.ready, true.B) && !stallOnPendingSnpHitReq_s2
     when(io.taskSnoop_s1.fire) {

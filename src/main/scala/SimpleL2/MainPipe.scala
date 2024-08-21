@@ -286,6 +286,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     when(task_s3.isChannelB) {
         mshrReallocStates_s3.s_snpresp      := false.B
         mshrReallocStates_s3.w_snpresp_sent := false.B
+
+        when(isFwdSnoop_s3) {
+            mshrReallocStates_s3.s_compdat      := false.B
+            mshrReallocStates_s3.w_compdat_sent := false.B
+        }
     }
 
     val mshrReplay_s3    = io.mshrAlloc_s3.valid && !io.mshrAlloc_s3.ready && valid_s3
@@ -347,7 +352,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     }
 
     /** Deal with snoop requests */
-    // TODO: FwdSnoop => Irrespective of the value of RetToSrc, must return a copy if a Dirty cache line cannot be forwarded or kept.
     val txrspWillFull_s3 = io.txrspCnt >= (nrTXRSPEntry - 1).U
     val snpNeedData_b_s3 = !task_s3.isMshrTask && task_s3.isChannelB && hit_s3 && Mux(
         /**
@@ -742,6 +746,12 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s6s7.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s6s7.bits.opcode := Mux(valid_s7 && isTXDAT_s7, task_s7.opcode, task_s6.opcode)
     io.txdat_s6s7.bits.resp   := Mux(valid_s7 && isTXDAT_s7, task_s7.resp, task_s6.resp)
+
+    // TODO: DCT
+    // io.txdat_s6s7.bits.txnID   := Mux(isCompData_s2, task_s2.fwdTxnID_opt.getOrElse(0.U), task_s2.txnID)
+    // io.txdat_s6s7.bits.dbID    := Mux(isCompData_s2, task_s2.txnID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
+    // io.txdat_s6s7.bits.homeNID := task_s2.srcID
+    // io.txdat_s6s7.bits.tgtID   := task_s2.fwdNID_opt.getOrElse(0.U)
 
     val mayUseDataBufCnt = PopCount(Cat(needsDataBuf_s4, needsDataBuf_s5, valid_s6, valid_s7))
     hasValidDataBuf_s6s7 := mayUseDataBufCnt < 2.U
