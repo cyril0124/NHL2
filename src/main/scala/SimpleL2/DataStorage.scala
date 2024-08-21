@@ -220,14 +220,22 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val fire_s5         = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
     val rdDataRawVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.r.resp.data(0))) })
     val rdDataRaw_s5    = Mux1H(rdWayOH_s5, rdDataRawVec_s5)
-    val rdDataHasErr_s5 = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).error)).asUInt)).asUInt.orR
     val rdDataVec_s5 = VecInit(rdDataRaw_s5.map { dataVec =>
         VecInit(dataVec.map { d =>
             val decodeData = dataCode.decode(d)
             Mux(decodeData.correctable, decodeData.corrected, decodeData.uncorrected)
         }).asUInt
     })
-    assert(!(ren_s5 && rdDataHasErr_s5), "TODO: Data has error rdDataVec_s5:%x, rdDataHasErr_s5:%d", rdDataVec_s5.asUInt, rdDataHasErr_s5)
+
+    val rdDataHasErr_s5           = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).error)).asUInt)).asUInt.orR
+    val rdDataHasUncorrectable_s5 = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).uncorrectable)).asUInt)).asUInt.orR
+    assert(
+        !(ren_s5 && rdDataHasErr_s5 && rdDataHasUncorrectable_s5),
+        "TODO: Data has error rdDataVec_s5:%x, rdDataHasErr_s5:%d, rdDataHasUncorrectable_s5:%d",
+        rdDataVec_s5.asUInt,
+        rdDataHasErr_s5,
+        rdDataHasUncorrectable_s5
+    )
     // TODO: ECC Error report
 
     rdData_s5 := rdDataVec_s5.asUInt
