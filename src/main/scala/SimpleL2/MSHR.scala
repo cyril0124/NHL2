@@ -365,8 +365,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.sourceb.valid := !cancelProbe_dup && (!state.s_aprobe /* TODO: acquire probe with MakeUnique */ ||
         !state.s_sprobe ||
         !state.s_rprobe) // Replace Probe should wait for refill finish, otherwise, it is possible that the ProbeAckData will replce the original CompData in TempDataStorage from downstream cache
-    io.tasks.sourceb.bits.opcode  := Probe
-    io.tasks.sourceb.bits.param   := Mux(!state.s_sprobe, Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB), Mux(!state.s_rprobe, toN, Mux(reqNeedT, toN, toB)))
+    io.tasks.sourceb.bits.opcode := Probe
+    io.tasks.sourceb.bits.param := Mux(
+        !state.s_sprobe,
+        Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB),
+        Mux(!state.s_rprobe, toN, Mux(reqNeedT || req.isAliasTask, toN, toB))
+    )
     io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
     io.tasks.sourceb.bits.data    := Cat(dirResp.meta.aliasOpt.getOrElse(0.U), 0.U(1.W))

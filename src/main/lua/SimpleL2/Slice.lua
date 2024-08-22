@@ -5523,7 +5523,7 @@ local test_sinkA_alias = env.register_test_case "test_sinkA_alias" {
             env.negedge()
                 tl_a:acquire_alias(sinka_opcode, address, acquire_param, source, req_alias)
             env.expect_happen_until(10, function() return mp.io_dirResp_s3_valid:is(1) and mp.io_dirResp_s3_bits_hit:is(1) and mp.io_dirResp_s3_bits_meta_aliasOpt:is(meta_alias) end)
-            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(acquire_param == TLParam.NtoT and TLParam.toN or TLParam.toB) and tl_b.bits.source:is(source) end)
+            env.expect_happen_until(10, function() return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(source) end)
             expect.equal(tl_b.bits.data:get()[1], bit.lshift(meta_alias, 1))
             env.negedge(5)
             if acquire_param == TLParam.NtoT then
