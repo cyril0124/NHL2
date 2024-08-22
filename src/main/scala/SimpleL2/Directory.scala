@@ -275,7 +275,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
         val sramWayMask = io.dirWrite_s3.bits.wayOH(i * 2 + (group - 1), i * 2)
         sram.io.w.req.valid       := !io.resetFinish || io.dirWrite_s3.fire
         sram.io.w.req.bits.setIdx := Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U)
-        sram.io.w.req.bits.data   := VecInit(Seq.fill(group)(io.dirWrite_s3.bits.meta))
+        sram.io.w.req.bits.data   := Mux(io.resetFinish, VecInit(Seq.fill(group)(io.dirWrite_s3.bits.meta)), VecInit(Seq.fill(group)(0.U.asTypeOf(new DirectoryMetaEntry))))
         sram.io.w.req.bits.waymask.foreach(_ := Mux(io.resetFinish, sramWayMask, Fill(group, 1.U)))
         assert(PopCount(sramWayMask) <= 1.U, "0b%b", sramWayMask)
     }
