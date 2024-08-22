@@ -212,7 +212,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     def mshrBlockSnp(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { s =>
-            s.valid && s.set === set && (s.metaTag === tag && !s.dirHit && s.w_replResp && !s.w_rprobeack || s.reqTag === tag && s.waitGrantAck) // Snoop nested WrteBackFull/Evict, mshr is waitting for ProbeAck since dirty data may exist in upstream cache.
+            s.valid && s.set === set && (s.metaTag === tag && !s.dirHit && s.w_replResp && !s.w_rprobeack) // Snoop nested WrteBackFull/Evict, mshr is waitting for ProbeAck since dirty data may exist in upstream cache.
         }).asUInt
     }
 
