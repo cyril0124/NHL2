@@ -212,3 +212,32 @@ class LinkMonitor()(implicit p: Parameters) extends L2Module {
         out
     }
 }
+
+class LinkMonitorDecoupled()(implicit p: Parameters) extends L2Module {
+    val io = IO(new Bundle() {
+        val in = new Bundle {
+            val chi = Flipped(CHIBundleDecoupled(chiBundleParams))
+        }
+        val out = new Bundle {
+            val chi         = CHIBundleDecoupled(chiBundleParams)
+            val chiLinkCtrl = new CHILinkCtrlIO()
+        }
+
+        val nodeID = Input(UInt(12.W))
+    })
+
+    def setSrcID[T <: Bundle](in: DecoupledIO[T], srcID: UInt = 0.U): DecoupledIO[T] = {
+        val out = Wire(in.cloneType)
+        out                                               <> in
+        out.bits.elements.filter(_._1 == "srcID").head._2 := srcID
+        out
+    }
+
+    io.out.chi.txreq <> setSrcID(io.in.chi.txreq, io.nodeID)
+    io.out.chi.txrsp <> setSrcID(io.in.chi.txrsp, io.nodeID)
+    io.out.chi.txdat <> setSrcID(io.in.chi.txdat, io.nodeID)
+    io.out.chi.rxsnp <>  io.in.chi.rxsnp
+    io.out.chi.rxrsp <>  io.in.chi.rxrsp
+    io.out.chi.rxdat <>  io.in.chi.rxdat
+    io.out.chiLinkCtrl <> DontCare
+}

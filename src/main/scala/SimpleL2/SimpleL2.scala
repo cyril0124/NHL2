@@ -377,6 +377,176 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     // }
 }
 
+class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasL2Param {
+    val xfer   = TransferSizes(blockBytes, blockBytes)
+    val atom   = TransferSizes(1, beatBytes)
+    val access = TransferSizes(1, blockBytes)
+
+    val addressRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)) // TODO: parameterize this
+    val managerParameters = TLSlavePortParameters.v1(
+        managers = Seq(
+            TLSlaveParameters.v1(
+                address = addressRange,
+                regionType = RegionType.CACHED,
+                supportsAcquireT = xfer,
+                supportsAcquireB = xfer,
+                supportsArithmetic = atom,
+                supportsLogical = atom,
+                supportsGet = access,
+                supportsPutFull = access,
+                supportsPutPartial = access,
+                supportsHint = access,
+                fifoId = None
+            )
+        ),
+        beatBytes = 32,
+        minLatency = 2,
+        responseFields = Nil,
+        requestKeys = Seq(AliasKey),
+        endSinkId = idsAll * (1 << bankBits)
+    )
+
+    val sinkNodes = Seq.fill(nrSlice) { TLManagerNode(Seq(managerParameters)) }
+    // val node = TLManagerNode(Seq(managerParameters))
+
+    // Interrupt node for ECC error reporting
+    val device = new SimpleDevice("l2", Seq("xiangshan,simpleL2"))
+    val eccIntNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
+
+    println(s"[${this.getClass().toString()}] addressBits:$addressBits")
+    println(s"[${this.getClass().toString()}] tagBits:$tagBits")
+    println(s"[${this.getClass().toString()}] setBits:$setBits")
+    println(s"[${this.getClass().toString()}] bankBits:$bankBits")
+    println(s"[${this.getClass().toString()}] offsetBits:$offsetBits")
+
+    // finalTxnID => | bankID | txnID |
+    def setTxnID(txnID: UInt, sliceID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits + 1))
+    }
+
+    def getSliceID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) 0.U else txnID.head(bankBits)
+    }
+
+    def restoreTxnID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits + 1))
+    }
+
+    lazy val module = new Impl
+    class Impl extends LazyModuleImp(this) {
+        val io = IO(new Bundle {
+            // compatible with kmh
+            val chi                  = new CHIBundleDecoupled(chiBundleParams)
+            val chi_tx_txsactive     = Output(Bool())
+            val chi_tx_rxsactive     = Input(Bool())
+            val chi_tx_linkactivereq = Output(Bool())
+            val chi_tx_linkactiveack = Input(Bool())
+            val chi_rx_linkactivereq = Input(Bool())
+            val chi_rx_linkactiveack = Output(Bool())
+
+            val nodeID = Input(UInt(12.W))
+        })
+
+        println(s"node size: ${sinkNodes.length}")
+        sinkNodes.zipWithIndex.foreach { case (node, i) =>
+            val edgeIn   = node.in.head._2
+            val bundleIn = node.in.head._1
+            edgeIn.client.clients.filter(_.supports.probe).foreach { c =>
+                println(s"[node_$i][TL-C ] client_name:${c.name} sourceId_start:${c.sourceId.start} sourceId_end:${c.sourceId.end}")
+            }
+            edgeIn.client.clients.filter(!_.supports.probe).foreach { c =>
+                println(s"[node_$i][TL-UL] client_name:${c.name} sourceId_start:${c.sourceId.start} sourceId_end:${c.sourceId.end}")
+            }
+        }
+
+        val linkMonitor = Module(new LinkMonitorDecoupled())
+        val slices = (0 until nrSlice).map { i =>
+            val edgeIn = sinkNodes(i).in.head._2
+
+            Module(new Slice()(p.alterPartial { case EdgeInKey =>
+                edgeIn
+            }))
+        }
+
+        /** If there has any ECC error in slices, the error signal will be sent to the [[eccIntNode]] */
+        val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+        val hasECCError = Cat(slicesECC.asUInt).orR
+        eccIntNode.out.foreach(int => int._1.foreach(_ := hasECCError))
+        eccIntNode.out.foreach(i => dontTouch(i._1))
+
+        slices.zip(sinkNodes).zipWithIndex.foreach { case ((slice, node), i) =>
+            val bundleIn = node.in.head._1
+
+            slice.io         <> DontCare
+            slice.io.tl      <> bundleIn
+            slice.io.sliceId := i.U(bankBits.W)
+        }
+
+        /** TXREQ */
+        val txreq    = WireInit(0.U.asTypeOf(Decoupled(new CHIBundleREQ(chiBundleParams))))
+        val txreqArb = Module(new Arbiter(new CHIBundleREQ(chiBundleParams), nrSlice))
+        txreqArb.io.in   <> slices.map(_.io.chi.txreq)
+        txreq            <> txreqArb.io.out
+        txreq.bits.txnID := setTxnID(txreqArb.io.out.bits.txnID, txreqArb.io.chosen)
+
+        /** TXDAT */
+        val txdat = WireInit(0.U.asTypeOf(Decoupled(new CHIBundleDAT(chiBundleParams))))
+        arbTask(slices.map(_.io.chi.txdat), txdat, Some("slice_txdat"))
+
+        /** TXRSP */
+        val txrsp = WireInit(0.U.asTypeOf(Decoupled(new CHIBundleRSP(chiBundleParams))))
+        arbTask(slices.map(_.io.chi.txrsp), txrsp, Some("slice_txrsp"))
+
+        /** RXSNP */
+        val rxsnp        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleSNP(chiBundleParams)))))
+        val rxsnpSliceID = if (nrSlice <= 1) 0.U else (rxsnp.bits.addr >> (offsetBits - 3))(bankBits - 1, 0)
+        slices.zipWithIndex.foreach { case (slice, i) =>
+            slice.io.chi.rxsnp.valid := rxsnp.valid && rxsnpSliceID === i.U
+            slice.io.chi.rxsnp.bits  := rxsnp.bits
+        }
+        rxsnp.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxsnp.ready && rxsnpSliceID === i.U }).orR
+
+        /** RXRSP */
+        val rxrsp        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleRSP(chiBundleParams)))))
+        val rxrspSliceID = getSliceID(rxrsp.bits.txnID)
+        slices.zipWithIndex.foreach { case (slice, i) =>
+            slice.io.chi.rxrsp.valid      := rxrsp.valid && rxrspSliceID === i.U
+            slice.io.chi.rxrsp.bits       := rxrsp.bits
+            slice.io.chi.rxrsp.bits.txnID := restoreTxnID(rxrsp.bits.txnID)
+        }
+        rxrsp.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxrsp.ready && rxrspSliceID === i.U }).orR
+
+        /** RXDAT */
+        val rxdat        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleDAT(chiBundleParams)))))
+        val rxdatSliceID = getSliceID(rxdat.bits.txnID)
+        slices.zipWithIndex.foreach { case (slice, i) =>
+            slice.io.chi.rxdat.valid      := rxdat.valid
+            slice.io.chi.rxdat.bits       := rxdat.bits
+            slice.io.chi.rxdat.bits.txnID := restoreTxnID(rxdat.bits.txnID)
+        }
+        rxdat.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxdat.ready && rxdatSliceID === i.U }).orR
+
+        linkMonitor.io              <> DontCare
+        linkMonitor.io.in.chi.txreq <> txreq
+        linkMonitor.io.in.chi.txdat <> txdat
+        linkMonitor.io.in.chi.txrsp <> txrsp
+        linkMonitor.io.in.chi.rxrsp <> rxrsp
+        linkMonitor.io.in.chi.rxsnp <> rxsnp
+        linkMonitor.io.in.chi.rxdat <> rxdat
+        linkMonitor.io.nodeID       := io.nodeID
+
+        // compatible with kmh
+        io.chi           <> linkMonitor.io.out.chi
+        io.chi_tx_txsactive     <> linkMonitor.io.out.chiLinkCtrl.txsactive
+        io.chi_tx_rxsactive     <> linkMonitor.io.out.chiLinkCtrl.rxsactive
+        io.chi_tx_linkactivereq <> linkMonitor.io.out.chiLinkCtrl.txactivereq
+        io.chi_tx_linkactiveack <> linkMonitor.io.out.chiLinkCtrl.txactiveack
+        io.chi_rx_linkactivereq <> linkMonitor.io.out.chiLinkCtrl.rxactivereq
+        io.chi_rx_linkactiveack <> linkMonitor.io.out.chiLinkCtrl.rxactiveack
+        dontTouch(io)
+    }
+}
+
 class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] = None, ways: Option[Int] = None, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
