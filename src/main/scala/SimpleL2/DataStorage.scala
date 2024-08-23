@@ -59,6 +59,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         val toSourceD = new Bundle {
             val dsResp_s6s7 = DecoupledIO(new DSResp)
         }
+
+        /** 
+         * This signal indicates that there is an uncorrectable ECC error. 
+         * It is also passed into the top-level of [[Slice]] and connect to the L2 top-level interrupt signal after one cycle delay.
+         */
+        val eccError = Output(Bool()) 
     })
 
     val ready_s7    = WireInit(false.B)
@@ -236,7 +242,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         rdDataHasErr_s5,
         rdDataHasUncorrectable_s5
     )
-    // TODO: ECC Error report
+    // TODO: ECC info should be saved in some kind of CSR registers. For now, just ignore it.
+    if(eccProtectBits == 0) {
+        io.eccError := false.B
+    } else {
+        io.eccError := ren_s5 && rdDataHasUncorrectable_s5
+    }
 
     rdData_s5 := rdDataVec_s5.asUInt
 

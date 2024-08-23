@@ -16,6 +16,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val chi         = CHIBundleDecoupled(chiBundleParams)
         val chiLinkCtrl = new CHILinkCtrlIO()
         val sliceId     = Input(UInt(bankBits.W))
+        val eccError    = Output(Bool())
     })
 
     println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
@@ -189,6 +190,9 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sourceB.io.grantMapStatus <> sinkE.io.grantMapStatus
     sourceB.io.mpStatus_s4567 <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
+
+
+    io.eccError := RegNext(ds.io.eccError, false.B)
 
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> sourceB.io.b

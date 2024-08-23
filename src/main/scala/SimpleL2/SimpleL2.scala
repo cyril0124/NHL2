@@ -8,6 +8,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink.MasterMuxNode
 import freechips.rocketchip.tilelink.TLMessages._
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
+import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import SimpleL2.Configs._
 import SimpleL2.chi._
@@ -100,6 +102,10 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     val sinkNodes = Seq.fill(nrSlice) { TLManagerNode(Seq(managerParameters)) }
     // val node = TLManagerNode(Seq(managerParameters))
 
+    // Interrupt node for ECC error reporting
+    val device = new SimpleDevice("l2", Seq("xiangshan,simpleL2"))
+    val eccIntNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
+
     println(s"[${this.getClass().toString()}] addressBits:$addressBits")
     println(s"[${this.getClass().toString()}] tagBits:$tagBits")
     println(s"[${this.getClass().toString()}] setBits:$setBits")
@@ -160,6 +166,12 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
                 edgeIn
             }))
         }
+
+        /** If there has any ECC error in slices, the error signal will be sent to the [[eccIntNode]] */
+        val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+        val hasECCError = Cat(slicesECC.asUInt).orR
+        eccIntNode.out.foreach(int => int._1.foreach(_ := hasECCError))
+        eccIntNode.out.foreach(i => dontTouch(i._1))
 
         slices.zip(sinkNodes).zipWithIndex.foreach { case ((slice, node), i) =>
             val bundleIn = node.in.head._1
@@ -406,6 +418,8 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
         masterNode
     }
 
+    val l2EccIntSinkNode = IntSinkNode(IntSinkPortSimple(1, 1))
+
     val BlockSize = 64 // in byte
 
     val bankBinder = BankBinder(nrSlice, BlockSize)
@@ -433,11 +447,15 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
     }
     bankBinder :*= l1xbar
 
+    l2EccIntSinkNode := l2.eccIntNode
+
     lazy val module = new LazyModuleImp(this) {
         (0 until nrCore).foreach { i =>
             l1d_nodes(i).makeIOs()(ValName(s"dcache_in_$i"))
             l1i_nodes(i).makeIOs()(ValName(s"icache_in_$i"))
         }
+
+        l2EccIntSinkNode.makeIOs()(ValName("l2EccInt"))
 
         // l2.module.io     <> DontCare
         // l2.module.io.chi <> DontCare
