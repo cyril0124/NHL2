@@ -7075,7 +7075,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                     }
                     env.negedge()
                         tl_a:acquire_block(addr, TLParam.NtoT, 4)
-                    if ret2src == 1 then env.negedge(3) --[[ Wait for writing TempDS finish caused by AcquireBlock ]] end
+                    env.negedge(2) --[[ Wait for writing TempDS finish caused by AcquireBlock ]]
                     env.negedge()
                         chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpSharedFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
                     
@@ -7276,7 +7276,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                 }
                 env.negedge()
                     tl_a:acquire_block(addr, TLParam.NtoT, 4)
-                if ret2src == 1 then env.negedge(3) --[[ Wait for writing TempDS finish caused by AcquireBlock ]] end
+                env.negedge(2) --[[ Wait for writing TempDS finish caused by AcquireBlock ]]
                 env.negedge()
                     chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
                 

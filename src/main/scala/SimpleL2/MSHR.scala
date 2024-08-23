@@ -1217,7 +1217,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.replGotDirty := replGotDirty
     io.status.isChannelA   := req.isChannelA
 
-    // Allow Snoop nested request address. This operation will cause ReadReissue
+    /**
+     *  Allow Snoop nested request address. This operation will cause ReadReissue
+     */
+    /** We need a counter to make sure that the data has been write back into [[TempDataStorage]] so that the nested Snoop can read [[TempDataStorage]] and get correct data. */
+    val tempDsWriteCnt    = RegInit(0.U(2.W)) 
+    val tempDsWriteFinish = tempDsWriteCnt >= 2.U
+    when(io.alloc_s3.fire) {
+        tempDsWriteCnt := 0.U
+    }.elsewhen(tempDsWriteCnt <= 2.U) {
+        tempDsWriteCnt := tempDsWriteCnt + 1.U
+    }
+
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
     val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent
@@ -1225,6 +1236,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val isAcquireHit     = dirResp.hit && req.isChannelA
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
+        tempDsWriteFinish &&
         state.w_replResp &&
         !(isAcquireHit && gotCompResp) && // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
         hasPendingRefill &&               // Does not grant to upstream cache
