@@ -166,6 +166,8 @@ class DirRead(implicit p: Parameters) extends L2Bundle {
     val tag      = UInt(tagBits.W)
     val replTask = Bool()           // replacement task, which is used by mainpipe to find a suitable entry for replacement
     val mshrId   = UInt(mshrBits.W) // mshr ID for replacement task response to find the destination mshr
+
+    val updateReplacer = Bool() // Indicates that whether the directory read request should update the replacer.
 }
 
 class DirWrite(implicit p: Parameters) extends L2Bundle {
@@ -200,8 +202,6 @@ class Directory()(implicit p: Parameters) extends L2Module {
         val resetFinish = Output(Bool()) // reset finish is ASSERTED when all meta entries are reset
     })
 
-    println(s"[${this.getClass().toString()}] DirectoryMetaEntry bits: ${(new DirectoryMetaEntry).getWidth}")
-
     // TODO: ECC
 
     io <> DontCare
@@ -221,98 +221,69 @@ class Directory()(implicit p: Parameters) extends L2Module {
         )
     }
 
-    // TODO: update replacer SRAM
-    val repl = ReplacementPolicy.fromString(replacementPolicy, ways)
-    
-    // @formatter:off
-    // val replacerSRAM_opt = if (replacementPolicy == "random") None else {
-    //         Some(
-    //             Module(
-    //                 new BankedSRAM( // TODO:
-    //                     gen = UInt(repl.nBits.W),
-    //                     sets = sets,
-    //                     ways = 1,
-    //                     nrBank = 4,
-    //                     singlePort = true,
-    //                     shouldReset = true,
-    //                     // hasMbist = false /* TODO */,
-    //                     // hasShareBus = false /* TODO */,
-    //                     hasClkGate = enableClockGate
-    //                     // parentName = parentName + "repl_"
-    //                 )
-    //             )
-    //         )
-    //     }
-    // @formatter:on
+    val isRandomRepl = replacementPolicy == "random"
+    val repl         = ReplacementPolicy.fromString(replacementPolicy, ways)
+    val replacerSRAM_opt =
+        if (isRandomRepl) None
+        else {
+            Some(
+                Module(
+                    new SRAMTemplate(
+                        gen = UInt(repl.nBits.W),
+                        set = sets,
+                        way = 1,
+                        singlePort = true,
+                        multicycle = 1
+                    )
+                )
+            )
+        }
 
-    // TODO: when should we update replacer SRAM
-    // replacerSRAM_opt.foreach { sram =>
-    //     sram.io <> DontCare
-    //     dontTouch(sram.io)
-    // }
-    // ReplacerWen: updateHit || updateRepl(replace task)
-
-    // replacerSRAM_opt.foreach { sram =>
-    //     sram.io.w(
-    //         valid = !io.resetFinish,
-    //         data = 0.U, // TODO: replacer SRAM init value
-    //         setIdx = resetIdx - 1.U,
-    //         waymask = 1.U
-    //     )
-
-    //     assert(!(!io.resetFinish && sram.io.w.req.valid && !sram.io.w.req.ready))
-    // }
+    println(s"[${this.getClass().toString()}] DirectoryMetaEntry bits: ${(new DirectoryMetaEntry).getWidth}")
+    println(s"[${this.getClass().toString()}] replacementPolicy: ${replacementPolicy} replacerSRAM entry bits: ${if (isRandomRepl) "None" else repl.nBits}")
 
     // -----------------------------------------------------------------------------------------
     // Stage 1(dir read) / Stage 3(dir write)
     // -----------------------------------------------------------------------------------------
-    val fire_s1     = io.dirRead_s1.fire
-    val sramRdReady = metaSRAMs.map(_.io.r.req.ready).reduce(_ & _)
+    val fire_s1          = io.dirRead_s1.fire
+    val sramReadReady_s1 = metaSRAMs.map(_.io.r.req.ready).reduce(_ & _)
     metaSRAMs.zipWithIndex.foreach { case (sram, i) =>
         sram.io.r.req.valid       := io.dirRead_s1.fire
         sram.io.r.req.bits.setIdx := io.dirRead_s1.bits.set
-
-        val sramWayMask = io.dirWrite_s3.bits.wayOH(i * 2 + (group - 1), i * 2)
-        sram.io.w.req.valid       := !io.resetFinish || io.dirWrite_s3.fire
-        sram.io.w.req.bits.setIdx := Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U)
-        sram.io.w.req.bits.data   := Mux(io.resetFinish, VecInit(Seq.fill(group)(io.dirWrite_s3.bits.meta)), VecInit(Seq.fill(group)(0.U.asTypeOf(new DirectoryMetaEntry))))
-        sram.io.w.req.bits.waymask.foreach(_ := Mux(io.resetFinish, sramWayMask, Fill(group, 1.U)))
-        assert(PopCount(sramWayMask) <= 1.U, "0b%b", sramWayMask)
     }
-
-    io.dirRead_s1.ready := io.resetFinish && sramRdReady && !io.dirWrite_s3.fire
 
     // -----------------------------------------------------------------------------------------
     // Stage 2(dir read)
     // -----------------------------------------------------------------------------------------
-    val metaRead_s2     = Wire(Vec(ways, new DirectoryMetaEntry()))
-    val reqValid_s2     = RegNext(fire_s1, false.B)
-    val replReqValid_s2 = reqValid_s2 && RegEnable(io.dirRead_s1.bits.replTask, false.B, fire_s1)
-    val mshrId_s2       = RegEnable(io.dirRead_s1.bits.mshrId, fire_s1)
-    val reqTag_s2       = RegEnable(io.dirRead_s1.bits.tag, fire_s1)
-    val reqSet_s2       = RegEnable(io.dirRead_s1.bits.set, fire_s1)
+    val metaRead_s2       = Wire(Vec(ways, new DirectoryMetaEntry()))
+    val reqValid_s2       = RegNext(fire_s1, false.B)
+    val replReqValid_s2   = reqValid_s2 && RegEnable(io.dirRead_s1.bits.replTask, false.B, fire_s1)
+    val mshrId_s2         = RegEnable(io.dirRead_s1.bits.mshrId, fire_s1)
+    val reqTag_s2         = RegEnable(io.dirRead_s1.bits.tag, fire_s1)
+    val reqSet_s2         = RegEnable(io.dirRead_s1.bits.set, fire_s1)
+    val updateReplacer_s2 = RegEnable(io.dirRead_s1.bits.updateReplacer, fire_s1)
     val occWayMask_s2 = VecInit(io.mshrStatus.map { mshr =>
         /* Only those set match and dirHit mshr can occupy a way */
         Mux(mshr.valid && mshr.set === reqSet_s2 && (mshr.dirHit || mshr.lockWay), mshr.wayOH, 0.U(ways.W))
     }).reduceTree(_ | _).asUInt // opt for timing, move from Stage 3 to Stage 2, cut the timing path between MSHR, Directory, MainPipe(Stage 3)
     val randomChosenWayOH_s2 = RandomPriorityEncoderOH(~occWayMask_s2, reqValid_s2 || replReqValid_s2) /* Select a random way, as a way to prevent deadlock */
-    val victimWay_s2         = UIntToOH(random.LFSR(3))(ways - 1, 0)                                   /* TODO: Replacment way */
 
     metaRead_s2 := VecInit(metaSRAMs.map(_.io.r.resp.data)).asTypeOf(Vec(ways, new DirectoryMetaEntry()))
 
     // -----------------------------------------------------------------------------------------
-    // Stage 3(dir read)
+    // Stage 3(get dir read result) / (dir write)
     // -----------------------------------------------------------------------------------------
-    val metaRead_s3     = RegEnable(metaRead_s2, reqValid_s2)
-    val reqValid_s3     = RegNext(reqValid_s2, false.B)
-    val replReqValid_s3 = reqValid_s3 && RegEnable(replReqValid_s2, false.B, reqValid_s2)
-    val mshrId_s3       = RegEnable(mshrId_s2, reqValid_s2)
-    val reqTag_s3       = RegEnable(reqTag_s2, reqValid_s2)
-    val reqSet_s3       = RegEnable(reqSet_s2, reqValid_s2)
-    val occWayMask_s3   = RegEnable(occWayMask_s2, reqValid_s2)
-    val stateVec_s3     = VecInit(metaRead_s3.map(_.state))
-    val tagVec_s3       = VecInit(metaRead_s3.map(_.tag))
-    val invVec_s3       = VecInit(stateVec_s3.map(_ === MixedState.I)).asUInt
+    val metaRead_s3       = RegEnable(metaRead_s2, reqValid_s2)
+    val reqValid_s3       = RegNext(reqValid_s2, false.B)
+    val replReqValid_s3   = reqValid_s3 && RegEnable(replReqValid_s2, false.B, reqValid_s2)
+    val mshrId_s3         = RegEnable(mshrId_s2, reqValid_s2)
+    val reqTag_s3         = RegEnable(reqTag_s2, reqValid_s2)
+    val reqSet_s3         = RegEnable(reqSet_s2, reqValid_s2)
+    val updateReplacer_s3 = RegEnable(updateReplacer_s2, reqValid_s2)
+    val occWayMask_s3     = RegEnable(occWayMask_s2, reqValid_s2)
+    val stateVec_s3       = VecInit(metaRead_s3.map(_.state))
+    val tagVec_s3         = VecInit(metaRead_s3.map(_.tag))
+    val invVec_s3         = VecInit(stateVec_s3.map(_ === MixedState.I)).asUInt
 
     val hitOH_s3    = VecInit(stateVec_s3.zip(tagVec_s3).map { case (state, tag) => state =/= MixedState.I && tag === reqTag_s3 }).asUInt
     val hit_s3      = hitOH_s3.orR
@@ -323,15 +294,28 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val replRetry_s3   = occWayMask_s3.andR
     val noFreeWay_s3   = replRetry_s3
 
-    val victimWay_s3         = RegEnable(victimWay_s2, reqValid_s2 || replReqValid_s2)
-    val chosenWayOH_s3       = Mux(hasInv_s3, invWayOH_s3, victimWay_s3)
+    val replacerState_s3 = if (isRandomRepl) {
+        when(io.dirWrite_s3.fire) {
+            repl.miss // Update the replacer state for random replacement policy
+        }
+        0.U
+    } else {
+        val replacerResult_s2 = replacerSRAM_opt.get.io.r(io.dirRead_s1.fire, io.dirRead_s1.bits.set).resp.data(0)
+        val _replacerState_s3 = RegEnable(replacerResult_s2, 0.U(repl.nBits.W), reqValid_s2)
+        _replacerState_s3
+    }
+
+    val victimWay_s3         = repl.get_replace_way(replacerState_s3)
+    val victimWayOH_s3       = UIntToOH(victimWay_s3)
+    val chosenWayOH_s3       = Mux(hasInv_s3, invWayOH_s3, victimWayOH_s3)
     val randomChosenWayOH_s3 = RegEnable(randomChosenWayOH_s2, reqValid_s2 || replReqValid_s2)
     val isFreeWay_s3         = (freeWayMask_s3 & chosenWayOH_s3).orR
     val finalWayOH_s3        = Mux(isFreeWay_s3, chosenWayOH_s3, randomChosenWayOH_s3)
     val respWayOH_s3         = Mux(hit_s3, hitOH_s3, finalWayOH_s3)
+    val way_s3               = OHToUInt(Mux(replReqValid_s3, finalWayOH_s3, respWayOH_s3)) // This is used by replacerSRAM
 
-    assert(!(io.resetFinish && PopCount(hitOH_s3) > 1.U))
-    assert(!(io.resetFinish && PopCount(finalWayOH_s3) > 1.U))
+    assert(!(io.resetFinish && reqValid_s3 && PopCount(hitOH_s3) > 1.U))
+    assert(!(io.resetFinish && reqValid_s3 && PopCount(finalWayOH_s3) > 1.U))
 
     io.dirResp_s3.valid          := reqValid_s3
     io.dirResp_s3.bits.hit       := hit_s3
@@ -344,6 +328,47 @@ class Directory()(implicit p: Parameters) extends L2Module {
     io.replResp_s3.bits.retry  := replRetry_s3
     io.replResp_s3.bits.meta   := Mux1H(finalWayOH_s3, metaRead_s3)
     io.replResp_s3.bits.wayOH  := finalWayOH_s3
+
+    /**
+     * MetaSRAMs should be updated on the following conditions:
+     *  1. When io.dirWrite_s3.valid is true.
+     *  2. When the reset is not finished and we should write an initial value to every SRAM entry to avoid X propagation.
+     */
+    metaSRAMs.zipWithIndex.foreach { case (sram, i) =>
+        val sramWayMask = io.dirWrite_s3.bits.wayOH(i * 2 + (group - 1), i * 2)
+        sram.io.w.req.valid       := !io.resetFinish || io.dirWrite_s3.fire
+        sram.io.w.req.bits.setIdx := Mux(io.resetFinish, io.dirWrite_s3.bits.set, resetIdx - 1.U)
+        sram.io.w.req.bits.data   := Mux(io.resetFinish, VecInit(Seq.fill(group)(io.dirWrite_s3.bits.meta)), VecInit(Seq.fill(group)(0.U.asTypeOf(new DirectoryMetaEntry))))
+        sram.io.w.req.bits.waymask.foreach(_ := Mux(io.resetFinish, sramWayMask, Fill(group, 1.U)))
+        assert(PopCount(sramWayMask) <= 1.U, "0b%b", sramWayMask)
+    }
+
+    /**
+     * ReplacerSRAM should be updated on the following conditions:
+     *  1. When the directory is under reseting. We should assign a initial value to the SRAM to avoid X propagation.
+     *  2. When the directory result is hit and the request is an Acquire* request from ChannelA.
+     *  3. When the directory has been read due to MSHR replTask, which means that the MSHR is going to chose a victim way for Evict/Writeback and the corresponding ReplacerSRAM entry should be updated.
+     */
+    val replacerUpdateOnHit_s3  = reqValid_s3 && !replReqValid_s3 && hit_s3 && updateReplacer_s3
+    val replacerUpdateOnRepl_s3 = replReqValid_s3 && !replRetry_s3
+    val replacerUpdate_s3       = (replacerUpdateOnHit_s3 || replacerUpdateOnRepl_s3) && !isRandomRepl.B
+    val replacerInitialState_s3 = if (replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru") {
+        0.U
+    } else {
+        // TODO: Other replacement policy.(e.g. rrip)
+        assert(false, s"Unimplemented replacement policy: ${replacementPolicy}")
+        0.U
+    }
+    replacerSRAM_opt.foreach { sram =>
+        sram.io.w(
+            valid = !io.resetFinish || replacerUpdate_s3,
+            data = Mux(io.resetFinish, repl.get_next_state(replacerState_s3, way_s3), replacerInitialState_s3),
+            setIdx = Mux(io.resetFinish, reqSet_s3, resetIdx - 1.U),
+            waymask = 1.U
+        )
+        assert(!(io.resetFinish && sram.io.r.req.valid && !sram.io.r.req.ready), "replacerSRAM is not ready for read!")
+        assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "replacerSRAM is not ready for write!")
+    }
 
     /** 
      * Reset all SRAM data when reset. 
@@ -367,6 +392,15 @@ class Directory()(implicit p: Parameters) extends L2Module {
             assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "write metaSRAM should always be ready!")
         }
     }
+
+    /**
+     * Cannot access directory on the following conditions:
+     *  1. Directory reset is not finished.
+     *  2. MetaSRAMs are not allow to be read.
+     *  3. There is a directory write operation on metaSRAMs.
+     *  4. ReplacerSRAM is updating.  
+     */
+    io.dirRead_s1.ready := io.resetFinish && sramReadReady_s1 && !io.dirWrite_s3.fire && !replacerUpdate_s3
 
     dontTouch(io)
 }

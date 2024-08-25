@@ -323,11 +323,12 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     valid_s1                   := chnlTask_s1.valid || mshrTaskFull_s1
     fire_s1                    := mshrTaskFull_s1 && mshrTaskReady_s1 || chnlTask_s1.fire
 
-    io.dirRead_s1.valid         := fire_s1 && (!task_s1.isMshrTask || task_s1.isMshrTask && task_s1.isReplTask) && !task_s1.snpHitReq
-    io.dirRead_s1.bits.set      := task_s1.set
-    io.dirRead_s1.bits.tag      := task_s1.tag
-    io.dirRead_s1.bits.mshrId   := task_s1.mshrId
-    io.dirRead_s1.bits.replTask := task_s1.isMshrTask && task_s1.isReplTask
+    io.dirRead_s1.valid               := fire_s1 && (!task_s1.isMshrTask || task_s1.isMshrTask && task_s1.isReplTask) && !task_s1.snpHitReq
+    io.dirRead_s1.bits.set            := task_s1.set
+    io.dirRead_s1.bits.tag            := task_s1.tag
+    io.dirRead_s1.bits.mshrId         := task_s1.mshrId
+    io.dirRead_s1.bits.replTask       := task_s1.isMshrTask && task_s1.isReplTask
+    io.dirRead_s1.bits.updateReplacer := task_s1.isChannelA && (task_s1.opcode === AcquireBlock || task_s1.opcode === AcquirePerm)
 
     io.tempDsRead_s1.valid     := mshrTaskFull_s1 && mshrTaskReady_s1 && mshrTask_s1.readTempDs || arbTaskSnoop.bits.snpHitReq && arbTaskSnoop.bits.readTempDs && io.taskSnoop_s1.fire
     io.tempDsRead_s1.bits.idx  := Mux(arbTaskSnoop.bits.snpHitReq && !mshrTaskFull_s1, arbTaskSnoop.bits.snpHitMshrId, mshrTask_s1.mshrId)

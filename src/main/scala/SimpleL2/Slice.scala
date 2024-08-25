@@ -191,7 +191,6 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sourceB.io.mpStatus_s4567 <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
 
-
     io.eccError := RegNext(ds.io.eccError, false.B)
 
     io.tl.d      <> sourceD.io.d

@@ -49,7 +49,7 @@ case class L2Param(
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
-    replacementPolicy: String = "random",         // TODO: plru
+    replacementPolicy: String = "plru",           // Option: "random", "plru", "lru"
     dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
     useDiplomacy: Boolean = false                 // If use diplomacy, EdgeInKey should be passed in
 ) {
