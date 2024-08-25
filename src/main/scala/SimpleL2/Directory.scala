@@ -243,7 +243,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
     println(s"[${this.getClass().toString()}] replacementPolicy: ${replacementPolicy} replacerSRAM entry bits: ${if (isRandomRepl) "None" else repl.nBits}")
 
     // -----------------------------------------------------------------------------------------
-    // Stage 1(dir read) / Stage 3(dir write)
+    // Stage 1(dir read)
     // -----------------------------------------------------------------------------------------
     val fire_s1          = io.dirRead_s1.fire
     val sramReadReady_s1 = metaSRAMs.map(_.io.r.req.ready).reduce(_ & _)

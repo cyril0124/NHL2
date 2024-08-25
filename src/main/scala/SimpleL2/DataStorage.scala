@@ -64,7 +64,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
          * This signal indicates that there is an uncorrectable ECC error. 
          * It is also passed into the top-level of [[Slice]] and connect to the L2 top-level interrupt signal after one cycle delay.
          */
-        val eccError = Output(Bool()) 
+        val eccError = Output(Bool())
     })
 
     val ready_s7    = WireInit(false.B)
@@ -77,7 +77,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val dataWithECCBits = dataCode.width(eccProtectBits)
     val dataEccBits     = dataWithECCBits - eccProtectBits
 
-    println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits}")
+    println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits} eccEnable: ${dataEccBits > 0}")
 
     /**
      * Each cacheline(64-byte) should be seperated into groups of 16-bytes(128-bits) beacuse SRAM provided by foundary is typically less than 144-bits wide.
@@ -243,7 +243,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         rdDataHasUncorrectable_s5
     )
     // TODO: ECC info should be saved in some kind of CSR registers. For now, just ignore it.
-    if(eccProtectBits == 0) {
+    if (eccProtectBits == 0) {
         io.eccError := false.B
     } else {
         io.eccError := ren_s5 && rdDataHasUncorrectable_s5

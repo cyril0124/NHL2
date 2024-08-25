@@ -1221,7 +1221,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      *  Allow Snoop nested request address. This operation will cause ReadReissue
      */
     /** We need a counter to make sure that the data has been write back into [[TempDataStorage]] so that the nested Snoop can read [[TempDataStorage]] and get correct data. */
-    val tempDsWriteCnt    = RegInit(0.U(2.W)) 
+    val tempDsWriteCnt    = RegInit(0.U(2.W))
     val tempDsWriteFinish = tempDsWriteCnt >= 2.U
     when(io.alloc_s3.fire) {
         tempDsWriteCnt := 0.U

@@ -103,7 +103,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     // val node = TLManagerNode(Seq(managerParameters))
 
     // Interrupt node for ECC error reporting
-    val device = new SimpleDevice("l2", Seq("xiangshan,simpleL2"))
+    val device     = new SimpleDevice("l2", Seq("xiangshan,simpleL2"))
     val eccIntNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
     println(s"[${this.getClass().toString()}] addressBits:$addressBits")
@@ -168,10 +168,10 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         }
 
         /** If there has any ECC error in slices, the error signal will be sent to the [[eccIntNode]] */
-        val slicesECC = VecInit(slices.map( s => RegNext(s.io.eccError)))
+        val slicesECC   = VecInit(slices.map(s => RegNext(s.io.eccError)))
         val hasECCError = Cat(slicesECC.asUInt).orR
         eccIntNode.out.foreach(int => int._1.foreach(_ := hasECCError))
-        eccIntNode.out.foreach(i => dontTouch(i._1))
+        eccIntNode.out.foreach(i   => dontTouch(i._1))
 
         slices.zip(sinkNodes).zipWithIndex.foreach { case ((slice, node), i) =>
             val bundleIn = node.in.head._1
