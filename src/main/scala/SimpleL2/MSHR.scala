@@ -310,9 +310,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Seq(
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
-                    (reqNeedT && dirResp.hit)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
-                    (reqNeedT && !dirResp.hit) -> ReadUnique,
-                    reqNeedB                   -> ReadNotSharedDirty
+                    (reqNeedT && dirResp.hit && req.opcode === AcquirePerm)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
+                    (reqNeedT && dirResp.hit && req.opcode === AcquireBlock) -> ReadUnique,
+                    (reqNeedT && !dirResp.hit)                               -> ReadUnique,
+                    reqNeedB                                                 -> ReadNotSharedDirty
                 )
             ),
             !state.s_evict -> Evict,

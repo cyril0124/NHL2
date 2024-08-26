@@ -239,9 +239,17 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
         when(needReadDownward_a_s3) {
             when(needReadOnHit_a_s3) {
-                mshrAllocStates.s_makeunique := false.B
-                mshrAllocStates.w_comp       := false.B
-                mshrAllocStates.s_compack    := false.B
+                when(isAcquirePerm_s3) {
+                    mshrAllocStates.s_makeunique := false.B
+                    mshrAllocStates.w_comp       := false.B
+                    mshrAllocStates.s_compack    := false.B
+                }.otherwise {
+                    assert(isAcquireBlock_s3)
+                    mshrAllocStates.s_read          := false.B
+                    mshrAllocStates.w_compdat       := false.B
+                    mshrAllocStates.w_compdat_first := false.B
+                    mshrAllocStates.s_compack       := false.B
+                }
             }
 
             when(needReadOnMiss_a_s3) {

@@ -5019,7 +5019,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
 
         do
             -- 
-            --  I    BC <- AcquireBlock.BtoT
+            --  I    BC <- AcquirePerm.BtoT
             --   \   /
             --    BC 
             --       <- SnpCleanInvalid
@@ -5029,7 +5029,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             local source = 4
             local address = to_address(0x01, 0x01)
             env.negedge()
-                tl_a:acquire_block(address, TLParam.BtoT, source)
+                tl_a:acquire_perm(address, TLParam.BtoT, source)
             env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
             
             env.negedge()
@@ -5049,8 +5049,6 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             chi_rxrsp:comp(0, 0)
             env.expect_happen_until(10, function() return tl_d:fire() end)
             env.negedge()
-                tl_d.valid:expect(1)
-            env.negedge()
                 tl_e:grantack(0)
             env.negedge(10)
                 mshrs[0].io_status_valid:expect(0)
@@ -5066,7 +5064,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
                 write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
             local source = 4
             env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.NtoT, source)
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
                 chi_txreq:dump()
@@ -5092,7 +5090,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
                 write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.BC, ("0b00"):number())
             local source = 4
             env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoT, source)
+                tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.NtoT, source)
             env.posedge()
                 env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
                 chi_txreq:dump()
@@ -7074,7 +7072,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                         end
                     }
                     env.negedge()
-                        tl_a:acquire_block(addr, TLParam.NtoT, 4)
+                        tl_a:acquire_perm(addr, TLParam.NtoT, 4)
                     env.negedge(2) --[[ Wait for writing TempDS finish caused by AcquireBlock ]]
                     env.negedge()
                         chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpSharedFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
@@ -7113,8 +7111,8 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
 
                     env.negedge(30)
                     chi_rxrsp:comp(0, 0)
-                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xde1ad end)
-                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbe1ef end)
+                    env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                    env.negedge()
                     tl_e:grantack(0)
                     env.negedge(50)
                     mshrs[0].io_status_valid:expect(0)
@@ -7275,7 +7273,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                     end
                 }
                 env.negedge()
-                    tl_a:acquire_block(addr, TLParam.NtoT, 4)
+                    tl_a:acquire_perm(addr, TLParam.NtoT, 4)
                 env.negedge(2) --[[ Wait for writing TempDS finish caused by AcquireBlock ]]
                 env.negedge()
                     chi_rxsnp:send_fwd_request(addr, OpcodeSNP.SnpUniqueFwd, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
@@ -7314,8 +7312,8 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
 
                 env.negedge(30)
                 chi_rxrsp:comp(0, 0)
-                env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xde1ad end)
-                env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbe1ef end)
+                env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
+                env.negedge()
                 tl_e:grantack(0)
                 env.negedge(50)
                 mshrs[0].io_status_valid:expect(0)
