@@ -377,7 +377,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     // }
 }
 
-class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] = None, ways: Option[Int] = None, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
+class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] = None, ways: Option[Int] = None, idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
     def createDCacheNode(name: String, sources: Int) = {
@@ -423,8 +423,8 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
     val BlockSize = 64 // in byte
 
     val bankBinder = BankBinder(nrSlice, BlockSize)
-    val l1d_nodes  = (0 until nrCore).map { i => createDCacheNode(s"L1D_$i", 16) }
-    val l1i_nodes  = (0 until nrCore).map { i => createICacheNode(s"L1I_$i", 16) }
+    val l1d_nodes  = (0 until nrCore).map { i => createDCacheNode(s"L1D_$i", idRangeMax) }
+    val l1i_nodes  = (0 until nrCore).map { i => createICacheNode(s"L1I_$i", idRangeMax) }
 
     val l2 = LazyModule(new SimpleL2Cache()(p.alterPartial { case L2ParamKey =>
         L2Param(
@@ -500,10 +500,10 @@ object SimpleL2Cache extends App {
         case DebugOptionsKey => DebugOptions()
     })
 
-    // TODO: 4 core
-    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12, hasEndpoint = true)(p)))(config)
+    // val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, idRangeMax = 64, nodeID = 12, hasEndpoint = true)(p)))(config)
+    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 4, nrSlice = 1, idRangeMax = 64, nodeID = 12, hasEndpoint = true)(p)))(config)
 
-    GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", split = false)
+    GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", release = false, split = false)
 }
 
 // For logic synthesis
