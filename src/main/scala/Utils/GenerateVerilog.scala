@@ -17,8 +17,17 @@ object GenerateVerilog {
             _isRelease
         }
 
+        val SPLIT_VERILOG = sys.env.get("SPLIT_VERILOG")
+        val isSplit = if (SPLIT_VERILOG.isEmpty) {
+            split
+        } else {
+            val _isSplit = SPLIT_VERILOG.get == "1"
+            println(s"[GenerateVerilog][${name}] get SPLIT_VERILOG => ${SPLIT_VERILOG.get} isSplit => ${_isSplit}")
+            _isSplit
+        }
+
         var extraFirtoolOptions = Seq(FirtoolOption("--export-module-hierarchy"))
-        if (split) {
+        if (isSplit) {
             extraFirtoolOptions = extraFirtoolOptions ++ Seq(FirtoolOption("--split-verilog"), FirtoolOption("-o=./build/" + name))
         }
 

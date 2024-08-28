@@ -39,10 +39,13 @@ if __name__ == "__main__":
     parser.add_argument('--target', '-t', dest="target", type=str, help='build target')
     parser.add_argument('--package', '-p', dest="package", type=str, default="SimpleL2", help='build target package')
     parser.add_argument('--release', '-r', dest="release", action='store_true', help='Build with release option')
+    parser.add_argument('--split', '-s', dest="split", action='store_true', help='Build with split verilog files option')
     args = parser.parse_args()
 
     if args.release:
         os.environ['GEN_RELEASE'] = '1'
+    if args.split:
+        os.environ['SPLIT_VERILOG'] = '1'
     
     if args.target != None:
         package = args.package
