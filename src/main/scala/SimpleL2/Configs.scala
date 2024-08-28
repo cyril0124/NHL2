@@ -35,7 +35,7 @@ case class L2Param(
     blockBytes: Int = 64,
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
-    addressBits: Int = 44,
+    addressBits: Int = 48,
     nrClients: Int = 2, // Number of L1 DCache
     nrMSHR: Int = 16,
     nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
@@ -139,7 +139,9 @@ trait HasL2Param {
         nodeIdBits = 7,
         addressBits = addressBits,
         dataBits = beatBytes * 8,
-        dataCheck = false
+        dataCheck = false,
+        txnIdBits = 12,
+        dbIdBits = 16
     )
     // @formatter:on
 

@@ -382,7 +382,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
     val atom   = TransferSizes(1, beatBytes)
     val access = TransferSizes(1, blockBytes)
 
-    val addressRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)) // TODO: parameterize this
+    val addressRange = AddressSet(0x00000000L, 0xFFFFFFFFFFFFL).subtract(AddressSet(0x0L, 0x7fffffffL)) // TODO: parameterize this
     val managerParameters = TLSlavePortParameters.v1(
         managers = Seq(
             TLSlaveParameters.v1(
@@ -596,7 +596,7 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
     val l1d_nodes  = (0 until nrCore).map { i => createDCacheNode(s"L1D_$i", 16) }
     val l1i_nodes  = (0 until nrCore).map { i => createICacheNode(s"L1I_$i", 16) }
 
-    val l2 = LazyModule(new SimpleL2Cache()(p.alterPartial { case L2ParamKey =>
+    val l2 = LazyModule(new SimpleL2CacheDecoupled()(p.alterPartial { case L2ParamKey =>
         L2Param(
             ways = ways.getOrElse(L2Param().ways),
             sets = sets.getOrElse(L2Param().sets),
@@ -643,20 +643,36 @@ class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] 
             endpoint.io.chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
             dontTouch(endpoint.io)
         } else {
-            val l2_chi                  = IO(l2.module.io.chi.cloneType)
-            val l2_chi_rx_linkactiveack = IO(l2.module.io.chi_rx_linkactiveack.cloneType)
-            val l2_chi_rx_linkactivereq = IO(Flipped(l2.module.io.chi_rx_linkactivereq.cloneType))
-            val l2_chi_tx_linkactiveack = IO(Flipped(l2.module.io.chi_tx_linkactiveack.cloneType))
-            val l2_chi_tx_linkactivereq = IO(l2.module.io.chi_tx_linkactivereq.cloneType)
-            val l2_chi_tx_rxsactive     = IO(Flipped(l2.module.io.chi_tx_rxsactive.cloneType))
-            val l2_chi_tx_txsactive     = IO(l2.module.io.chi_tx_txsactive.cloneType)
-            l2_chi                  <> l2.module.io.chi
-            l2_chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
-            l2_chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
-            l2_chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
-            l2_chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
-            l2_chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
-            l2_chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
+            def connectBundle[T1 <: UInt, T2 <: Bundle](in: DecoupledIO[T1], out: DecoupledIO[T2]): Unit = {
+                out.valid := in.valid
+                out.bits := in.bits.asTypeOf(out.bits)
+                in.ready := out.ready
+                require(in.bits.getWidth == out.bits.getWidth)
+            }
+
+            def connectUInt[T1 <: Bundle, T2 <: UInt](in: DecoupledIO[T1], out: DecoupledIO[T2]): Unit = {
+                out.valid := in.valid
+                out.bits := in.bits.asTypeOf(out.bits)
+                in.ready := out.ready
+                require(in.bits.getWidth == out.bits.getWidth)
+            }
+
+            val l2_chi                        = IO(new CHIUIntDecoupled(l2.chiBundleParams))
+
+            connectUInt(l2.module.io.chi.txreq, l2_chi.txreq)
+            connectUInt(l2.module.io.chi.txdat, l2_chi.txdat)
+            connectUInt(l2.module.io.chi.txrsp, l2_chi.txrsp)
+
+            connectBundle(l2_chi.rxsnp, l2.module.io.chi.rxsnp)
+            connectBundle(l2_chi.rxdat, l2.module.io.chi.rxdat)
+            connectBundle(l2_chi.rxrsp, l2.module.io.chi.rxrsp)
+
+            l2.module.io.chi_rx_linkactiveack <> DontCare
+            l2.module.io.chi_rx_linkactivereq <> DontCare
+            l2.module.io.chi_tx_linkactiveack <> DontCare
+            l2.module.io.chi_tx_linkactivereq <> DontCare
+            l2.module.io.chi_tx_rxsactive     <> DontCare
+            l2.module.io.chi_tx_txsactive     <> DontCare
         }
 
         dontTouch(l2.module.io)
@@ -671,7 +687,7 @@ object SimpleL2Cache extends App {
     })
 
     // TODO: 4 core
-    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 2, nrSlice = 1, nodeID = 12, hasEndpoint = true)(p)))(config)
+    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nrCore = 1, nrSlice = 1, nodeID = 12, hasEndpoint = false)(p)))(config)
 
     GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", split = false)
 }

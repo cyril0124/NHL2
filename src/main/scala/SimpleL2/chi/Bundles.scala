@@ -183,6 +183,16 @@ class CHIBundleDecoupled(params: CHIBundleParameters) extends Bundle {
     val rxsnp = Flipped(Decoupled(new CHIBundleSNP(params)))
 }
 
+class CHIUIntDecoupled(params: CHIBundleParameters) extends Bundle {
+    val txreq = Decoupled(UInt(new CHIBundleREQ(params).getWidth.W))
+    val txdat = Decoupled(UInt(new CHIBundleDAT(params).getWidth.W))
+    val txrsp = Decoupled(UInt(new CHIBundleRSP(params).getWidth.W))
+
+    val rxrsp = Flipped(Decoupled(UInt(new CHIBundleRSP(params).getWidth.W)))
+    val rxdat = Flipped(Decoupled(UInt(new CHIBundleDAT(params).getWidth.W)))
+    val rxsnp = Flipped(Decoupled(UInt(new CHIBundleSNP(params).getWidth.W)))
+}
+
 object CHIBundleDownstream {
     def apply(params: CHIBundleParameters, aggregateIO: Boolean = false): CHIBundleDownstream = new CHIBundleDownstream(params, aggregateIO)
 }

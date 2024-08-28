@@ -46,3 +46,5 @@ unit-test-quiet:
 	fi
 
 .PHONY: l2cache rtl uint-test unit-test-quiet
+
+# ./build_all.py -t SimpleL2Cache
