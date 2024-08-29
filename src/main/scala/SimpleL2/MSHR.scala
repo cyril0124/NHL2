@@ -236,16 +236,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reqPromoteT     = (reqIsAcquire || reqIsGet || reqIsPrefetch) && (promoteT_normal || promoteT_l3 || promoteT_alias) // TODO:
 
     when(io.alloc_s3.fire && !io.alloc_s3.bits.realloc) {
-        val allocState = io.alloc_s3.bits.fsmState
+        val allocState   = io.alloc_s3.bits.fsmState
+        val allocReq     = io.alloc_s3.bits.req
+        val allocDirResp = io.alloc_s3.bits.dirResp
 
         valid   := true.B
-        req     := io.alloc_s3.bits.req
-        dirResp := io.alloc_s3.bits.dirResp
+        req     := allocReq
+        dirResp := allocDirResp
         state   := allocState
 
         needProbe   := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
         needRead    := !allocState.s_read
-        needPromote := !allocState.s_makeunique
+        needPromote := !allocState.s_makeunique || !allocState.s_read && needT(allocReq.opcode, allocReq.param) && allocDirResp.hit && allocReq.opcode === AcquireBlock
         needWb      := false.B
 
         isRealloc := false.B
