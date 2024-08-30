@@ -12,12 +12,11 @@ case class CHIBundleParameters(
     addressBits: Int,
     dataBits: Int,
     dataCheck: Boolean,
-                        // issueB  |  issueE
-    txnIdBits: Int = 8, // 8, 12
-    dbIdBits:  Int = 8, // 8, 12
-    reqOpcode: Int = 6, // 6,  7
-    rspOpcode: Int = 4, // 4,  5
-    datOpcode: Int = 3  // 3,  4
+    txnIdBits: Int = 8, // issueB: 8, issueE: 12
+    dbIdBits:  Int = 8, // issueB: 8, issueE: 12
+    reqOpcode: Int = 6, // issueB: 6, issueE: 7
+    rspOpcode: Int = 4, // issueB: 4, issueE: 5
+    datOpcode: Int = 3  // issueB: 3, issueE: 4
 // TODO: has snoop
 ) {
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
@@ -100,7 +99,7 @@ class CHIBundleSNP(params: CHIBundleParameters) extends Bundle {
     val srcID       = UInt(params.nodeIdBits.W)
     val txnID       = UInt(params.txnIdBits.W)
     val fwdNID      = UInt(params.nodeIdBits.W) // Used for DCT
-    val fwdTxnID    = UInt(params.txnIdBits.W)                // Used for DCT
+    val fwdTxnID    = UInt(params.txnIdBits.W)  // Used for DCT
     val opcode      = UInt(5.W)
     val addr        = UInt((params.addressBits - 3).W)
     val doNotGoToSD = Bool()
