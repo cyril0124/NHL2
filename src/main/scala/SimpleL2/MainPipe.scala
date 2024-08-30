@@ -96,11 +96,21 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isMshrSourceD_data_s2 = (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData) && task_s2.readTempDs
     val isMshrSourceD_s2      = !task_s2.isCHIOpcode && task_s2.isMshrTask && !task_s2.isReplTask && (isMshrSourceD_resp_s2 || isMshrSourceD_data_s2)
     val isSourceD_s2          = !task_s2.isCHIOpcode && !task_s2.isMshrTask && task_s2.isChannelC && (task_s2.opcode === Release || task_s2.opcode === ReleaseData)
-    io.sourceD_s2.valid := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
-    io.sourceD_s2.bits  <> task_s2
-    when(isSourceD_s2) {
-        io.sourceD_s2.bits.opcode := ReleaseAck
-        assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
+    val sourceD_s2            = WireInit(0.U.asTypeOf(Valid(new TaskBundle)))
+    if (enableDataECC) {
+        sourceD_s2.valid := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
+        sourceD_s2.bits  := task_s2
+        when(isSourceD_s2) {
+            sourceD_s2.bits.opcode := ReleaseAck
+            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
+        }
+    } else {
+        io.sourceD_s2.valid := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
+        io.sourceD_s2.bits  <> task_s2
+        when(isSourceD_s2) {
+            io.sourceD_s2.bits.opcode := ReleaseAck
+            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
+        }
     }
 
     val isSnpToN_s2    = CHIOpcodeSNP.isSnpToN(task_s2.opcode) && task_s2.isChannelB
@@ -110,15 +120,28 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isCompData_s2  = isMshrTXDAT_s2 && task_s2.opcode === CompData && supportDCT.B
     val isTXDAT_s2     = task_s2.isChannelB && task_s2.readTempDs && task_s2.snpHitReq && !isSnpFwd_s2
     val snpNeedMshr_s2 = isTXDAT_s2 && io.txdat_s2.valid && !io.txdat_s2.ready // If txdat is not ready, we should let this req enter mshr, the mshrId is task_s2.snpHitMshrId
-    io.txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
-    io.txdat_s2.bits         := DontCare
-    io.txdat_s2.bits.tgtID   := task_s2.tgtID
-    io.txdat_s2.bits.txnID   := task_s2.txnID
-    io.txdat_s2.bits.homeNID := task_s2.srcID
-    io.txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
-    io.txdat_s2.bits.resp    := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp)
-    io.txdat_s2.bits.be      := Fill(beatBytes, 1.U)
-    io.txdat_s2.bits.opcode  := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
+    val txdat_s2       = WireInit(0.U.asTypeOf(Valid(new CHIBundleDAT(chiBundleParams))))
+    if (enableDataECC) {
+        txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
+        txdat_s2.bits         := DontCare
+        txdat_s2.bits.tgtID   := task_s2.tgtID
+        txdat_s2.bits.txnID   := task_s2.txnID
+        txdat_s2.bits.homeNID := task_s2.srcID
+        txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
+        txdat_s2.bits.resp    := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp)
+        txdat_s2.bits.be      := Fill(beatBytes, 1.U)
+        txdat_s2.bits.opcode  := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
+    } else {
+        io.txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
+        io.txdat_s2.bits         := DontCare
+        io.txdat_s2.bits.tgtID   := task_s2.tgtID
+        io.txdat_s2.bits.txnID   := task_s2.txnID
+        io.txdat_s2.bits.homeNID := task_s2.srcID
+        io.txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
+        io.txdat_s2.bits.resp    := Mux(task_s2.snpHitReq && task_s2.snpGotDirty, Mux(isSnpToN_s2, Resp.I_PD, Resp.SC_PD), task_s2.resp)
+        io.txdat_s2.bits.be      := Fill(beatBytes, 1.U)
+        io.txdat_s2.bits.opcode  := Mux(task_s2.snpHitReq, SnpRespData, task_s2.opcode)
+    }
 
     val dropMshrTask_s2 = if (optParam.mshrStallOnReqArb) {
         false.B
@@ -128,14 +151,26 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val sourcedStall_s2 = io.sourceD_s2.valid && !io.sourceD_s2.ready
     val txdatStall_s2   = io.txdat_s2.valid && !io.txdat_s2.ready
     val hasRetry_s2     = io.retryTasks.stage2.valid && io.retryTasks.stage2.bits.isRetry_s2
-    io.retryTasks.mshrId_s2                := task_s2.mshrId
-    io.retryTasks.stage2.valid             := (isMshrSourceD_s2 || isMshrTXDAT_s2 || dropMshrTask_s2) && valid_s2
-    io.retryTasks.stage2.bits.isRetry_s2   := sourcedStall_s2 || txdatStall_s2 || dropMshrTask_s2
-    io.retryTasks.stage2.bits.grant_s2     := !task_s2.isCHIOpcode && (task_s2.opcode === Grant || task_s2.opcode === GrantData)
-    io.retryTasks.stage2.bits.accessack_s2 := !task_s2.isCHIOpcode && (task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData)
-    io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
-    io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
-    io.retryTasks.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
+    val retryTasks_s2   = WireInit(0.U.asTypeOf(chiselTypeOf(io.retryTasks)))
+    if (enableDataECC) {
+        retryTasks_s2.mshrId_s2                := task_s2.mshrId
+        retryTasks_s2.stage2.valid             := (isMshrSourceD_s2 || isMshrTXDAT_s2 || dropMshrTask_s2) && valid_s2
+        retryTasks_s2.stage2.bits.isRetry_s2   := sourcedStall_s2 || txdatStall_s2 || dropMshrTask_s2
+        retryTasks_s2.stage2.bits.grant_s2     := !task_s2.isCHIOpcode && (task_s2.opcode === Grant || task_s2.opcode === GrantData)
+        retryTasks_s2.stage2.bits.accessack_s2 := !task_s2.isCHIOpcode && (task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData)
+        retryTasks_s2.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
+        retryTasks_s2.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
+        retryTasks_s2.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
+    } else {
+        io.retryTasks.mshrId_s2                := task_s2.mshrId
+        io.retryTasks.stage2.valid             := (isMshrSourceD_s2 || isMshrTXDAT_s2 || dropMshrTask_s2) && valid_s2
+        io.retryTasks.stage2.bits.isRetry_s2   := sourcedStall_s2 || txdatStall_s2 || dropMshrTask_s2
+        io.retryTasks.stage2.bits.grant_s2     := !task_s2.isCHIOpcode && (task_s2.opcode === Grant || task_s2.opcode === GrantData)
+        io.retryTasks.stage2.bits.accessack_s2 := !task_s2.isCHIOpcode && (task_s2.opcode === AccessAck || task_s2.opcode === AccessAckData)
+        io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
+        io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
+        io.retryTasks.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
+    }
 
     /**
       * Notify [[MSHR]]s that the stage 2 task may nested [[MSHR]] in stage 3.
@@ -144,15 +179,49 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrEarlyNested_s2.set       := task_s2.set
     io.mshrEarlyNested_s2.tag       := task_s2.tag
     io.mshrEarlyNested_s2.isMshr    := task_s2.isMshrTask
-    io.mshrEarlyNested_s2.isSnpToN  := valid_s2 && ((task_s2.isChannelB && isSnpToN_s2 && !snpNeedMshr_s2) || task_s2.isMshrTask && task_s2.updateDir && task_s2.newMetaEntry.state === MixedState.I)
+    io.mshrEarlyNested_s2.isSnpToN  := valid_s2 && ((task_s2.isChannelB && isSnpToN_s2 && Mux(enableDataECC.B, true.B, !snpNeedMshr_s2)) || task_s2.isMshrTask && task_s2.updateDir && task_s2.newMetaEntry.state === MixedState.I)
     io.mshrEarlyNested_s2.isRelease := valid_s2 && task_s2.isChannelC && task_s2.opcode === ReleaseData
+
+    // -----------------------------------------------------------------------------------------
+    // Stage 2 ecc
+    // -----------------------------------------------------------------------------------------
+    val valid_s2e      = RegNext(valid_s2, false.B)
+    val retryTasks_s2e = RegEnable(retryTasks_s2, valid_s2)
+    val sourceD_s2e    = RegEnable(sourceD_s2, valid_s2)
+    val txdat_s2e      = RegEnable(txdat_s2, valid_s2)
+
+    val isSourceD_s2e = RegEnable(isSourceD_s2, valid_s2)
+    if (enableDataECC) {
+        io.sourceD_s2.valid := sourceD_s2e.valid && valid_s2e
+        io.sourceD_s2.bits  := sourceD_s2e.bits
+        when(isSourceD_s2e) {
+            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
+        }
+    }
+
+    val isTXDAT_s2e     = RegEnable(isTXDAT_s2, valid_s2)
+    val snpNeedMshr_s2e = isTXDAT_s2e && io.txdat_s2.valid && !io.txdat_s2.ready // If txdat is not ready, we should let this req enter mshr, the mshrId is task_s2.snpHitMshrId
+    if (enableDataECC) {
+        io.txdat_s2.valid := txdat_s2e.valid && valid_s2e
+        io.txdat_s2.bits  := txdat_s2e.bits
+    }
+
+    val dropMshrTask_s2e = RegEnable(dropMshrTask_s2, valid_s2)
+    val sourcedStall_s2e = io.sourceD_s2.valid && !io.sourceD_s2.ready
+    val txdatStall_s2e   = io.txdat_s2.valid && !io.txdat_s2.ready
+    val hasRetry_s2e     = io.retryTasks.stage2.valid && io.retryTasks.stage2.bits.isRetry_s2
+    if (enableDataECC) {
+        io.retryTasks                        <> retryTasks_s2e
+        io.retryTasks.stage2.valid           := retryTasks_s2e.stage2.valid && valid_s2e
+        io.retryTasks.stage2.bits.isRetry_s2 := sourcedStall_s2e || txdatStall_s2e || dropMshrTask_s2e
+    }
 
     // -----------------------------------------------------------------------------------------
     // Stage 3
     // -----------------------------------------------------------------------------------------
     val dirResp_s3     = io.dirResp_s3.bits
     val task_s3        = RegEnable(task_s2, 0.U.asTypeOf(new TaskBundle), valid_s2)
-    val hasRetry_s3    = RegEnable(hasRetry_s2, valid_s2)
+    val hasRetry_s3    = if (enableDataECC) hasRetry_s2e else RegEnable(hasRetry_s2, valid_s2)
     val valid_s3       = RegNext(valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B), false.B)
     val isSnpHitReq_s3 = task_s3.snpHitReq && valid_s3
     val hit_s3         = dirResp_s3.hit && io.dirResp_s3.valid // && !isSnpHitReq_s3 // hit is invalid for snpHitReq request
@@ -160,7 +229,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val state_s3       = meta_s3.state
     assert(!(valid_s3 && !task_s3.isMshrTask && !task_s3.snpHitReq && !io.dirResp_s3.fire), "Directory response should be valid!")
 
-    val snpNeedMshr_s3        = RegEnable(snpNeedMshr_s2, valid_s2)
+    val snpNeedMshr_s3        = if (enableDataECC) snpNeedMshr_s2e else RegEnable(snpNeedMshr_s2, valid_s2)
     val reqNeedT_s3           = needT(task_s3.opcode, task_s3.param)
     val reqClientOH_s3        = getClientBitOH(task_s3.source)
     val noClients_s3          = !meta_s3.clientsOH.orR

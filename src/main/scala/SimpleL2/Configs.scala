@@ -8,6 +8,7 @@ import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey}
 import org.chipsalliance.cde.config._
 import xs.utils.FastArbiter
+import xs.utils.Code
 import SimpleL2._
 import SimpleL2.chi._
 
@@ -24,7 +25,8 @@ case class L2OptimizationParam(
     sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
     sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
     sinkaStallOnReqArb: Boolean = false,
-    mshrStallOnReqArb: Boolean = false
+    mshrStallOnReqArb: Boolean = false,
+    latchTempDsToDs: Boolean = true // Whether to latch the refill data from TempDataStorage to DataStorage for one cycle. If it is true, it will eliminate the timing path of refilling data from TempDataStorage to DataStorage when data ECC is enabled.
 )
 
 case class L2Param(
@@ -49,9 +51,9 @@ case class L2Param(
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
-    replacementPolicy: String = "plru",           // Option: "random", "plru", "lru"
-    dataEccCode: Option[String] = Some("secded"), // Option: "none", "identity", "parity", "sec", "secded"
-    useDiplomacy: Boolean = false                 // If use diplomacy, EdgeInKey should be passed in
+    replacementPolicy: String = "plru", // Option: "random", "plru", "lru"
+    dataEccCode: String = "secded",     // Option: "none", "identity", "parity", "sec", "secded"
+    useDiplomacy: Boolean = false       // If use diplomacy, EdgeInKey should be passed in
 ) {
     require(isPow2(ways))
     require(isPow2(sets))
@@ -59,7 +61,7 @@ case class L2Param(
     require(nrSlice >= 1)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
     require(nrClients >= 1)
-    dataEccCode.foreach(code => require(code == "none" || code == "identity" || code == "parity" || code == "sec" || code == "secded"))
+    require(dataEccCode == "none" || dataEccCode == "identity" || dataEccCode == "parity" || dataEccCode == "sec" || dataEccCode == "secded")
 }
 
 trait HasL2Param {
@@ -99,7 +101,18 @@ trait HasL2Param {
     val rxdatCreditMAX = l2param.rxdatCreditMAX
 
     val replacementPolicy = l2param.replacementPolicy
-    val dataEccCode       = l2param.dataEccCode
+
+    /** 
+     * ECC parameters 
+     */
+    val dataEccCode = l2param.dataEccCode
+    def dataCode: Code = Code.fromString(dataEccCode)
+
+    val eccProtectBytes = 8
+    val eccProtectBits  = eccProtectBytes * 8
+    val dataWithECCBits = dataCode.width(eccProtectBits)
+    val dataEccBits     = dataWithECCBits - eccProtectBits
+    val enableDataECC   = dataEccBits > 0
 
     val deadlockThreshold = 10000 * 2
 

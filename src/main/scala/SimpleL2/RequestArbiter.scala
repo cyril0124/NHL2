@@ -85,14 +85,14 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val blockC_s1 = WireInit(false.B)
 
-    val task_s2         = RegInit(0.U.asTypeOf(new TaskBundle))
-    val valid_s2        = RegInit(false.B)
-    val mayReadDS_s2    = WireInit(false.B)
-    val willWriteDS_s2  = WireInit(false.B)
-    val willRefillDS_s2 = WireInit(false.B)
-    val willWriteDS_s3  = WireInit(false.B)
-    val willRefillDS_s3 = WireInit(false.B)
-    val snpHitReq_s2    = RegInit(false.B)
+    val task_s2          = RegInit(0.U.asTypeOf(new TaskBundle))
+    val valid_s2         = RegInit(false.B)
+    val mayReadDS_s2     = WireInit(false.B)
+    val willWriteDS_s2   = WireInit(false.B)
+    val willRefillDS_s2  = WireInit(false.B)
+    val willWriteDS_s3   = WireInit(false.B)
+    val willRefillDS_s2e = WireInit(false.B)
+    val snpHitReq_s2     = RegInit(false.B)
 
     val valid_s3     = RegInit(false.B)
     val set_s3       = RegInit(0.U(setBits.W))
@@ -101,6 +101,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val arbTaskSnoop_dup_s1 = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     val taskSnoop_s1        = io.taskSnoop_s1.bits
+    val latchTempDsToDs     = enableDataECC && optParam.latchTempDsToDs
 
     // -----------------------------------------------------------------------------------------
     // Stage 0
@@ -198,7 +199,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
          * We need to check if stage2 will read the [[DataStorage]]. 
          * If it is, we should not allow the stage1 request that will read the [[DataStorage]] go further to meet the requirement of multi-cycle path of DataSRAM. 
          */
-        val blockA_mayReadDS_forSinkA = mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2)
+        val blockA_mayReadDS_forSinkA = mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2))
         blockA_s1 := blockA_mayReadDS_forSinkA || io.fromSinkC.willWriteDS_s1
     } else {
         val addrConflict_forSinkA = addrConflict(io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
@@ -206,7 +207,11 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
         val setConflict_forSinkA  = setConflict("A", io.taskSinkA_s1.bits.set, io.taskSinkA_s1.bits.tag)
         val blockA_addrConflict   = (io.taskSinkA_s1.bits.set === task_s2.set && io.taskSinkA_s1.bits.tag === task_s2.tag) && valid_s2 || (io.taskSinkA_s1.bits.set === set_s3 && io.taskSinkA_s1.bits.tag === tag_s3) && valid_s3 || addrConflict_forSinkA
         val blockA_mayReadDS_forSinkA =
-            mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
+            mayReadDS_a_s1_dup && (mayReadDS_s2 || willWriteDS_s2 || Mux(
+                latchTempDsToDs.B,
+                willRefillDS_s2e || willRefillDS_s2,
+                willRefillDS_s2
+            )) // We need to check if stage2 will read the DataStorage. If it is, we should not allow the stage1 request that will read the DataStorage go further to meet the requirement of multi-cycle path of DataSRAM.
         blockA_s1 := blockA_addrConflict || blockA_mayReadDS_forSinkA || io.fromSinkC.willWriteDS_s1 || noFreeWay_forSinkA || setConflict_forSinkA
     }
 
@@ -245,14 +250,15 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val mshrBlockSnp_forSnoop = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
 
-    val blockB_mayReadDS     = mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2
+    val blockB_mayReadDS     = mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
     val setConflict_forSnoop = setConflict("B", io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
 
     blockB_s1 := reqBlockSnp_forSnoop || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
 
     val noSpaceForNonDataResp = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U // No space for ReleaseAck to send out to SourceD
 
-    blockC_s1 := mayReadDS_s2 || willWriteDS_s2 || willRefillDS_s2 || noSpaceForNonDataResp // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
+    // TODO: Some snoop does not need data // This is used to meet the multi-cycle path of DataSRAM
+    blockC_s1 := noSpaceForNonDataResp || mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
 
     /** Task priority: MSHR > CMO > SinkC > Snoop > Replay > SinkA */
     val opcodeSinkC_s1 = io.taskSinkC_s1.bits.opcode
@@ -310,7 +316,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     val mayReadDS_mshr_s1 = (mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === CopyBackWrData || mshrTask_s1.opcode === SnpRespData) && mshrTask_s1.channel === CHIChannel.TXDAT) || (!mshrTask_s1.isCHIOpcode && (mshrTask_s1.opcode === GrantData || mshrTask_s1.opcode === AccessAckData))
     mayReadDS_a_s1_dup := mayReadDS_a_s1
 
-    val dsReady_s1             = !mayReadDS_s2 && !willWriteDS_s2 && !willRefillDS_s2
+    val dsReady_s1             = !mayReadDS_s2 && !willWriteDS_s2 && !Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
     val tempDsReady_s1         = io.tempDsRead_s1.ready && (tempDsToDs_s1 && dsReady_s1 || !tempDsToDs_s1)
     val setConflict_forRepl_s1 = setConflict_forRepl(mshrTask_s1.set)
     val mshrTaskReady_s1 = Mux(
@@ -401,17 +407,22 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     io.mpReq_s2.valid := valid_s2
     io.mpReq_s2.bits  := task_s2
 
-    io.toSinkC.mayReadDS_s2    := mayReadDS_s2
-    io.toSinkC.willRefillDS_s2 := willRefillDS_s2
+    io.toSinkC.mayReadDS_s2 := mayReadDS_s2
+
+    /**
+     * If latchTempDsToDs is true, we should block the other [[DataStorage]] operation with both `willRefillDS_s2e || willRefillDS_s2` as back-pressure signal.
+     * The reason for using two willRefillDS* signal is that we should prevent the consequent [[DataStorage]] operation from being read and written at the same time and avoid violating the multi-cycle read/write rule of [[DataStorage]].
+     */
+    io.toSinkC.willRefillDS_s2 := Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
 
     // -----------------------------------------------------------------------------------------
     // Stage 3
     // -----------------------------------------------------------------------------------------
     val isMshrTask_s3 = RegInit(false.B)
     val channel_s3    = RegInit(0.U(L2Channel.width.W))
-    willWriteDS_s3  := RegNext(willWriteDS_s2)
-    willRefillDS_s3 := RegNext(willRefillDS_s2)
-    valid_s3        := fire_s2 && !io.reqDrop_s2_opt.getOrElse(false.B)
+    willWriteDS_s3   := RegNext(willWriteDS_s2)
+    willRefillDS_s2e := RegNext(willRefillDS_s2)
+    valid_s3         := fire_s2 && !io.reqDrop_s2_opt.getOrElse(false.B)
 
     when(fire_s2) {
         isMshrTask_s3 := task_s2.isMshrTask

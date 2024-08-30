@@ -131,6 +131,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     dir.io.dirWrite_s3 <> mainPipe.io.dirWrite_s3
 
+    tempDS.io.fromDS.eccVec_s5        := ds.io.toTempDS.eccVec_s5
     tempDS.io.fromDS.write_s5         <> ds.io.toTempDS.write_s5
     tempDS.io.fromRXDAT.write         <> rxdat.io.toTempDS.write
     tempDS.io.fromSinkC.write         <> sinkC.io.toTempDS.write
@@ -160,7 +161,11 @@ class Slice()(implicit p: Parameters) extends L2Module {
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?
     txreq.io.sliceId   := io.sliceId
 
-    val cancelData_s2 = reqArb.io.reqDrop_s2_opt.getOrElse(false.B)
+    val cancelData_s2 = if (enableDataECC) {
+        RegNext(reqArb.io.reqDrop_s2_opt.getOrElse(false.B), false.B)
+    } else {
+        reqArb.io.reqDrop_s2_opt.getOrElse(false.B)
+    }
     sourceD.io.task_s2          <> mainPipe.io.sourceD_s2
     sourceD.io.data_s2          <> tempDS.io.toSourceD.data_s2
     sourceD.io.data_s2.valid    := tempDS.io.toSourceD.data_s2.valid && !cancelData_s2
@@ -191,7 +196,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     sourceB.io.mpStatus_s4567 <> mainPipe.io.status
     sourceB.io.bufferStatus   := sourceD.io.bufferStatus
 
-    io.eccError := RegNext(ds.io.eccError, false.B)
+    io.eccError := RegNext(ds.io.eccError, false.B) || RegNext(tempDS.io.eccError, false.B)
 
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> sourceB.io.b
@@ -214,6 +219,7 @@ object Slice extends App {
             L2Param(
                 nrClients = CFG_CLIENT.toInt,
                 supportDCT = true,
+                dataEccCode = "none",
                 optParam = L2OptimizationParam(
                     reqBufOutLatch = false,
                     rxsnpHasLatch = false,

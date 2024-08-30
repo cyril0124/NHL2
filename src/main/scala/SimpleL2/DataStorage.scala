@@ -45,7 +45,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         }
 
         val toTempDS = new Bundle {
-            val write_s5 = ValidIO(new TempDataWrite)
+            val eccVec_s5 = Output(Vec(blockBytes / eccProtectBytes, UInt(dataEccBits.W)))
+            val write_s5  = ValidIO(new TempDataWrite)
         }
 
         /** 
@@ -71,13 +72,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val sramReady   = WireInit(false.B)
     val wayConflict = WireInit(false.B)
 
-    def dataCode: Code = Code.fromString(dataEccCode)
-    val eccProtectBytes = 8
-    val eccProtectBits  = eccProtectBytes * 8
-    val dataWithECCBits = dataCode.width(eccProtectBits)
-    val dataEccBits     = dataWithECCBits - eccProtectBits
-
-    println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits} eccEnable: ${dataEccBits > 0}")
+    println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits} eccEnable: ${enableDataECC}")
 
     /**
      * Each cacheline(64-byte) should be seperated into groups of 16-bytes(128-bits) beacuse SRAM provided by foundary is typically less than 144-bits wide.
@@ -110,6 +105,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     println(s"[${this.getClass().toString()}] dataSRAMs entry bits: ${Vec(groupBytes / 8, UInt(dataWithECCBits.W)).getWidth}")
 
+    val latchTempDsToDs = enableDataECC && optParam.latchTempDsToDs || !enableDataECC
+
     // -----------------------------------------------------------------------------------------
     // Stage 2 (SinkC release write)
     // -----------------------------------------------------------------------------------------
@@ -123,7 +120,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val wrSet_refill_s2   = io.refillWrite_s2.bits.set
     val wrWayOH_refill_s2 = io.refillWrite_s2.bits.wayOH
 
-    val fire_s2 = wen_sinkC_s2 || wen_refill_s2
+    val fire_s2 = if (latchTempDsToDs) wen_sinkC_s2 || wen_refill_s2 else wen_sinkC_s2
 
     _assert(!(RegNext(io.dsWrite_s2.fire, false.B) && io.dsWrite_s2.fire), "continuous write!")
 
@@ -136,16 +133,18 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdSet_s3     = io.fromMainPipe.dsRead_s3.bits.set
     val rdMshrIdx_s3 = io.fromMainPipe.mshrId_s3
 
-    val wen_s3           = RegNext(fire_s2, false.B)
-    val wen_sinkC_s3     = wen_s3 && RegEnable(wen_sinkC_s2, false.B, fire_s2)
+    // @formatter:off
+    val wen_s3           = if (latchTempDsToDs) { RegNext(fire_s2, false.B) } else { RegNext(fire_s2, false.B) || wen_refill_s2 } 
+    val wen_sinkC_s3     = if (latchTempDsToDs) { wen_s3 && RegEnable(wen_sinkC_s2, false.B, fire_s2) } else { RegNext(fire_s2, false.B) && RegEnable(wen_sinkC_s2, false.B, fire_s2) } 
     val wrData_sinkC_s3  = RegEnable(wrData_sinkC_s2, wen_sinkC_s2)
     val wrSet_sinkC_s3   = RegEnable(wrSet_sinkC_s2, wen_sinkC_s2)
     val wrWayOH_sinkC_s3 = Mux(io.fromMainPipe.dsWrWayOH_s3.valid, io.fromMainPipe.dsWrWayOH_s3.bits, RegEnable(wrWayOH_sinkC_s2, wen_sinkC_s2))
-
-    val wen_refill_s3     = wen_s3 && RegEnable(wen_refill_s2, false.B, fire_s2)
-    val wrData_refill_s3  = RegEnable(wrData_refill_s2, wen_refill_s2)
-    val wrSet_refill_s3   = RegEnable(wrSet_refill_s2, wen_refill_s2)
-    val wrWayOH_refill_s3 = RegEnable(wrWayOH_refill_s2, wen_refill_s2)
+    
+    val wen_refill_s3     = if (latchTempDsToDs) { wen_s3 && RegEnable(wen_refill_s2, false.B, fire_s2) } else wen_refill_s2
+    val wrData_refill_s3  = if (latchTempDsToDs) { RegEnable(wrData_refill_s2, wen_refill_s2) } else wrData_refill_s2
+    val wrSet_refill_s3   = if (latchTempDsToDs) { RegEnable(wrSet_refill_s2, wen_refill_s2) } else wrSet_refill_s2
+    val wrWayOH_refill_s3 = if (latchTempDsToDs) { RegEnable(wrWayOH_refill_s2, wen_refill_s2) } else wrWayOH_refill_s2
+    // @formatter:on
 
     val wrSet_s3   = Mux(wen_refill_s3, wrSet_refill_s3, wrSet_sinkC_s3)
     val wrWayOH_s3 = Mux(wen_refill_s3, wrWayOH_refill_s3, wrWayOH_sinkC_s3)
@@ -216,7 +215,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     )
 
     // -----------------------------------------------------------------------------------------
-    // Stage 5 (read finish && ECC)
+    // Stage 5 (read finish)
     // -----------------------------------------------------------------------------------------
     val ren_s5          = RegNext(ren_s4, false.B)
     val rdWayOH_s5      = RegEnable(rdWayOH_s4, ren_s4)
@@ -228,46 +227,60 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdDataRaw_s5    = Mux1H(rdWayOH_s5, rdDataRawVec_s5)
     val rdDataVec_s5 = VecInit(rdDataRaw_s5.map { dataVec =>
         VecInit(dataVec.map { d =>
-            val decodeData = dataCode.decode(d)
-            Mux(decodeData.correctable, decodeData.corrected, decodeData.uncorrected)
+            dataCode.decode(d).uncorrected
         }).asUInt
     })
 
-    val rdDataHasErr_s5           = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).error)).asUInt)).asUInt.orR
-    val rdDataHasUncorrectable_s5 = VecInit(rdDataRaw_s5.map(dataVec => VecInit(dataVec.map(d => dataCode.decode(d).uncorrectable)).asUInt)).asUInt.orR
-    assert(
-        !(ren_s5 && rdDataHasErr_s5 && rdDataHasUncorrectable_s5),
-        "TODO: Data has error rdDataVec_s5:%x, rdDataHasErr_s5:%d, rdDataHasUncorrectable_s5:%d",
-        rdDataVec_s5.asUInt,
-        rdDataHasErr_s5,
-        rdDataHasUncorrectable_s5
-    )
-    // TODO: ECC info should be saved in some kind of CSR registers. For now, just ignore it.
-    if (eccProtectBits == 0) {
-        io.eccError := false.B
+    rdData_s5                      := rdDataVec_s5.asUInt
+    io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
+    io.toTempDS.write_s5.bits.data := rdData_s5 // rdData without ECC bits, ECC check is located in TempDataStorage, so we don't need to add ECC bits here
+    io.toTempDS.write_s5.bits.idx  := rdMshrIdx_s5
+    if (enableDataECC) {
+        io.toTempDS.eccVec_s5 := VecInit(
+            rdDataRaw_s5.map { dataVec =>
+                dataVec.asTypeOf(Vec(groupBytes / 8, UInt(dataWithECCBits.W))).map(d => d.head(dataEccBits)).asUInt
+            }
+        ).asUInt.asTypeOf(Vec(blockBytes / eccProtectBytes, UInt(dataEccBits.W)))
     } else {
-        io.eccError := ren_s5 && rdDataHasUncorrectable_s5
+        io.toTempDS.eccVec_s5 := DontCare
     }
 
-    rdData_s5 := rdDataVec_s5.asUInt
-
-    io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
-    io.toTempDS.write_s5.bits.data := rdData_s5
-    io.toTempDS.write_s5.bits.idx  := rdMshrIdx_s5
-
     // -----------------------------------------------------------------------------------------
-    // Stage 6 (data output)
+    // Stage 6 (data output) / (ECC check)
     // -----------------------------------------------------------------------------------------
     val ren_s7_dup           = WireInit(false.B)
     val readToSourceD_s7_dup = WireInit(false.B)
     val readToTXDAT_s7_dup   = WireInit(false.B)
 
     val ren_s6           = RegInit(false.B)
-    val rdData_s6        = RegEnable(rdData_s5, fire_s5)
+    val rdData_s6        = WireInit(0.U(dataBits.W))
+    val rdDataRaw_s6     = RegEnable(rdDataRaw_s5, fire_s5)
     val rdDest_s6        = RegEnable(rdDest_s5, fire_s5)
     val readToSourceD_s6 = rdDest_s6 === DataDestination.SourceD
     val readToTXDAT_s6   = rdDest_s6 === DataDestination.TXDAT
     val fire_s6          = ren_s6 && ready_s7 && (io.toSourceD.dsResp_s6s7.valid && !io.toSourceD.dsResp_s6s7.ready || io.toTXDAT.dsResp_s6s7.valid && !io.toTXDAT.dsResp_s6s7.ready)
+
+    val rdDataVecDecoded_s6       = rdDataRaw_s6.map(dataVec => dataVec.map(d => dataCode.decode(d)))
+    val rdDataVec_s6              = VecInit(rdDataVecDecoded_s6.map(decodedDataVec => VecInit(decodedDataVec.map(decodedData => Mux(decodedData.correctable, decodedData.corrected, decodedData.uncorrected))).asUInt))
+    val rdDataHasErr_s6           = VecInit(rdDataVecDecoded_s6.map(decodedDataVec => VecInit(decodedDataVec.map(decodedData => decodedData.error)).asUInt)).asUInt.orR
+    val rdDataHasUncorrectable_s6 = VecInit(rdDataVecDecoded_s6.map(decodedDataVec => VecInit(decodedDataVec.map(decodedData => decodedData.uncorrectable)).asUInt)).asUInt.orR
+
+    rdData_s6 := rdDataVec_s6.asUInt
+
+    // TODO: ECC info should be saved in some kind of CSR registers. For now, just ignore it.
+    if (enableDataECC) {
+        assert(
+            !(ren_s6 && rdDataHasErr_s6 && rdDataHasUncorrectable_s6),
+            "TODO: Data has error rdDataVec_s6:%x, rdDataHasErr_s6:%d, rdDataHasUncorrectable_s6:%d",
+            rdDataVec_s6.asUInt,
+            rdDataHasErr_s6,
+            rdDataHasUncorrectable_s6
+        )
+
+        io.eccError := ren_s6 && rdDataHasUncorrectable_s6
+    } else {
+        io.eccError := false.B
+    }
 
     when(fire_s5) {
         ren_s6 := true.B
