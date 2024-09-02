@@ -24,6 +24,7 @@ case class L2OptimizationParam(
     rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
     sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
     sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
+    rxrspHasLatch: Boolean = true,
     sinkaStallOnReqArb: Boolean = false,
     mshrStallOnReqArb: Boolean = false,
     latchTempDsToDs: Boolean = true // Whether to latch the refill data from TempDataStorage to DataStorage for one cycle. If it is true, it will eliminate the timing path of refilling data from TempDataStorage to DataStorage when data ECC is enabled.

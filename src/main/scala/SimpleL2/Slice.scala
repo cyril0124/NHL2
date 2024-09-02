@@ -225,8 +225,10 @@ object Slice extends App {
                     rxsnpHasLatch = false,
                     sinkcHasLatch = false,
                     sourcebHasLatch = false,
+                    rxrspHasLatch = false,
                     sinkaStallOnReqArb = true,
-                    mshrStallOnReqArb = true
+                    mshrStallOnReqArb = true,
+                    latchTempDsToDs = true
                 )
             )
         case DebugOptionsKey => DebugOptions()
