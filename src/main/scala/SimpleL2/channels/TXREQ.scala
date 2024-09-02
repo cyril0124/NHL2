@@ -29,7 +29,10 @@ class TXREQ()(implicit p: Parameters) extends L2Module {
 
     if (nrSlice > 1) {
         val addr = queue.io.deq.bits.addr
-        io.out.bits.addr := Cat(addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits - 1), addr(setBits + offsetBits - 1, offsetBits), io.sliceId, 0.U(offsetBits.W))
+        val set = addr(setBits + offsetBits - 1, offsetBits)
+        val tag = addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits)
+        require(io.sliceId.getWidth == bankBits)
+        io.out.bits.addr := Cat(tag, set, io.sliceId, 0.U(offsetBits.W))
     }
 
     LeakChecker(io.out.valid, io.out.fire, Some("TXREQ_valid"), maxCount = deadlockThreshold)
