@@ -214,9 +214,7 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
         
         env.negedge(30)
 
-
-
-        function bitNot( input )
+        local function bitNot( input )
             if (input == 0) then
                 output = 1
             else
@@ -229,14 +227,14 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
         --   /          \
         -- plru_1[1]  plru_1[2]
         
-        plru_0 = 0
-        plru_1 = {0,0}
+        local plru_0 = 0
+        local plru_1 = {0,0}
         
-        GetVictimBool = 1
-        GetVictimWay  = 0
-        UpdateBool    = 1
-        UpdateWay     = 0
-        BitSaveStruct = 0
+        local GetVictimBool = 1
+        local GetVictimWay  = 0
+        local UpdateBool    = 1
+        local UpdateWay     = 0
+        local BitSaveStruct = 0
 
         -- no retry, use PLRU Replacer
         for i=1,nr_way do
@@ -252,7 +250,7 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
             GetVictimBool = 1
             if GetVictimBool == 1 then
                 GetVictimWay = plru_0*2 + plru_1[plru_0+1]
-                print("GetVictimWay:",GetVictimWay)
+                print("GetVictimWay:", GetVictimWay)
                 plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
                 plru_0           = bitNot(plru_0)
             elseif UpdateBool == 1 then
@@ -260,11 +258,11 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
                 -- plru_0                 = bitNot(UpdateWay//2)
                 plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
                 plru_0                            = bitNot(math.floor(UpdateWay/2))
-                print("plru_0:",plru_0)
-                print("plru_1:",plru_1[1],plru_1[2])
+                print("plru_0:", plru_0)
+                print("plru_1:", plru_1[1], plru_1[2])
                 BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
-                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
-                print("BitSaveStruct:",BitSaveStruct)
+                -- BitSaveStruct = (plru_0 << 2) + (plru_1[2] << 1) + (plru_1[1])
+                print("BitSaveStruct:", BitSaveStruct)
             end
 
             replResp_s3.valid:expect(1)
@@ -281,7 +279,7 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
             GetVictimBool = 1
             if GetVictimBool == 1 then
                 GetVictimWay = plru_0*2 + plru_1[plru_0+1]
-                print("GetVictimWay:",GetVictimWay)
+                print("GetVictimWay:", GetVictimWay)
                 plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
                 plru_0           = bitNot(plru_0)
             elseif UpdateBool == 1 then
@@ -289,11 +287,11 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
                 -- plru_0                 = bitNot(UpdateWay//2)
                 plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
                 plru_0                            = bitNot(math.floor(UpdateWay/2))
-                print("plru_0:",plru_0)
-                print("plru_1:",plru_1[1],plru_1[2])
+                print("plru_0:", plru_0)
+                print("plru_1:", plru_1[1], plru_1[2])
                 BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
-                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
-                print("BitSaveStruct:",BitSaveStruct)
+                -- BitSaveStruct = (plru_0 << 2) + (plru_1[2] << 1) + (plru_1[1])
+                print("BitSaveStruct:", BitSaveStruct)
             end
 
             for i = 1, 1 do
@@ -316,7 +314,7 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
             GetVictimBool = 1
             if GetVictimBool == 1 then
                 GetVictimWay = plru_0*2 + plru_1[plru_0+1]
-                print("GetVictimWay:",GetVictimWay)
+                print("GetVictimWay:", GetVictimWay)
                 plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
                 plru_0           = bitNot(plru_0)
             elseif UpdateBool == 1 then
@@ -324,11 +322,11 @@ local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_u
                 -- plru_0                 = bitNot(UpdateWay//2)
                 plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
                 plru_0                            = bitNot(math.floor(UpdateWay/2))
-                print("plru_0:",plru_0)
-                print("plru_1:",plru_1[1],plru_1[2])
+                print("plru_0:", plru_0)
+                print("plru_1:", plru_1[1], plru_1[2])
                 BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
-                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
-                print("BitSaveStruct:",BitSaveStruct)
+                -- BitSaveStruct = (plru_0 << 2) + (plru_1[2] << 1) + (plru_1[1])
+                print("BitSaveStruct:", BitSaveStruct)
             end
 
             replResp_s3.valid:expect(1)
