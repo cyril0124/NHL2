@@ -512,11 +512,6 @@ local test_basic_ecc_1bErr_read_write = env.register_test_case "test_basic_ecc_1
                 dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(0)
                 dut.u_DataStorage.io_eccError:expect(0)
 
-                -- "io_r_resp_data_0_1" detect
-                -- dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:expect(1)
-                -- dut.u_DataStorage.rdDataVec_s5_corrected_1:expect(0) -- ecc corrected
-                -- dut.u_DataStorage.rdDataVec_s5_uncorrected_2:expect(1) -- before corrected
-
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
                     return tempDS_write:fire()
@@ -573,13 +568,6 @@ local test_basic_ecc_2bErr_read_write = env.register_test_case "test_basic_ecc_2
                 
                 tempDS_write.bits.idx:expect(4)
                 
-                -- env.negedge()
-                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:get(), 1)
-                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_corrected_1:get(),0) -- ecc corrected
-                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_uncorrected_2:get(),1) -- before corrected
-                -- dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:expect(1)
-                -- dut.u_DataStorage.rdDataVec_s5_corrected_1:expect(0) -- ecc corrected
-                -- dut.u_DataStorage.rdDataVec_s5_uncorrected_2:expect(1) -- before corrected
                 dut.u_DataStorage.rdDataHasErr_s5:expect(1)
                 dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(1)
                 dut.u_DataStorage.io_eccError:expect(1)
