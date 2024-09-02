@@ -29,8 +29,8 @@ class TXREQ()(implicit p: Parameters) extends L2Module {
 
     if (nrSlice > 1) {
         val addr = queue.io.deq.bits.addr
-        val set = addr(setBits + offsetBits - 1, offsetBits)
-        val tag = addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits)
+        val set  = addr(setBits + offsetBits - 1, offsetBits)
+        val tag  = addr(tagBits + setBits + offsetBits - 1, setBits + offsetBits)
         require(io.sliceId.getWidth == bankBits)
         io.out.bits.addr := Cat(tag, set, io.sliceId, 0.U(offsetBits.W))
     }
