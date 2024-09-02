@@ -13,7 +13,7 @@ case class CHIBundleParameters(
     dataBits: Int,
     dataCheck: Boolean,
     txnIdBits: Int = 8, // issueB: 8, issueE: 12
-    dbIdBits:  Int = 8, // issueB: 8, issueE: 12
+    dbIdBits: Int = 8,  // issueB: 8, issueE: 12
     reqOpcode: Int = 6, // issueB: 6, issueE: 7
     rspOpcode: Int = 4, // issueB: 4, issueE: 5
     datOpcode: Int = 3  // issueB: 3, issueE: 4
@@ -34,7 +34,7 @@ object CHIBundleParameters {
         txnIdBits: Int = 8,
         dbIdBits: Int = 8,
         reqOpcode: Int = 6, // 6,  7
-        rspOpcode :Int = 4, // 4,  5
+        rspOpcode: Int = 4, // 4,  5
         datOpcode: Int = 3  // 3,  4
     ): CHIBundleParameters = new CHIBundleParameters(
         nodeIdBits = nodeIdBits,
