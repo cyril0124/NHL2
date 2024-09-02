@@ -433,6 +433,197 @@ local test_drop_overflow_data = env.register_test_case "test_drop_overflow_data"
     end
 }
 
+
+local test_basic_ecc_0bErr_read_write = env.register_test_case "test_basic_ecc_0bErr_read_write" {
+    function ()
+        env.dut_reset()
+
+        verilua "appendTasks" {
+            check_task = function ()        
+                local read_data = 0xff
+
+                env.expect_happen_until(100, function (c)
+                    return tempDS_write:fire()
+                end)
+                tempDS_write:dump()
+                read_data = tempDS_write.bits.data:get()[1]
+                expect.equal(read_data, 0xdead)
+                tempDS_write.bits.idx:expect(4)
+
+                dut.u_DataStorage.rdDataHasErr_s5:expect(0)
+                dut.u_DataStorage.io_eccError:expect(0)
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return tempDS_write:fire()
+                end)
+            end
+        }
+
+        env.negedge()
+            -- write "0xdead" into set=0x01, wayOH=0x01
+            dsWrite_s2.ready:expect(1)
+            dsWrite_s2.valid:set(1)
+            dsWrite_s2.bits.set:set(2)
+            dsWrite_s2.bits.data:set(0xdead, true)
+        env.negedge()
+            -- write way is provided in Stage 3
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(1)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(1)
+            dsWrite_s2.valid:set(0)        
+        env.negedge()
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(0)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(0)
+        env.negedge()
+            -- read from set=0x01, wayOH=0x01, mshrId_s3=0x04
+            dsRead_s3.valid:set(1)
+            dsRead_s3.bits.set:set(2)
+            dsRead_s3.bits.wayOH:set(1)
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
+
+        env.negedge()
+            dsRead_s3.valid:set(0)
+
+        env.posedge(200)
+    end
+}
+
+local test_basic_ecc_1bErr_read_write = env.register_test_case "test_basic_ecc_1bErr_read_write" {
+    function ()
+        env.dut_reset()
+
+        verilua "appendTasks" {
+            check_task = function ()        
+                local read_data = 0xff
+
+                env.expect_happen_until(100, function (c)
+                    return tempDS_write:fire()
+                end)
+                tempDS_write:dump()
+                read_data = tempDS_write.bits.data:get()[1]
+                
+                expect.equal(read_data, 0xdead)
+                expect.equal(tempDS_write.bits.data:get()[2], 0)
+                
+                tempDS_write.bits.idx:expect(4)
+                
+                dut.u_DataStorage.rdDataHasErr_s5:expect(1)
+                dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(0)
+                dut.u_DataStorage.io_eccError:expect(0)
+
+                -- "io_r_resp_data_0_1" detect
+                -- dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:expect(1)
+                -- dut.u_DataStorage.rdDataVec_s5_corrected_1:expect(0) -- ecc corrected
+                -- dut.u_DataStorage.rdDataVec_s5_uncorrected_2:expect(1) -- before corrected
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return tempDS_write:fire()
+                end)
+            end
+        }
+
+        env.negedge()
+            -- write "0xdead" into set=0x01, wayOH=0x01
+            dsWrite_s2.ready:expect(1)
+            dsWrite_s2.valid:set(1)
+            dsWrite_s2.bits.set:set(2)
+            dsWrite_s2.bits.data:set(0xdead, true)
+        env.negedge()
+            -- write way is provided in Stage 3
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(1)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(1)
+            dsWrite_s2.valid:set(0)        
+        env.negedge()
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(0)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(0)
+        env.negedge()
+            -- read from set=0x01, wayOH=0x01, mshrId_s3=0x04
+            dsRead_s3.valid:set(1)
+            dsRead_s3.bits.set:set(2)
+            dsRead_s3.bits.wayOH:set(1)
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
+            -- dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_1:set_force_str("0x01")
+            dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_0:set_force_str("0x7000000000001dead")
+        env.negedge()
+            dsRead_s3.valid:set(0)
+
+        env.posedge(200)
+            dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_0:set_release()
+    end
+}
+
+local test_basic_ecc_2bErr_read_write = env.register_test_case "test_basic_ecc_2bErr_read_write" {
+    function ()
+        env.dut_reset()
+
+        verilua "appendTasks" {
+            check_task = function ()        
+                local read_data = 0xff
+
+                env.expect_happen_until(100, function (c)
+                    return tempDS_write:fire()
+                end)
+                tempDS_write:dump()
+                read_data = tempDS_write.bits.data:get()[1]
+                
+                -- expect.equal(read_data, 0xdead)
+                
+                tempDS_write.bits.idx:expect(4)
+                
+                -- env.negedge()
+                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:get(), 1)
+                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_corrected_1:get(),0) -- ecc corrected
+                -- expect.equal(dut.u_DataStorage.rdDataVec_s5_uncorrected_2:get(),1) -- before corrected
+                -- dut.u_DataStorage.rdDataVec_s5_uncorrectable_4:expect(1)
+                -- dut.u_DataStorage.rdDataVec_s5_corrected_1:expect(0) -- ecc corrected
+                -- dut.u_DataStorage.rdDataVec_s5_uncorrected_2:expect(1) -- before corrected
+                dut.u_DataStorage.rdDataHasErr_s5:expect(1)
+                dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(1)
+                dut.u_DataStorage.io_eccError:expect(1)
+
+
+                env.posedge()
+                env.expect_not_happen_until(100, function ()
+                    return tempDS_write:fire()
+                end)
+            end
+        }
+
+        env.negedge()
+            -- write "0xdead" into set=0x01, wayOH=0x01
+            dsWrite_s2.ready:expect(1)
+            dsWrite_s2.valid:set(1)
+            dsWrite_s2.bits.set:set(2)
+            dsWrite_s2.bits.data:set(0xdead, true)
+        env.negedge()
+            -- write way is provided in Stage 3
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(1)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(1)
+            dsWrite_s2.valid:set(0)        
+        env.negedge()
+            dut.io_fromMainPipe_dsWrWayOH_s3_bits:set(0)
+            dut.io_fromMainPipe_dsWrWayOH_s3_valid:set(0)
+        env.negedge()
+            -- read from set=0x01, wayOH=0x01, mshrId_s3=0x04
+            dsRead_s3.valid:set(1)
+            dsRead_s3.bits.set:set(2)
+            dsRead_s3.bits.wayOH:set(1)
+            dsRead_s3.bits.dest:set(TempDataStorage)
+            dut.io_fromMainPipe_mshrId_s3:set(4)
+            dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_1:set_force_str("0x11")
+            -- dut:force_all()
+            --     dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_0:set_str("0x7000000000001dead")
+        env.negedge()
+            dsRead_s3.valid:set(0)
+
+        env.posedge(200)
+            dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_1:set_release()
+    end
+}
+
 verilua "mainTask" {
     function ()
         sim.dump_wave()
@@ -444,6 +635,10 @@ verilua "mainTask" {
         test_read_stall()
         -- test_drop_overflow_data()
 
+        test_basic_ecc_0bErr_read_write()
+        test_basic_ecc_1bErr_read_write()
+        test_basic_ecc_2bErr_read_write()
+        
         env.posedge(100)
         env.TEST_SUCCESS()
     end

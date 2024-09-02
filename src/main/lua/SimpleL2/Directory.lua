@@ -182,6 +182,165 @@ local test_miss_use_inv_way = env.register_test_case "test_miss_use_inv_way" {
    end 
 }
 
+local test_miss_use_inv_way_updateReplacer = env.register_test_case "test_miss_use_inv_way_updateReplacer" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        -- loop 1(i = 1~4): miss and use inv_way
+        -- loop 2(i = 5~8): hit  and updateReplacer
+        for i = 1, nr_way*2 do
+            local set = 0x00
+            local tag = 0x01 + i%4
+            local expect_wayOH = utils.uint_to_onehot((i-1)%4)
+
+            env.negedge(); dir_read(set, tag)
+            dir.io_dirRead_s1_bits_updateReplacer:set(1)
+            
+            env.expect_happen_until(10, function ()
+                return dirResp_s3:fire()
+            end)
+            dirResp_s3:dump()
+            if (i<=4) then
+                dirResp_s3.bits.hit:expect(0)
+                dirResp_s3.bits.meta_state:expect(MixedState.I)
+            else
+                dirResp_s3.bits.hit:expect(1)
+            end
+
+            env.negedge(); dir_write(set, tag, expect_wayOH, MixedState.TC)
+            env.negedge(10)
+        end
+        
+        env.negedge(30)
+
+
+
+        function bitNot( input )
+            if (input == 0) then
+                output = 1
+            else
+                output = 0
+            end
+            return output
+        end
+        
+        --      plru_0
+        --   /          \
+        -- plru_1[1]  plru_1[2]
+        
+        plru_0 = 0
+        plru_1 = {0,0}
+        
+        GetVictimBool = 1
+        GetVictimWay  = 0
+        UpdateBool    = 1
+        UpdateWay     = 0
+        BitSaveStruct = 0
+
+        -- no retry, use PLRU Replacer
+        for i=1,nr_way do
+            local mshrId = math.random(0,15)
+            env.negedge(); dir_read(0x00, 0x05+(i-1), mshrId, 1)
+            dir.io_dirRead_s1_bits_updateReplacer:set(1)
+            env.expect_happen_until(10, function ()
+                return dirResp_s3:fire()
+            end)
+            dirResp_s3:dump()
+            replResp_s3:dump()
+
+            GetVictimBool = 1
+            if GetVictimBool == 1 then
+                GetVictimWay = plru_0*2 + plru_1[plru_0+1]
+                print("GetVictimWay:",GetVictimWay)
+                plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
+                plru_0           = bitNot(plru_0)
+            elseif UpdateBool == 1 then
+                -- plru_1[UpdateWay//2+1] = bitNot(UpdateWay%2)
+                -- plru_0                 = bitNot(UpdateWay//2)
+                plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
+                plru_0                            = bitNot(math.floor(UpdateWay/2))
+                print("plru_0:",plru_0)
+                print("plru_1:",plru_1[1],plru_1[2])
+                BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
+                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
+                print("BitSaveStruct:",BitSaveStruct)
+            end
+
+            replResp_s3.valid:expect(1)
+            replResp_s3.bits.mshrId:expect(mshrId)
+            replResp_s3.bits.retry:expect(0)
+            replResp_s3.bits.wayOH:expect(utils.uint_to_onehot(GetVictimWay))
+        end
+
+        env.negedge(30)
+
+        -- no retry, PLRU Replacer victimway no free
+        for i=1,1 do
+
+            GetVictimBool = 1
+            if GetVictimBool == 1 then
+                GetVictimWay = plru_0*2 + plru_1[plru_0+1]
+                print("GetVictimWay:",GetVictimWay)
+                plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
+                plru_0           = bitNot(plru_0)
+            elseif UpdateBool == 1 then
+                -- plru_1[UpdateWay//2+1] = bitNot(UpdateWay%2)
+                -- plru_0                 = bitNot(UpdateWay//2)
+                plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
+                plru_0                            = bitNot(math.floor(UpdateWay/2))
+                print("plru_0:",plru_0)
+                print("plru_1:",plru_1[1],plru_1[2])
+                BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
+                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
+                print("BitSaveStruct:",BitSaveStruct)
+            end
+
+            for i = 1, 1 do
+                mshr_status[i].valid:set(1)
+                mshr_status[i].set:set(0x00)
+                mshr_status[i].dirHit:set(1)
+                mshr_status[i].wayOH:set(utils.uint_to_onehot(GetVictimWay))
+            end
+
+            local mshrId = math.random(0,15)
+            env.negedge(); 
+            dir_read(0x00, 0x10+(i-1), mshrId, 1)
+            dir.io_dirRead_s1_bits_updateReplacer:set(1)
+            env.expect_happen_until(10, function ()
+                return dirResp_s3:fire()
+            end)
+            dirResp_s3:dump()
+            replResp_s3:dump()
+
+            GetVictimBool = 1
+            if GetVictimBool == 1 then
+                GetVictimWay = plru_0*2 + plru_1[plru_0+1]
+                print("GetVictimWay:",GetVictimWay)
+                plru_1[plru_0+1] = bitNot(plru_1[plru_0+1])
+                plru_0           = bitNot(plru_0)
+            elseif UpdateBool == 1 then
+                -- plru_1[UpdateWay//2+1] = bitNot(UpdateWay%2)
+                -- plru_0                 = bitNot(UpdateWay//2)
+                plru_1[math.floor(UpdateWay/2)+1] = bitNot(UpdateWay%2)
+                plru_0                            = bitNot(math.floor(UpdateWay/2))
+                print("plru_0:",plru_0)
+                print("plru_1:",plru_1[1],plru_1[2])
+                BitSaveStruct = plru_0*4 + plru_1[2]*2 + plru_1[1]
+                -- BitSaveStruct = (plru_0<<2) + (plru_1[2]<<1) + (plru_1[1])
+                print("BitSaveStruct:",BitSaveStruct)
+            end
+
+            replResp_s3.valid:expect(1)
+            replResp_s3.bits.mshrId:expect(mshrId)
+            replResp_s3.bits.retry:expect(0)
+            -- replResp_s3.bits.wayOH:expect(utils.uint_to_onehot(GetVictimWay))
+        end
+
+        env.posedge(100)
+    end 
+ }
+
 local test_miss_filter_occupied_way = env.register_test_case "test_miss_filter_occupied_way" {
     function ()
         env.dut_reset()
@@ -214,6 +373,32 @@ local test_miss_filter_occupied_way = env.register_test_case "test_miss_filter_o
         print("")
 
         for i = 1, 3 do
+            mshr_status[i].valid:set(1)
+            mshr_status[i].set:set(0x00)
+            mshr_status[i].dirHit:set(1)
+            mshr_status[i].wayOH:set(utils.uint_to_onehot(i - 1))
+        end
+
+        env.negedge(); dir_read(0x00, 0x01)
+
+        env.expect_happen_until(10, function ()
+            return dirResp_s3:fire()
+        end)
+        dirResp_s3:dump()
+        dirResp_s3.bits.hit:expect(0)
+        assert(dirResp_s3.bits.wayOH:is_not(utils.uint_to_onehot(3 - 1)))
+        -- dirResp_s3.bits.wayOH:expect(utils.uint_to_onehot(3)) 
+        dirResp_s3.bits.meta_state:expect(MixedState.I)
+
+        reset_mshr_status()
+
+        env.dut_reset()
+        resetFinish:posedge()
+
+        print("")
+        print("")
+
+        for i = 1, 4 do
             mshr_status[i].valid:set(1)
             mshr_status[i].set:set(0x00)
             mshr_status[i].dirHit:set(1)
@@ -323,6 +508,8 @@ verilua "mainTask" {
         test_miss_filter_occupied_way()
         test_repl_resp()
         test_continuous_read_write()
+
+        test_miss_use_inv_way_updateReplacer()
 
         env.posedge(100)        
         env.TEST_SUCCESS()
