@@ -219,7 +219,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         val rxdat        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleDAT(chiBundleParams)))))
         val rxdatSliceID = getSliceID(rxdat.bits.txnID)
         slices.zipWithIndex.foreach { case (slice, i) =>
-            slice.io.chi.rxdat.valid      := rxdat.valid
+            slice.io.chi.rxdat.valid      := rxdat.valid && rxdatSliceID === i.U
             slice.io.chi.rxdat.bits       := rxdat.bits
             slice.io.chi.rxdat.bits.txnID := restoreTxnID(rxdat.bits.txnID)
         }
