@@ -10,6 +10,17 @@ import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
 
+/**
+  * CHI request retry info.
+  * [[Slice]] should provide this info to the top-level IO.
+  * The L2 top will use this info to match the PCrdGrant request with the proper [[Slice]] that is waiting for this PCrdGrant.
+  */
+class PCrdRetryInfo(implicit p: Parameters) extends Bundle {
+    val valid    = Bool()
+    val srcID    = UInt(chiBundleParams.nodeIdBits.W)
+    val pCrdType = UInt(4.W)
+}
+
 class Slice()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val tl          = Flipped(TLBundle(tlBundleParams))
@@ -17,6 +28,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val chiLinkCtrl = new CHILinkCtrlIO()
         val sliceId     = Input(UInt(bankBits.W))
         val eccError    = Output(Bool())
+
+        val pCrdRetryInfoVec = Output(Vec(nrMSHR, new PCrdRetryInfo))
     })
 
     println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
@@ -156,6 +169,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.retryTasks         <> mainPipe.io.retryTasks
     missHandler.io.mshrEarlyNested_s2 <> mainPipe.io.mshrEarlyNested_s2
     missHandler.io.mshrNested_s3      <> mainPipe.io.mshrNested_s3
+
+    io.pCrdRetryInfoVec <> missHandler.io.pCrdRetryInfoVec
 
     txreq.io.mshrTask  <> missHandler.io.tasks.txreq
     txreq.io.mpTask_s3 := DontCare // TODO: connect to MainPipe or remove ?

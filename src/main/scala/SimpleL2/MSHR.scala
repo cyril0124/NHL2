@@ -34,6 +34,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_compack    = Bool() // response CompAck downwards
     val s_makeunique = Bool()
     val s_repl       = Bool() // send replTask to MainPipe
+    val s_pcrdreturn = Bool() // send PCrdReturn when the correponding txreq transaction has been canceled.
 
     // w: wait
     val w_grant_sent      = Bool()
@@ -155,6 +156,13 @@ class MshrNestedWriteback()(implicit p: Parameters) extends L2Bundle {
     val release = new MshrNestedRelease
 }
 
+class LastReqState extends Bundle {
+    val read       = Bool()
+    val makeunique = Bool()
+    val evict      = Bool()
+    val wb         = Bool()
+}
+
 class MSHR()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val alloc_s3      = Flipped(ValidIO(new MshrAllocBundle))
@@ -166,6 +174,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val earlyNested   = Input(new MshrEarlyNested)
         val nested        = Input(new MshrNestedWriteback)
         val respMapCancel = DecoupledIO(UInt(mshrBits.W))
+        val pCrdRetryInfo = Output(new PCrdRetryInfo) // Each MSHR has a pCrdRetryInfo interface which provides the essential information for the PCrdGrant transaction to match exactly one MSHR.
         val id            = Input(UInt(mshrBits.W))
     })
 
@@ -199,6 +208,15 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val rspSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
     val datDBID  = RegInit(0.U(chiBundleParams.dbIdBits.W))
     val datSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+
+    // Registers for retry retry
+    val lastReqState   = RegInit(0.U(4.W)) // A register to store the last fired txreq transaction.
+    val gotRetry       = RegInit(false.B)
+    val retryPCrdType  = RegInit(0.U(4.W))
+    val retrySrcID     = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val gotPCrdReturn  = RegInit(false.B)
+    val returnPCrdType = RegInit(0.U(4.W))
+    val retryIsReissue = RegInit(false.B)
 
     val gotCompData         = RegInit(false.B)
     val gotDirty            = RegInit(false.B)
@@ -257,6 +275,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         datDBID  := 0.U
         datSrcID := 0.U
 
+        lastReqState   := 0.U
+        gotRetry       := false.B
+        retryPCrdType  := 0.U
+        gotPCrdReturn  := false.B
+        returnPCrdType := 0.U
+        retryIsReissue := false.B
+
         gotCompData     := false.B
         gotT            := false.B
         gotDirty        := false.B
@@ -305,11 +330,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mayCancelWb    := mayCancelEvict
 
     io.tasks.txreq <> DontCare
-    io.tasks.txreq.valid := (!state.s_read ||
+    io.tasks.txreq.valid := (!state.s_pcrdreturn || !state.s_read ||
         !state.s_makeunique ||
         (!state.s_evict && !mayChangeEvict && !mayCancelEvict || !state.s_wb && !mayCancelWb) && state.w_rprobeack) && state.s_snpresp && state.w_snpresp_sent // Evict/WriteBackFull should wait for refill and probeack finish
     io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
+            !state.s_pcrdreturn -> PCrdReturn,
+            !state.s_evict      -> Evict,
+            !state.s_wb         -> WriteBackFull,
             (!state.s_read || !state.s_makeunique) -> ParallelPriorityMux(
                 Seq(
                     (reqNeedT && dirResp.hit && req.opcode === AcquirePerm)  -> MakeUnique, // If we are nested by a SnpUnique, data still safe since we have already read data from DataStorage into TempDataStorage after allocation of MSHR at stage 3
@@ -317,28 +345,49 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     (reqNeedT && !dirResp.hit)                               -> ReadUnique,
                     reqNeedB                                                 -> ReadNotSharedDirty
                 )
-            ),
-            !state.s_evict -> Evict,
-            !state.s_wb    -> WriteBackFull
+            )
         )
     )
     io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_read || !state.s_makeunique, req.tag, meta.tag), req.set, 0.U(6.W))
-    io.tasks.txreq.bits.allowRetry := false.B                              // TODO: Retry
     io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique // TODO: only for Read not for Evict
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
     io.tasks.txreq.bits.order      := Order.None                           // No ordering required
     io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
     io.tasks.txreq.bits.snpAttr    := true.B
-    io.tasks.txreq.bits.srcID      := DontCare                             // This value will be assigned in output chi portr
-    io.tasks.txreq.bits.txnID      := io.id
+    io.tasks.txreq.bits.tgtID      := Mux(gotRetry, retrySrcID, DontCare)
+    io.tasks.txreq.bits.srcID      := DontCare                             // This value will be assigned in output chi port
+    io.tasks.txreq.bits.txnID      := Mux(!state.s_pcrdreturn, 0.U, io.id) // For PCrdReturn, txnID is not used and must be set to 0
+    io.tasks.txreq.bits.allowRetry := !gotRetry                            // The AllowRetry field should be set to 1 if the transaction is first issued(except for PrefetchTgt), and 0 if the transaction is being retried.
+    io.tasks.txreq.bits.pCrdType   := retryPCrdType                        // If the transaction is the first issued, the PCrdType field should be set to 0b0000
     when(io.tasks.txreq.fire) {
-        val opcode = io.tasks.txreq.bits.opcode
-        state.s_read       := state.s_read || (opcode === ReadUnique || opcode === ReadNotSharedDirty)
-        state.s_makeunique := state.s_makeunique || opcode === MakeUnique
-        state.s_evict      := state.s_evict || opcode === Evict
-        state.s_wb         := state.s_wb || opcode === WriteBackFull
+        val opcode       = io.tasks.txreq.bits.opcode
+        val s_read       = opcode === ReadUnique || opcode === ReadNotSharedDirty
+        val s_makeunique = opcode === MakeUnique
+        val s_evict      = opcode === Evict
+        val s_wb         = opcode === WriteBackFull
+        val s_pcrdreturn = opcode === PCrdReturn
+        state.s_read       := state.s_read || s_read
+        state.s_makeunique := state.s_makeunique || s_makeunique
+        state.s_evict      := state.s_evict || s_evict
+        state.s_wb         := state.s_wb || s_wb
+        state.s_pcrdreturn := state.s_pcrdreturn || s_pcrdreturn
+
+        val _lastReqState = WireInit(0.U.asTypeOf(new LastReqState))
+        _lastReqState.read       := s_read
+        _lastReqState.makeunique := s_makeunique
+        _lastReqState.evict      := s_evict
+        _lastReqState.wb         := s_wb
+        lastReqState             := _lastReqState.asUInt
+
+        when(retryIsReissue) {
+            retryIsReissue := false.B
+            gotRetry       := false.B
+            gotPCrdReturn  := false.B
+            assert(retryPCrdType === returnPCrdType, "retryPCrdType != returnPCrdType")
+        }
     }
     assert(!(!state.s_evict && !state.s_wb))
+    assert(PopCount(lastReqState) <= 1.U, "lastReqState should have only one valid bit!")
 
     /**
      * ------------------------------------------------------- 
@@ -790,9 +839,46 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             state.w_evict_comp := true.B
         }.elsewhen(opcode === CompDBIDResp) {
             state.w_compdbid := true.B
+        }.elsewhen(opcode === RetryAck) {
+            gotRetry      := true.B
+            retryPCrdType := rxrsp.bits.pCrdType
+            retrySrcID    := rxrsp.bits.srcID
+
+            assert(!gotRetry, "gotRetry has been set!")
+            assert(!gotPCrdReturn, "gotPCrdReturn should be set after receivng RetryAck")
+            assert(lastReqState.orR)
+        }.elsewhen(opcode === PCrdGrant) {
+            gotPCrdReturn  := true.B
+            returnPCrdType := rxrsp.bits.pCrdType
+
+            assert(gotRetry, "PCrdGrant should arrive after RetryAck") // If PCrdGrant arrives at L2 before RetryAck, it should be reordered in MissHandler
+            assert(!gotPCrdReturn, "gotPCrdReturn has been set!")
+            assert(lastReqState.orR)
+        }.otherwise {
+            assert(false.B, "Unknown rxrsp opcode => %x", opcode)
         }
     }
-    assert(!(rxrsp.fire && state.w_comp && state.w_evict_comp && state.w_compdbid), s"mshr is not watting for rxrsp")
+    // If the MSHR is not waitting for Comp/CompDBID or already accepted RetryAck, it should not accept further rxrsp
+    assert(!(rxrsp.fire && !(!state.w_comp || !state.w_evict_comp || !state.w_compdbid || !gotRetry || !gotPCrdReturn)), s"mshr is not watting for rxrsp")
+
+    /**
+     * Deal with CHI transaction retry.
+     * Once the PCrdReturn and RetryAck is received, the MSHR should reissue the last fired txreq transaction.
+     */
+    when(gotRetry && gotPCrdReturn && lastReqState.orR) {
+        when(!retryIsReissue) {
+            val _lastReqState = lastReqState.asTypeOf(new LastReqState)
+            state.s_read       := Mux(_lastReqState.read, false.B, state.s_read)
+            state.s_makeunique := Mux(_lastReqState.makeunique, false.B, state.s_makeunique)
+            state.s_evict      := Mux(_lastReqState.evict, false.B, state.s_evict)
+            state.s_wb         := Mux(_lastReqState.wb, false.B, state.s_wb)
+            retryIsReissue     := true.B
+        }
+    }
+    // Provide retry info to MissHandler. This info will be used by PCrdGrant to match which MSHR should it send to.
+    io.pCrdRetryInfo.valid    := valid && gotRetry
+    io.pCrdRetryInfo.srcID    := retrySrcID
+    io.pCrdRetryInfo.pCrdType := retryPCrdType
 
     /**
      * A [[MSHR]] will wait GrantAck for Acquire requests.
@@ -966,25 +1052,51 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         when(nested.toN) {
 
-            /** If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions. */
-            when(!state.s_wb) {
-                willCancelWb          := true.B
-                state.s_wb            := true.B
-                state.w_compdbid      := true.B
-                state.s_cbwrdata      := true.B
-                state.w_cbwrdata_sent := true.B
-                needWb                := false.B
-                assert(mayCancelWb)
-                // assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull") // Already checked
-            }
+            when(!retryIsReissue) {
 
-            when(!state.s_evict) {
-                willCancelEvict    := true.B
-                state.s_evict      := true.B
-                state.w_evict_comp := true.B
-                needWb             := true.B
-                assert(mayCancelEvict)
-                // assert(false.B, "TODO: Check! Snoop.toN cancel Evict") // Already checked
+                /** If WriteBackFull/Evict is not fired, snoop will cancel the WriteBackFull/Evict under certain conditions. */
+                when(!state.s_wb) {
+                    willCancelWb          := true.B
+                    state.s_wb            := true.B
+                    state.w_compdbid      := true.B
+                    state.s_cbwrdata      := true.B
+                    state.w_cbwrdata_sent := true.B
+                    needWb                := false.B
+                    assert(mayCancelWb)
+                    // assert(false.B, "TODO: Check! Snoop.toN cancel WriteBackFull") // Already checked
+                }
+
+                when(!state.s_evict) {
+                    willCancelEvict    := true.B
+                    state.s_evict      := true.B
+                    state.w_evict_comp := true.B
+                    needWb             := true.B
+                    assert(mayCancelEvict)
+                    // assert(false.B, "TODO: Check! Snoop.toN cancel Evict") // Already checked
+                }
+            }.otherwise {
+
+                /**
+                 *  If the request has already got P-Credit, we should send PCrdReturn to return the P-Credit granted by PCrdGrant
+                 */
+
+                when(!state.s_wb) {
+                    willCancelWb          := true.B
+                    state.s_pcrdreturn    := false.B
+                    state.s_wb            := true.B
+                    state.w_compdbid      := true.B
+                    state.s_cbwrdata      := true.B
+                    state.w_cbwrdata_sent := true.B
+                    needWb                := false.B
+                }
+
+                when(!state.s_evict) {
+                    willCancelEvict    := true.B
+                    state.s_pcrdreturn := false.B
+                    state.s_evict      := true.B
+                    state.w_evict_comp := true.B
+                    needWb             := true.B
+                }
             }
 
             /** Snoop is permitted to cancel the unfired Probe under certain conditions. */

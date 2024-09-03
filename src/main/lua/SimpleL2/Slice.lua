@@ -1,3 +1,5 @@
+--[[verilua]]
+
 local utils = require "LuaUtils"
 local env = require "env"
 local tl = require "TileLink"
@@ -21,386 +23,19 @@ local CHIResp = chi.CHIResp
 
 local resetFinish = (cfg.top .. ".u_Slice.dir.io_resetFinish"):chdl()
 
-local tl_a = ([[
-    | valid
-    | ready
-    | opcode
-    | param
-    | size
-    | source
-    | address
-    | user_alias
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_a_", name = "tl_a"}
+local channels = require("Channel").build_channel("io_tl_", "io_chi_")
 
-local tl_b = ([[
-    | valid
-    | ready
-    | opcode
-    | param
-    | size
-    | source
-    | address
-    | data
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_b_", name = "tl_b"}
-
-local tl_c = ([[
-    | valid
-    | ready
-    | opcode
-    | param
-    | size
-    | source
-    | address
-    | data
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_c_", name = "tl_c"}
-
-local tl_d = ([[
-    | valid
-    | ready
-    | data
-    | sink
-    | source
-    | param
-    | opcode
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_d_", name = "tl_d"}
-
-local tl_e = ([[
-    | valid
-    | ready
-    | sink
-]]):bundle {hier = cfg.top, is_decoupled=true, prefix = "io_tl_e_", name = "tl_e"}
-
-tl_a.acquire_block_1 = function (this, addr, param, source)
-    assert(addr ~= nil)
-    assert(param ~= nil)
-
-    this.valid:set(1)
-    this.bits.opcode:set(TLOpcodeA.AcquireBlock)
-    this.bits.address:set(addr, true)
-    this.bits.param:set(param)
-    this.bits.source:set(source or 0)
-    this.bits.size:set(6) -- 2^6 == 64
-end
-
-tl_a.acquire_block = function (this, addr, param, source)
-    assert(addr ~= nil)
-    assert(param ~= nil)
-
-    env.negedge()
-        this.ready:expect(1)
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeA.AcquireBlock)
-        this.bits.address:set(addr, true)
-        this.bits.param:set(param)
-        this.bits.source:set(source or 0)
-        this.bits.user_alias:set(0)
-        this.bits.size:set(6) -- 2^6 == 64
-        env.posedge()
-        this.ready:expect(1)
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_a.acquire_alias = function (this, opcode, addr, param, source, alias)
-    assert(addr ~= nil)
-    assert(param ~= nil)
-
-    env.negedge()
-        this.ready:expect(1)
-        this.valid:set(1)
-        this.bits.opcode:set(opcode)
-        this.bits.address:set(addr, true)
-        this.bits.param:set(param)
-        this.bits.source:set(source or 0)
-        this.bits.user_alias:set(alias or 0)
-        this.bits.size:set(6) -- 2^6 == 64
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_a.acquire_perm_1 = function (this, addr, param, source)
-    assert(addr ~= nil)
-    assert(param ~= nil)
-
-    this.valid:set(1)
-    this.bits.opcode:set(TLOpcodeA.AcquirePerm)
-    this.bits.address:set(addr, true)
-    this.bits.param:set(param)
-    this.bits.source:set(source or 0)
-    this.bits.size:set(6) -- 2^6 == 64
-end
-
-tl_a.acquire_perm = function (this, addr, param, source)
-    assert(addr ~= nil)
-    assert(param ~= nil)
-
-    env.negedge()
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeA.AcquirePerm)
-        this.bits.address:set(addr, true)
-        this.bits.param:set(param)
-        this.bits.source:set(source or 0)
-        this.bits.size:set(6) -- 2^6 == 64
-    env.negedge()
-        this.valid:set(0)
-end
-
-tl_a.get_1 = function (this, addr, source)
-    assert(addr ~= nil)
-
-    this.valid:set(1)
-    this.bits.opcode:set(TLOpcodeA.Get)
-    this.bits.address:set(addr, true)
-    this.bits.param:set(0)
-    this.bits.source:set(source or 0)
-    this.bits.size:set(6) -- 2^6 == 64
-end
-
-tl_a.get = function (this, addr, source)
-    assert(addr ~= nil)
-
-    env.negedge()
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeA.Get)
-        this.bits.address:set(addr, true)
-        this.bits.param:set(0)
-        this.bits.source:set(source or 0)
-        this.bits.size:set(6) -- 2^6 == 64
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_c.release_data = function (this, addr, param, source, data_str_0, data_str_1)
-    env.negedge()
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeC.ReleaseData)
-        this.bits.param:set(param)
-        this.bits.size:set(6)
-        this.bits.source:set(source)
-        this.bits.address:set(addr, true)
-        this.bits.data:set_str(data_str_0)
-    env.negedge()
-        this.bits.data:set_str(data_str_1)
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_c.release = function (this, addr, param, source)
-    env.negedge()
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeC.Release)
-        this.bits.param:set(param)
-        this.bits.size:set(6)
-        this.bits.source:set(source)
-        this.bits.address:set(addr, true)
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_c.probeack_data = function (this, addr, param, data_str_0, data_str_1, source)
-    env.negedge()
-        this.ready:expect(1)
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeC.ProbeAckData)
-        this.bits.param:set(param)
-        this.bits.source:set(source)
-        this.bits.size:set(6)
-        this.bits.address:set(addr, true)
-        this.bits.data:set_str(data_str_0)
-    env.negedge()
-        this.ready:expect(1)
-        this.bits.data:set_str(data_str_1)
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-tl_c.probeack = function (this, addr, param, source)
-    env.negedge()
-        this.valid:set(1)
-        this.bits.opcode:set(TLOpcodeC.ProbeAck)
-        this.bits.param:set(param)
-        this.bits.source:set(source)
-        this.bits.size:set(5)
-        this.bits.address:set(addr, true)
-    env.negedge()
-        this.valid:set(0)
-    env.negedge()
-end
-
-
-tl_e.grantack = function (this, sink)
-    env.negedge()
-        this.valid:set(1)
-        this.bits.sink:set(sink)
-    env.negedge()
-        this.valid:set(0)
-end
-
-local mpReq_s2 = ([[
-    | valid
-    | opcode
-    | set
-    | tag
-]]):bundle {hier = cfg.top .. ".u_Slice.reqArb", is_decoupled = true, prefix = "io_mpReq_s2_", name = "mpReq_s2"}
-
-local chi_txreq = ([[
-    | valid
-    | ready
-    | addr
-    | opcode
-    | txnID
-    | addr
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txreq_", name = "chi_txreq"}
-
-local chi_txdat = ([[
-    | valid
-    | ready
-    | opcode
-    | resp
-    | respErr
-    | txnID
-    | tgtID
-    | dbID
-    | dataID
-    | data
-    | be
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txdat_", name = "chi_txdat"}
-
-local chi_txrsp = ([[
-    | valid
-    | ready
-    | opcode
-    | resp
-    | tgtID
-    | txnID
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_txrsp_", name = "chi_txrsp"}
-
-local chi_rxrsp = ([[
-    | valid
-    | ready
-    | opcode
-    | txnID
-    | dbID
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxrsp_", name = "chi_rxrsp"}
-
-chi_rxrsp.comp = function (this, txn_id, db_id)
-    env.negedge()
-        chi_rxrsp.bits.txnID:set(txn_id)
-        chi_rxrsp.bits.opcode:set(OpcodeRSP.Comp)
-        chi_rxrsp.bits.dbID:set(db_id)
-        chi_rxrsp.valid:set(1)
-    env.negedge()
-        chi_rxrsp.valid:set(0)
-end
-
-chi_rxrsp.comp_dbidresp = function (this, txn_id, db_id)
-    env.negedge()
-        chi_rxrsp.bits.txnID:set(txn_id)
-        chi_rxrsp.bits.opcode:set(OpcodeRSP.CompDBIDResp)
-        chi_rxrsp.bits.dbID:set(db_id)
-        chi_rxrsp.valid:set(1)
-    env.negedge()
-        chi_rxrsp.valid:set(0)
-end
-
-local chi_rxdat = ([[
-    | valid
-    | ready
-    | opcode
-    | dataID
-    | resp
-    | data
-    | txnID
-    | dbID
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxdat_", name = "rxdat"}
-
-chi_rxdat.compdat = function (this, txn_id, data_str_0, data_str_1, dbID, resp)
-    local dbID = dbID or 0
-    local resp = resp or CHIResp.I
-    env.negedge()
-        chi_rxdat.bits.txnID:set(txn_id)
-        chi_rxdat.bits.dataID:set(0)
-        chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
-        chi_rxdat.bits.data:set_str(data_str_0)
-        chi_rxdat.bits.dbID:set(dbID)
-        chi_rxdat.bits.resp:set(resp)
-        chi_rxdat.valid:set(1)
-    env.negedge()
-        chi_rxdat.bits.data:set_str(data_str_1)
-        chi_rxdat.bits.dataID:set(2) -- last data beat
-    env.negedge()
-        chi_rxdat.valid:set(0)
-end
-
-local chi_rxsnp = ([[
-    | valid
-    | ready
-    | addr
-    | opcode
-    | srcID
-    | txnID
-    | fwdNID
-    | fwdTxnID
-    | doNotGoToSD
-    | retToSrc
-]]):bundle {hier = cfg.top, is_decoupled = true, prefix = "io_chi_rxsnp_", name = "chi_rxsnp"}
-
-chi_rxsnp.send_request = function(this, addr, opcode, txn_id, ret2src)
-    local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
-    env.negedge()
-        chi_rxsnp.ready:expect(1)
-        chi_rxsnp.bits.txnID:set(txn_id)
-        chi_rxsnp.bits.addr:set(addr, true)
-        chi_rxsnp.bits.opcode:set(opcode)
-        chi_rxsnp.bits.retToSrc:set(ret2src)
-        chi_rxsnp.valid:set(1)
-        env.posedge()
-        chi_rxsnp.ready:expect(1)
-    env.negedge()
-        chi_rxsnp.valid:set(0)
-end
-
-chi_rxsnp.send_fwd_request = function(this, addr, opcode, src_id, txn_id, ret2src, fwd_nid, fwd_txn_id, do_not_go_to_sd)
-    local do_not_go_to_sd = do_not_go_to_sd or false
-    local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
-    env.negedge()
-        chi_rxsnp.ready:expect(1)
-        chi_rxsnp.bits.srcID:set(src_id)
-        chi_rxsnp.bits.txnID:set(txn_id)
-        chi_rxsnp.bits.addr:set(addr, true)
-        chi_rxsnp.bits.opcode:set(opcode)
-        chi_rxsnp.bits.retToSrc:set(ret2src)
-        chi_rxsnp.bits.fwdNID:set(fwd_nid)
-        chi_rxsnp.bits.fwdTxnID:set(fwd_txn_id)
-        chi_rxsnp.bits.doNotGoToSD:set(do_not_go_to_sd)
-        chi_rxsnp.valid:set(1)
-        env.posedge()
-        chi_rxsnp.ready:expect(1)
-    env.negedge()
-        chi_rxsnp.valid:set(0)
-end
-
-chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src)
-    chi_rxsnp:send_request(addr, OpcodeSNP.SnpShared, txn_id, ret2src)
-end
-
-chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
-    chi_rxsnp:send_request(addr, OpcodeSNP.SnpUnique, txn_id, ret2src)
-end
-
-local mp_dirResp = ([[
-    | valid
-    | bits_hit => hit
-    | bits_wayOH => way
-    | {p}_state => state
-    | {p}_clientsOH => clientsOH
-]]):abdl {hier = cfg.top .. ".u_Slice.mainPipe", is_decoupled = true, prefix = "io_dirResp_s3_", name = "mp_dirResp", p = "bits_meta"}
+local tl_a = channels.tl_a
+local tl_b = channels.tl_b
+local tl_c = channels.tl_c
+local tl_d = channels.tl_d
+local tl_e = channels.tl_e
+local chi_txreq = channels.chi_txreq
+local chi_txdat = channels.chi_txdat
+local chi_txrsp = channels.chi_txrsp
+local chi_rxsnp = channels.chi_rxsnp
+local chi_rxrsp = channels.chi_rxrsp
+local chi_rxdat = channels.chi_rxdat
 
 local TXDAT = ("0b0001"):number()
 local SourceD = ("0b0010"):number()
@@ -423,6 +58,15 @@ local mshrs = {}
 for i = 0, 15 do
     mshrs[i] = ms["mshrs_" .. i]
 end
+
+local mp_dirResp = ([[
+    | valid
+    | bits_hit => hit
+    | bits_wayOH => way
+    | {p}_state => state
+    | {p}_clientsOH => clientsOH
+]]):abdl {hier = cfg.top .. ".u_Slice.mainPipe", is_decoupled = true, prefix = "io_dirResp_s3_", name = "mp_dirResp", p = "bits_meta"}
+
 
 local mpReq_s2 = ([[
     | valid
@@ -5589,14 +5233,21 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
 
         tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
 
-        do
-            -- Snoop cancel Evict
+        local function cancel_wb_evict_common(is_evict, should_retry)
+            printf("is_evict => %s should_retry => %s\n", tostring(is_evict), tostring(should_retry))
+
             local clientsOH = ("0b00"):number()
+            local state = MixedState.TD
+            
+            if is_evict then
+                state = MixedState.TC
+            end
+
             env.negedge()
-                write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
-                write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
-                write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
-                write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(0), 0x01, state, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(1), 0x02, state, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(2), 0x03, state, clientsOH)
+                write_dir(0x00, utils.uint_to_onehot(3), 0x04, state, clientsOH)
             local source = 4
             env.negedge()
                 tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
@@ -5609,13 +5260,51 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
                 env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
             env.negedge()
                 env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
-            chi_txreq.ready:set(0)
-            mshrs[0].io_tasks_txreq_ready:set_force(0)
-            env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
+
+            if should_retry then
+                if is_evict then
+                    env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.allowRetry:is(1) end)
+                else
+                    env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) and chi_txreq.bits.allowRetry:is(1) end)
+                end
+            else
+                chi_txreq.ready:set(0)
+                mshrs[0].io_tasks_txreq_valid:set_force(0)
+                mshrs[0].io_tasks_txreq_ready:set_force(0)
+
+                if is_evict then
+                    env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.allowRetry:is(1) end)
+                else
+                    env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) and chi_txreq.bits.allowRetry:is(1) end)
+                end
+            end
+
+            env.negedge(10)
+
+            local pcrd_type = 1
+            local txn_id = 0 -- mshr_0
+            local src_id = 3
+            if should_retry then
+                chi_rxrsp:retry_ack(txn_id, src_id, pcrd_type)
+                chi_rxrsp:pcrd_grant(src_id, pcrd_type)
+                mshrs[0].gotRetry:expect(1)
+
+                chi_txreq.ready:set(0)
+                mshrs[0].io_tasks_txreq_valid:set_force(0)
+                mshrs[0].io_tasks_txreq_ready:set_force(0)
+            end
+
             local set = mshrs[0].req_set:get()
             local tag = mshrs[0].dirResp_meta_tag:get()
-            mshrs[0].state_s_evict:expect(0)
-            mshrs[0].state_w_evict_comp:expect(0)
+            env.negedge()
+            if is_evict then
+                mshrs[0].state_s_evict:expect(0)
+                mshrs[0].state_w_evict_comp:expect(0)
+            else
+                mshrs[0].state_s_wb:expect(0)
+                mshrs[0].state_w_compdbid:expect(0)
+            end
+
             mp:force_all()
                 mshrs[0].mayCancelEvict:set(1)
                 env.negedge()
@@ -5626,62 +5315,33 @@ local test_nested_cancel_req = env.register_test_case "test_nested_cancel_req" {
                     mp.io_mshrNested_s3_tag:set(tag)
                 env.negedge()
             mp:release_all()
-            mshrs[0].state_s_evict:expect(1)
-            mshrs[0].state_w_evict_comp:expect(1)
+
+            if is_evict then
+                mshrs[0].state_s_evict:expect(1)
+                mshrs[0].state_w_evict_comp:expect(1)
+            else
+                mshrs[0].state_s_wb:expect(1)
+                mshrs[0].state_w_compdbid:expect(1)
+            end
+
+            chi_txreq.ready:set(1)
+            mshrs[0].io_tasks_txreq_valid:set_release()
             mshrs[0].io_tasks_txreq_ready:set_release()
+
+            if should_retry then
+                -- Return the P-Credit since the Evict operation has been canceled
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.PCrdReturn) and chi_txreq.bits.allowRetry:is(0) and chi_txreq.bits.pCrdType:is(pcrd_type) end)
+            end
 
             env.dut_reset()
             resetFinish:posedge()
             chi_txreq.ready:set(1)
         end
 
-        -- TODO:
-        -- do
-        --     -- Snoop cancel WriteBackFull
-        --     local clientsOH = ("0b00"):number()
-        --     env.negedge()
-        --         write_dir(0x00, utils.uint_to_onehot(0), 0x01, MixedState.TD, clientsOH)
-        --         write_dir(0x00, utils.uint_to_onehot(1), 0x02, MixedState.TD, clientsOH)
-        --         write_dir(0x00, utils.uint_to_onehot(2), 0x03, MixedState.TD, clientsOH)
-        --         write_dir(0x00, utils.uint_to_onehot(3), 0x04, MixedState.TD, clientsOH)
-        --     local source = 4
-        --     env.negedge()
-        --         tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
-
-        --     env.negedge()
-        --         env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
-        --     env.negedge()
-        --         chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
-        --     env.negedge()
-        --         env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
-        --     env.negedge()
-        --         env.expect_happen_until(20, function() return mshrs[0].io_replResp_s3_valid:is(1) end)
-        --     chi_txreq.ready:set(0)
-        --     mshrs[0].io_tasks_txreq_ready:set_force(0)
-        --     env.expect_not_happen_until(100, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
-        --     local set = mshrs[0].req_set:get()
-        --     local tag = mshrs[0].dirResp_meta_tag:get()
-        --     mshrs[0].state_s_wb:expect(0)
-        --     mshrs[0].state_w_compdbid:expect(0)
-        --     mshrs[0].state_s_cbwrdata:expect(0)
-        --     mp:force_all()
-        --         env.negedge()
-        --             mp.io_mshrNested_s3_isMshr:set(1)
-        --             mp.io_mshrNested_s3_mshrId:set(3)
-        --             mp.io_mshrNested_s3_snoop_toN:set(1)
-        --             mp.io_mshrNested_s3_set:set(set)
-        --             mp.io_mshrNested_s3_tag:set(tag)
-        --         env.negedge()
-        --     mp:release_all()
-        --     mshrs[0].state_s_wb:expect(1)
-        --     mshrs[0].state_w_compdibd:expect(1)
-        --     mshrs[0].state_s_cbwrdata:expect(1)
-        --     mshrs[0].io_tasks_txreq_ready:set_release()
-
-        --     env.dut_reset()
-        --     resetFinish:posedge()
-        --     chi_txreq.ready:set(1)
-        -- end
+        cancel_wb_evict_common(false, false)
+        cancel_wb_evict_common(true, false)
+        cancel_wb_evict_common(false, true)
+        cancel_wb_evict_common(true, true)
 
         -- TODO: cancel probes
 
@@ -7425,13 +7085,67 @@ local test_snpHitReq_block_mshrRefill = env.register_test_case "test_snpHitReq_b
     end
 }
 
+local test_chi_retry = env.register_test_case "test_chi_retry" {
+    function ()
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        local function test(retry_after_pcrd)
+            local retry_after_pcrd = retry_after_pcrd or false
+            print("retry_after_pcrd => " .. tostring(retry_after_pcrd))
+
+            env.negedge()
+                write_dir(0x01, ("0b0001"):number(), 0x01, MixedState.I)    
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) and chi_txreq.bits.allowRetry:is(1) and chi_txreq.bits.pCrdType:is(0) end)
+
+            local pcrd_type = 1
+            local txn_id = 0 -- mshr_0
+            local src_id = 3
+
+            if retry_after_pcrd then
+                -- TODO: PCrdGrant first, RetryAck later
+                chi_rxrsp:pcrd_grant(src_id, pcrd_type)
+                env.negedge()
+                    ms.pendingPCrdGrant_0_valid:expect(1)
+                    ms.pendingPCrdGrant_0_bits_srcID:expect(src_id)
+                    ms.pendingPCrdGrant_0_bits_pCrdType:expect(pcrd_type)
+                chi_rxrsp:retry_ack(txn_id, src_id, pcrd_type)
+            else
+                chi_rxrsp:retry_ack(txn_id, src_id, pcrd_type)
+                chi_rxrsp:pcrd_grant(src_id, pcrd_type)
+            end
+
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) and chi_txreq.bits.allowRetry:is(0) and chi_txreq.bits.pCrdType:is(pcrd_type) end)
+            env.negedge()
+            env.expect_not_happen_until(10, function () return chi_txreq:fire() end)
+
+            if retry_after_pcrd then
+                ms.pendingPCrdGrant_0_valid:expect(0)
+            end
+
+            chi_rxdat:compdat(txn_id, "0xaabb", "0xccdd", 0, CHIResp.SC)
+            env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xaabb and tl_d.bits.param:is(TLParam.toB) end)
+            env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xccdd and tl_d.bits.param:is(TLParam.toB) end)
+            tl_e:grantack(0)
+            env.negedge(10)
+            mshrs[0].io_status_valid:expect(0)
+        end
+
+        test(false)
+        -- test(true) -- PCrdGrant arrive before RetryAck is handled in L2 top, Slice can only handle the normal case(RetryAck before PCrdGrant)
+
+        -- TODO: Snoop cancle WriteBackFull || Evict and the MSHR should issue PCrdReturn
+
+        env.negedge(100)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
--- TODO: replacement policy
 -- TODO: Get not preferCache
--- TODO: CHI retry
-
--- TODO: Grant at MainPipe should block Probe with same address
-
  
 jit.off()
 verilua "mainTask" { function ()
@@ -7508,6 +7222,7 @@ verilua "mainTask" { function ()
     test_other_snoop()
     test_fwd_snoop()
     test_snpHitReq_block_mshrRefill()
+    test_chi_retry()
     end
 
    

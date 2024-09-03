@@ -14,6 +14,7 @@ local OpcodeREQ = setmetatable({
     WriteEvictOrEvict = 0x02 + lshift(1, 6),
     ReadOnce          = 0x03 + lshift(0, 6),
     ReadNoSnp         = 0x04 + lshift(0, 6),
+    PCrdReturn        = 0x05 + lshift(0, 6),
     ReadUnique        = 0x07 + lshift(0, 6),
 
     CleanUnique       = 0x0b + lshift(0, 6),

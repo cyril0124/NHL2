@@ -262,4 +262,17 @@ trait HasL2Param {
     def needData(opcode: UInt): Bool = {
         opcode === ReleaseData || opcode === GrantData || opcode === AccessAckData
     }
+
+    // finalTxnID => | bankID | txnID |
+    def setTxnID(txnID: UInt, sliceID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits + 1))
+    }
+
+    def getSliceID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) 0.U else txnID.head(bankBits) // The `bankBits` most significant bits(MSB)
+    }
+
+    def restoreTxnID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits + 1))
+    }
 }

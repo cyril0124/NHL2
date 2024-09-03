@@ -15,6 +15,7 @@ import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
 import scala.math.BigInt
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 object _assert {
     def apply(cond: Bool, message: String, data: Bits*)(implicit s: SourceInfo) = {
@@ -112,19 +113,6 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     println(s"[${this.getClass().toString()}] bankBits:$bankBits")
     println(s"[${this.getClass().toString()}] offsetBits:$offsetBits")
 
-    // finalTxnID => | bankID | txnID |
-    def setTxnID(txnID: UInt, sliceID: UInt): UInt = {
-        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits + 1))
-    }
-
-    def getSliceID(txnID: UInt): UInt = {
-        if (nrSlice <= 1) 0.U else txnID.head(bankBits)
-    }
-
-    def restoreTxnID(txnID: UInt): UInt = {
-        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits + 1))
-    }
-
     lazy val module = new Impl
     class Impl extends LazyModuleImp(this) {
         val io = IO(new Bundle {
@@ -206,14 +194,22 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         rxsnp.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxsnp.ready && rxsnpSliceID === i.U }).orR
 
         /** RXRSP */
-        val rxrsp        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleRSP(chiBundleParams)))))
-        val rxrspSliceID = getSliceID(rxrsp.bits.txnID)
-        slices.zipWithIndex.foreach { case (slice, i) =>
-            slice.io.chi.rxrsp.valid      := rxrsp.valid && rxrspSliceID === i.U
-            slice.io.chi.rxrsp.bits       := rxrsp.bits
-            slice.io.chi.rxrsp.bits.txnID := restoreTxnID(rxrsp.bits.txnID)
+        val rxrsp = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleRSP(chiBundleParams)))))
+
+        val retryHelper  = Module(new RetryHelper()) // A RetryHelper module for handling RetryAck and PCrdGrant
+        val rxrspOut     = retryHelper.io.rxrspOut
+        val rxrspSliceID = retryHelper.io.sliceID
+        retryHelper.io.rxrspIn <> rxrsp
+        retryHelper.io.pCrdRetryInfoVecs.zipWithIndex.foreach { case (pCrdRetryInfoVec, i) =>
+            pCrdRetryInfoVec <> slices(i).io.pCrdRetryInfoVec
         }
-        rxrsp.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxrsp.ready && rxrspSliceID === i.U }).orR
+
+        slices.zipWithIndex.foreach { case (slice, i) =>
+            slice.io.chi.rxrsp.valid      := rxrspOut.valid && rxrspSliceID === i.U
+            slice.io.chi.rxrsp.bits       := rxrspOut.bits
+            slice.io.chi.rxrsp.bits.txnID := restoreTxnID(rxrspOut.bits.txnID)
+        }
+        rxrspOut.ready := Cat(slices.zipWithIndex.map { case (s, i) => s.io.chi.rxrsp.ready && rxrspSliceID === i.U }).orR
 
         /** RXDAT */
         val rxdat        = WireInit(0.U.asTypeOf(Flipped(Decoupled(new CHIBundleDAT(chiBundleParams)))))
