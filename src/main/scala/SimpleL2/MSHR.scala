@@ -992,14 +992,14 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.s_aprobe          := true.B
                 state.w_aprobeack       := true.B
                 state.w_aprobeack_first := true.B
-                assert(false.B, "TODO: Check! Snoop.toN cancel sProbe")
+                assert(false.B, "TODO: Check! Snoop.toN cancel aProbe")
             }
 
             when(!state.s_sprobe) {
                 state.s_sprobe          := true.B
                 state.w_sprobeack       := true.B
                 state.w_sprobeack_first := true.B
-                assert(false.B, "TODO: Check! Snoop.toN cancel aProbe")
+                assert(false.B, "TODO: Check! Snoop.toN cancel sProbe")
             }
 
             when(!state.s_rprobe) {
