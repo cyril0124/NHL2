@@ -15,7 +15,7 @@ import SimpleL2.chi._
   * [[Slice]] should provide this info to the top-level IO.
   * The L2 top will use this info to match the PCrdGrant request with the proper [[Slice]] that is waiting for this PCrdGrant.
   */
-class PCrdRetryInfo(implicit p: Parameters) extends Bundle {
+class PCrdRetryInfo(implicit p: Parameters) extends L2Bundle {
     val valid    = Bool()
     val srcID    = UInt(chiBundleParams.nodeIdBits.W)
     val pCrdType = UInt(4.W)
