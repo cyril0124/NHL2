@@ -104,6 +104,12 @@
         "unit_test": false
     },
     {
+        "package": "SimpleL2",
+        "target": "SimpleL2CacheDecoupled",
+        "unit_test": true,
+        "unit_test_cmd": "make package=SimpleL2 target=SimpleL2CacheWrapperDecoupled unit-test-filelist"
+    },
+    {
         "package": "Utils",
         "target": "LFSRArbiter",
         "unit_test": true

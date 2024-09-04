@@ -9,6 +9,8 @@ import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
+import SimpleL2.chi.CHIOpcodeRSP._
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
     val req      = new TaskBundle
@@ -33,7 +35,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val tasks              = new MshrTasks
         val resps              = new MshrResps
         val retryTasks         = Flipped(new MpMshrRetryTasks)
-        val respMapCancel      = DecoupledIO(UInt(mshrBits.W)) // to SinkC
+        val respMapCancel      = DecoupledIO(UInt(mshrBits.W))          // to SinkC
+        val pCrdRetryInfoVec   = Output(Vec(nrMSHR, new PCrdRetryInfo)) // used by L2 top to match the desired Slice
     })
 
     io <> DontCare
@@ -44,11 +47,9 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     assert(PopCount(io.mshrFreeOH_s3) <= 1.U)
 
     val rxdat           = io.resps.rxdat
-    val rxrsp           = io.resps.rxrsp
     val sinke           = io.resps.sinke
     val sinkc           = io.resps.sinkc
     val rxdatMatchOH    = UIntToOH(rxdat.bits.txnID)(nrMSHR - 1, 0)
-    val rxrspMatchOH    = UIntToOH(rxrsp.bits.txnID)(nrMSHR - 1, 0)
     val sinkeMatchOH    = UIntToOH(sinke.bits.sink)(nrMSHR - 1, 0)
     val waitProbeAckVec = VecInit(mshrs.map(_.io.status.waitProbeAck)).asUInt
     val sinkcSetMatchOH = VecInit(mshrs.map(_.io.status.set === sinkc.bits.set)).asUInt(nrMSHR - 1, 0)
@@ -58,7 +59,6 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     }).asUInt(nrMSHR - 1, 0)
     val sinkcMatchOH = mshrValidVec & sinkcSetMatchOH & sinkcTagMatchOH & waitProbeAckVec
     assert(!(rxdat.fire && !rxdatMatchOH.orR), "rxdat does not match any mshr! txnID => %d/0x%x", rxdat.bits.txnID, rxdat.bits.txnID)
-    assert(!(rxrsp.fire && !rxrspMatchOH.orR), "rxrsp does not match any mshr! txnID => %d/0x%x", rxrsp.bits.txnID, rxrsp.bits.txnID)
     assert(!(sinke.fire && !sinkeMatchOH.orR), "sinke does not match any mshr! sink => %d/0x%x", sinke.bits.sink, sinke.bits.sink)
     assert(
         !(sinkc.fire && !sinkcMatchOH.orR),
@@ -73,6 +73,32 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
     val retryTasksMatchOH_s2 = UIntToOH(io.retryTasks.mshrId_s2)
     val retryTasksMatchOH_s4 = UIntToOH(io.retryTasks.mshrId_s4)
+
+    /**
+     * RXRSP is special compared to other channels because it would receive PCrdGrant which does not contain a valid TxnID that can be used to determine which MSHR this PCrdGrant is for.
+     * Therefore, we need to use the PCrdRetryInfo of each MSHR to determine which MSHR this PCrdGrant is for.
+     */
+    val rxrsp             = io.resps.rxrsp
+    val rxrspIsPCrdGrant  = rxrsp.bits.chiOpcode === PCrdGrant
+    val pCrdGrantMatchVec = VecInit(mshrs.map(m => m.io.pCrdRetryInfo.valid && m.io.pCrdRetryInfo.pCrdType === rxrsp.bits.pCrdType && m.io.pCrdRetryInfo.srcID === rxrsp.bits.srcID)).asUInt
+    val pCrdGrantArb      = Module(new RRArbiter(Bool(), nrMSHR)) // If there is more than one MSHR that matches the PCrdGrant, use a round-robin arbiter to choose one MSHR for the PCrdGrant go in. This would be a fair policy for each MSHR.
+    val pCrdGrantMatchOH  = UIntToOH(pCrdGrantArb.io.chosen)(nrMSHR - 1, 0)
+    val rxrspMatchOH      = Mux(rxrspIsPCrdGrant, pCrdGrantMatchOH, UIntToOH(rxrsp.bits.txnID)(nrMSHR - 1, 0))
+    pCrdGrantArb.io.in.zipWithIndex.foreach { case (in, i) =>
+        in.valid := rxrsp.valid && pCrdGrantMatchVec(i)
+        in.bits  := DontCare
+    }
+    pCrdGrantArb.io.out.ready := true.B
+
+    assert(
+        !(rxrsp.fire && !rxrspMatchOH.orR),
+        "rxrsp does not match any mshr! txnID => %d/0x%x opcode => %d/0x%x isPCrdGrant => %d",
+        rxrsp.bits.txnID,
+        rxrsp.bits.txnID,
+        rxrsp.bits.chiOpcode,
+        rxrsp.bits.chiOpcode,
+        rxrspIsPCrdGrant
+    )
 
     mshrs.zip(UIntToOH(io.mshrAlloc_s3.bits.mshrId).asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
         mshr.io.id := i.U
@@ -89,7 +115,12 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
 
         mshr.io.resps.rxrsp.valid := rxrsp.valid && rxrspMatchOH(i)
         mshr.io.resps.rxrsp.bits  := rxrsp.bits
-        assert(!(mshr.io.resps.rxrsp.valid && !mshr.io.status.valid), s"rxrsp valid but mshr_${i} invalid")
+        assert(
+            !(mshr.io.resps.rxrsp.valid && !mshr.io.status.valid),
+            s"rxrsp valid but mshr_${i} invalid rxrspIsPCrdGrant:%d rxrspMatchOH:0b%b",
+            rxrspIsPCrdGrant,
+            rxrspMatchOH
+        )
 
         mshr.io.resps.sinke.valid := sinke.valid && sinkeMatchOH(i)
         mshr.io.resps.sinke.bits  := sinke.bits
@@ -128,6 +159,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         mshr.io.nested.release := io.mshrNested_s3.release
 
         io.mshrStatus(i) := mshr.io.status
+
+        io.pCrdRetryInfoVec(i) := mshr.io.pCrdRetryInfo
     }
 
     /** Cancle respMap entry at [[SinkC]](no ProbeAck is needed) */

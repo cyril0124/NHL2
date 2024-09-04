@@ -435,8 +435,8 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     // Channel C does not need to replay
     if (optParam.sinkaStallOnReqArb) {
         val mayReplayCnt_a = WireInit(0.U(io.replayFreeCntSinkA.getWidth.W))
-        val mayReplay_a_s2 = valid_s2 && !task_s2.isMshrTask && !task_s2.isChannelC && task_s2.isChannelA
-        val mayReplay_a_s3 = valid_s3 && !isMshrTask_s3 && !(channel_s3 === L2Channel.ChannelC) && channel_s3 === L2Channel.ChannelA
+        val mayReplay_a_s2 = valid_s2 && task_s2.isChannelA
+        val mayReplay_a_s3 = valid_s3 && !isMshrTask_s3 && channel_s3 === L2Channel.ChannelA
         mayReplayCnt_a        := PopCount(Cat(1.U, mayReplay_a_s2, mayReplay_a_s3)) // TODO:
         noSpaceForReplay_a_s1 := mayReplayCnt_a >= io.replayFreeCntSinkA
     }

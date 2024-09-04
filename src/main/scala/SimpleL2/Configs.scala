@@ -24,6 +24,7 @@ case class L2OptimizationParam(
     rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
     sinkcHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the SinkC module
     sourcebHasLatch: Boolean = true, // Whether to latch the request for one cycle delay on the path from MSHR sourceb task to SourceB
+    rxrspHasLatch: Boolean = true,
     sinkaStallOnReqArb: Boolean = false,
     mshrStallOnReqArb: Boolean = false,
     latchTempDsToDs: Boolean = true // Whether to latch the refill data from TempDataStorage to DataStorage for one cycle. If it is true, it will eliminate the timing path of refilling data from TempDataStorage to DataStorage when data ECC is enabled.
@@ -260,5 +261,18 @@ trait HasL2Param {
 
     def needData(opcode: UInt): Bool = {
         opcode === ReleaseData || opcode === GrantData || opcode === AccessAckData
+    }
+
+    // finalTxnID => | bankID | txnID |
+    def setTxnID(txnID: UInt, sliceID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits + 1))
+    }
+
+    def getSliceID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) 0.U else txnID.head(bankBits) // The `bankBits` most significant bits(MSB)
+    }
+
+    def restoreTxnID(txnID: UInt): UInt = {
+        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits + 1))
     }
 }
