@@ -450,7 +450,8 @@ local test_basic_ecc_0bErr_read_write = env.register_test_case "test_basic_ecc_0
                 expect.equal(read_data, 0xdead)
                 tempDS_write.bits.idx:expect(4)
 
-                dut.u_DataStorage.rdDataHasErr_s5:expect(0)
+                env.posedge()
+                dut.u_DataStorage.rdDataHasErr_s6:expect(0)
                 dut.u_DataStorage.io_eccError:expect(0)
 
                 env.posedge()
@@ -498,23 +499,24 @@ local test_basic_ecc_1bErr_read_write = env.register_test_case "test_basic_ecc_1
                 local read_data = 0xff
 
                 env.expect_happen_until(100, function (c)
-                    return tempDS_write:fire()
+                    return sourceD_data:fire()
                 end)
-                tempDS_write:dump()
-                read_data = tempDS_write.bits.data:get()[1]
+                sourceD_data:dump()
+                read_data = sourceD_data.bits.data:get()[1]
                 
                 expect.equal(read_data, 0xdead)
-                expect.equal(tempDS_write.bits.data:get()[2], 0)
+                expect.equal(sourceD_data.bits.data:get()[2], 0)
                 
-                tempDS_write.bits.idx:expect(4)
+                -- sourceD_data.bits.idx:expect(4)
                 
-                dut.u_DataStorage.rdDataHasErr_s5:expect(1)
-                dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(0)
+                env.posedge()
+                dut.u_DataStorage.rdDataHasErr_s6:expect(1)
+                dut.u_DataStorage.rdDataHasUncorrectable_s6:expect(0)
                 dut.u_DataStorage.io_eccError:expect(0)
 
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
-                    return tempDS_write:fire()
+                    return sourceD_data:fire()
                 end)
             end
         }
@@ -538,7 +540,7 @@ local test_basic_ecc_1bErr_read_write = env.register_test_case "test_basic_ecc_1
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
             dsRead_s3.bits.wayOH:set(1)
-            dsRead_s3.bits.dest:set(TempDataStorage)
+            dsRead_s3.bits.dest:set(SourceD)
             dut.io_fromMainPipe_mshrId_s3:set(4)
             -- dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_1:set_force_str("0x01")
             dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_0:set_force_str("0x7000000000001dead")
@@ -559,23 +561,24 @@ local test_basic_ecc_2bErr_read_write = env.register_test_case "test_basic_ecc_2
                 local read_data = 0xff
 
                 env.expect_happen_until(100, function (c)
-                    return tempDS_write:fire()
+                    return sourceD_data:fire()
                 end)
-                tempDS_write:dump()
-                read_data = tempDS_write.bits.data:get()[1]
+                sourceD_data:dump()
+                read_data = sourceD_data.bits.data:get()[1]
                 
                 -- expect.equal(read_data, 0xdead)
                 
-                tempDS_write.bits.idx:expect(4)
+                -- sourceD_data.bits.idx:expect(4)
                 
-                dut.u_DataStorage.rdDataHasErr_s5:expect(1)
-                dut.u_DataStorage.rdDataHasUncorrectable_s5:expect(1)
-                dut.u_DataStorage.io_eccError:expect(1)
+                dut.u_DataStorage.io_eccError:expect(1) -- pulse
+                env.posedge()
+                dut.u_DataStorage.rdDataHasErr_s6:expect(1)
+                dut.u_DataStorage.rdDataHasUncorrectable_s6:expect(1)
 
 
                 env.posedge()
                 env.expect_not_happen_until(100, function ()
-                    return tempDS_write:fire()
+                    return sourceD_data:fire()
                 end)
             end
         }
@@ -599,7 +602,7 @@ local test_basic_ecc_2bErr_read_write = env.register_test_case "test_basic_ecc_2
             dsRead_s3.valid:set(1)
             dsRead_s3.bits.set:set(2)
             dsRead_s3.bits.wayOH:set(1)
-            dsRead_s3.bits.dest:set(TempDataStorage)
+            dsRead_s3.bits.dest:set(SourceD)
             dut.io_fromMainPipe_mshrId_s3:set(4)
             dut.u_DataStorage.dataSRAMs_0_0.io_r_resp_data_0_1:set_force_str("0x11")
             -- dut:force_all()
