@@ -12,11 +12,11 @@ case class CHIBundleParameters(
     addressBits: Int,
     dataBits: Int,
     dataCheck: Boolean,
-    txnIdBits: Int = 8, // issueB: 8, issueE: 12
-    dbIdBits: Int = 8,  // issueB: 8, issueE: 12
-    reqOpcode: Int = 6, // issueB: 6, issueE: 7
-    rspOpcode: Int = 4, // issueB: 4, issueE: 5
-    datOpcode: Int = 3  // issueB: 3, issueE: 4
+    txnIdBits: Int = 8,     // issueB: 8, issueE: 12
+    dbIdBits: Int = 8,      // issueB: 8, issueE: 12
+    reqOpcodeBits: Int = 6, // issueB: 6, issueE: 7
+    rspOpcodeBits: Int = 4, // issueB: 4, issueE: 5
+    datOpcodeBits: Int = 3  // issueB: 3, issueE: 4
 // TODO: has snoop
 ) {
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
@@ -33,9 +33,9 @@ object CHIBundleParameters {
         dataCheck: Boolean = false,
         txnIdBits: Int = 8,
         dbIdBits: Int = 8,
-        reqOpcode: Int = 6, // 6,  7
-        rspOpcode: Int = 4, // 4,  5
-        datOpcode: Int = 3  // 3,  4
+        reqOpcodeBits: Int = 6,
+        rspOpcodeBits: Int = 4,
+        datOpcodeBits: Int = 3
     ): CHIBundleParameters = new CHIBundleParameters(
         nodeIdBits = nodeIdBits,
         addressBits = addressBits,
@@ -43,9 +43,9 @@ object CHIBundleParameters {
         dataCheck = dataCheck,
         txnIdBits = txnIdBits,
         dbIdBits = dbIdBits,
-        reqOpcode = reqOpcode,
-        rspOpcode = rspOpcode,
-        datOpcode = datOpcode
+        reqOpcodeBits = reqOpcodeBits,
+        rspOpcodeBits = rspOpcodeBits,
+        datOpcodeBits = datOpcodeBits
     )
 }
 
@@ -59,7 +59,7 @@ class CHIBundleREQ(params: CHIBundleParameters) extends Bundle {
     val returnNID     = UInt(params.nodeIdBits.W) // TODO: not use?
     val stashNIDValid = Bool()
     val returnTxnID   = UInt(8.W)
-    val opcode        = UInt(params.reqOpcode.W)
+    val opcode        = UInt(params.reqOpcodeBits.W)
     val size          = UInt(3.W)
     val addr          = UInt(params.addressBits.W)
     val ns            = Bool()                    // TODO: not use?
@@ -83,7 +83,7 @@ class CHIBundleRSP(params: CHIBundleParameters) extends Bundle {
     val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
     val srcID    = UInt(params.nodeIdBits.W)
     val txnID    = UInt(params.txnIdBits.W)
-    val opcode   = UInt(params.rspOpcode.W)
+    val opcode   = UInt(params.rspOpcodeBits.W)
     val respErr  = UInt(2.W)
     val resp     = UInt(3.W)
     val fwdState = UInt(3.W)                 // Used for DCT
@@ -114,7 +114,7 @@ class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
     val srcID     = UInt(params.nodeIdBits.W)
     val txnID     = UInt(params.txnIdBits.W)
     val homeNID   = UInt(params.nodeIdBits.W) // Used for DCT
-    val opcode    = UInt(params.datOpcode.W)
+    val opcode    = UInt(params.datOpcodeBits.W)
     val respErr   = UInt(2.W)
     val resp      = UInt(3.W)
     val fwdState  = UInt(3.W)                 // Used for DCT
