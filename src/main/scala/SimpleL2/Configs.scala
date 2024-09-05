@@ -39,7 +39,8 @@ case class L2Param(
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
-    nrClients: Int = 2, // Number of L1 DCache
+    chiBundleParams: Option[CHIBundleParameters] = None, // This will overwrite the default chi bundle parameters
+    nrClients: Int = 2,                                  // Number of L1 DCache
     nrMSHR: Int = 16,
     nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntrySinkA: Int = 4,
@@ -147,15 +148,16 @@ trait HasL2Param {
         l2param.nrClients
     }
 
-
-    // @formatter:off
-    val chiBundleParams = CHIBundleParameters(
-        nodeIdBits = 7,
-        addressBits = addressBits,
-        dataBits = beatBytes * 8,
-        dataCheck = false
-    )
-    // @formatter:on
+    val chiBundleParams = if (l2param.chiBundleParams.isDefined) {
+        l2param.chiBundleParams.get
+    } else {
+        CHIBundleParameters(
+            nodeIdBits = 7,
+            addressBits = addressBits,
+            dataBits = beatBytes * 8,
+            dataCheck = false
+        )
+    }
 
     def widthCheck(in: UInt, width: Int) = {
         assert(in.getWidth == width)
