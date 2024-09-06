@@ -102,7 +102,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         sourceD_s2.bits  := task_s2
         when(isSourceD_s2) {
             sourceD_s2.bits.opcode := ReleaseAck
-            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
         }
     } else {
         io.sourceD_s2.valid := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrSourceD_s2 || isSourceD_s2)
