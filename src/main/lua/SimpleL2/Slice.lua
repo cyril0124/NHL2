@@ -1438,12 +1438,11 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             local source = 28 -- core 1 source
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoT, source) -- core 1 acquire, source = 28
             env.posedge()
-                chi_txreq.valid:posedge(); env.negedge()
-                chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
+                env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
             env.posedge()
                 chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
             env.posedge()
-                chi_txrsp.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return chi_txrsp:fire() end)
                 chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
             env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(source) and tl_d.bits.data:get()[1] == 0xdead end)
@@ -1461,7 +1460,7 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             local source = 3 -- core 0 source
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.NtoB, source) -- core 0 acquire, source = 3
             env.posedge()
-                tl_b.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return tl_b:fire() end)
                 tl_b.bits.opcode:expect(TLOpcodeB.Probe); tl_b.bits.param:expect(TLParam.toB); tl_b.bits.address:expect(to_address(0x10, 0x20))
             env.posedge(5)
                 tl_c:probeack_data(to_address(0x10, 0x20), TLParam.TtoB, "0xabab", "0xefef", 28)
@@ -1475,7 +1474,7 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             }
 
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return tl_d:fire() end)
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xabab)
             env.negedge()
                 expect.equal(tl_d.bits.data:get()[1], 0xefef)
@@ -1493,7 +1492,7 @@ local test_probe_toB = env.register_test_case "test_probe_toB" {
             local source = 28 -- core 1 source
             tl_a:acquire_block(to_address(0x10, 0x20), TLParam.BtoT, source)
             env.posedge()
-                tl_b.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return tl_b:fire() end)
                 tl_b.bits.opcode:expect(TLOpcodeB.Probe); tl_b.bits.param:expect(TLParam.toN); tl_b.bits.address:expect(to_address(0x10, 0x20))
             env.posedge(5)
                 tl_c:probeack(to_address(0x10, 0x20), TLParam.BtoN, 3)
@@ -1538,12 +1537,12 @@ local test_get_miss = env.register_test_case "test_get_miss" {
                 tl_a:get(to_address(0x10, 0x20), source)
 
             env.posedge()
-                chi_txreq.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return chi_txreq:fire() end)
                 chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
             env.posedge()
                 chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
             env.posedge()
-                chi_txrsp.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return chi_txrsp:fire() end)
                 chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
             verilua "appendTasks" {
@@ -1556,7 +1555,7 @@ local test_get_miss = env.register_test_case "test_get_miss" {
             }
 
             env.posedge()
-                tl_d.valid:posedge(); env.negedge()
+                env.expect_happen_until(10, function() return tl_d:fire() end)
                 tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
             env.negedge()
                 expect.equal(tl_d.bits.data:get()[1], 0xbeef)
@@ -1768,12 +1767,12 @@ local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
         env.negedge()
             tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
         env.posedge()
-            chi_txreq.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txreq:fire() end)
             chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
         env.posedge()
             chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
         env.posedge()
-            chi_txrsp.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
             chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
         verilua "appendTasks" {
@@ -1789,7 +1788,7 @@ local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
         }
         
         env.posedge()
-            tl_d.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return tl_d:fire() end)
             tl_d:dump()
             tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
         env.negedge()
@@ -1838,12 +1837,12 @@ local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_ev
         env.negedge()
             tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
         env.posedge()
-            chi_txreq.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txreq:fire() end)
             chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
         env.posedge()
             chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
         env.posedge()
-            chi_txrsp.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
             chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
         env.expect_happen_until(10, function ()
@@ -1912,7 +1911,7 @@ local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_ev
                 verilua "appendTasks" {
                     function ()
                         env.posedge()
-                            tl_d.valid:posedge(); env.negedge()
+                            env.expect_happen_until(10, function() return tl_d:fire() end)
                             tl_d:dump()
                             tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
                         env.negedge()
@@ -1965,12 +1964,12 @@ local test_miss_need_writebackfull = env.register_test_case "test_miss_need_writ
         env.negedge()
             tl_a:acquire_block(to_address(0x01, 0x05), TLParam.NtoB, source)
         env.posedge()
-            chi_txreq.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txreq:fire() end)
             chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
         env.posedge()
             chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
         env.posedge()
-            chi_txrsp.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
             chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
         verilua "appendTasks" {
@@ -2048,12 +2047,12 @@ local test_miss_need_writebackfull_and_probe = env.register_test_case "test_miss
         env.negedge()
             tl_a:acquire_block(to_address(0x02, 0x05), TLParam.NtoB, source)
         env.posedge()
-            chi_txreq.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txreq:fire() end)
             chi_txreq.bits.opcode:expect(OpcodeREQ.ReadNotSharedDirty)
         env.posedge()
             chi_rxdat:compdat(0, "0xabcd", "0xbeef", 5, CHIResp.UC) -- dbID = 5
         env.posedge()
-            chi_txrsp.valid:posedge(); env.negedge()
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
             chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
 
         env.expect_happen_until(10, function ()
@@ -7149,7 +7148,7 @@ local test_chi_retry = env.register_test_case "test_chi_retry" {
  
 jit.off()
 verilua "mainTask" { function ()
-    sim.dump_wave()
+    -- sim.dump_wave()
 
     -- local test_all = false
     local test_all = true
