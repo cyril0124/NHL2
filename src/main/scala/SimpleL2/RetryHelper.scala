@@ -7,7 +7,6 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import SimpleL2.chi.CHIOpcodeRSP._
-import NHL2.NHL2Bundle
 
 /**
  *  [[RetryHelper]] for CHI transaction retry mechanism.

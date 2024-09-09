@@ -22,9 +22,6 @@ compile:
 	mill -i $(project).compile
 	mill -i $(project).test.compile
 
-simple-test-top:
-	mill -i $(project).test.runMain NHL2.SimpleTestTop -td build
-
 l2cache:
 	mill -i $(project).runMain $(package).L2Cache -td build
 
