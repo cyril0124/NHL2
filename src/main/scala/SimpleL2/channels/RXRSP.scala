@@ -31,6 +31,7 @@ class RXRSP()(implicit p: Parameters) extends L2Module {
     io.resp.bits.resp      := rxrsp.bits.resp
     io.resp.bits.respErr   := rxrsp.bits.respErr
     io.resp.bits.srcID     := rxrsp.bits.srcID
+    io.resp.bits.homeNID   := DontCare
     io.resp.bits.dbID      := rxrsp.bits.dbID
     io.resp.bits.txnID     := rxrsp.bits.txnID
     io.resp.bits.last      := true.B

@@ -7143,6 +7143,74 @@ local test_chi_retry = env.register_test_case "test_chi_retry" {
     end
 }
 
+local test_homeNID_dbID = env.register_test_case "test_homeNID_dbID" {
+    function ()
+        do
+            env.dut_reset()
+            resetFinish:posedge()
+
+            tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+            env.negedge()
+                tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadNotSharedDirty) and chi_txreq.bits.allowRetry:is(1) and chi_txreq.bits.pCrdType:is(0) end)
+
+            local homeNID = 12
+            local dbID = 4
+            env.negedge()
+                chi_rxdat.bits.txnID:set(0)
+                chi_rxdat.bits.dataID:set(0)
+                chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+                chi_rxdat.bits.homeNID:set(homeNID)
+                chi_rxdat.bits.data:set_str("0xaabb")
+                chi_rxdat.bits.dbID:set(dbID)
+                chi_rxdat.bits.resp:set(CHIResp.UC)
+                chi_rxdat.valid:set(1)
+            env.negedge()
+                chi_rxdat.bits.data:set_str("0xccdd")
+                chi_rxdat.bits.dataID:set(2) -- last data beat
+            env.negedge()
+                chi_rxdat.valid:set(0)
+
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
+            chi_txrsp:dump()
+            chi_txrsp.bits.tgtID:expect(homeNID)
+            chi_txrsp.bits.txnID:expect(dbID)
+
+            env.negedge(100)
+        end
+
+        do
+            env.dut_reset()
+            resetFinish:posedge()
+
+            env.negedge()
+                write_dir(0x10, ("0b0010"):number(), 0x20, MixedState.BC)
+            env.negedge()
+                tl_a:acquire_perm(to_address(0x10, 0x20), TLParam.BtoT, 0)
+            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) and chi_txreq.bits.allowRetry:is(1) and chi_txreq.bits.pCrdType:is(0) end)
+
+            local srcID = 12
+            local dbID = 4
+            env.negedge()
+                chi_rxrsp.bits.txnID:set(0)
+                chi_rxrsp.bits.opcode:set(OpcodeRSP.Comp)
+                chi_rxrsp.bits.srcID:set(srcID)
+                chi_rxrsp.bits.dbID:set(dbID)
+                chi_rxrsp.valid:set(1)
+            env.negedge()
+                chi_rxrsp.valid:set(0)
+
+            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
+            chi_txrsp:dump()
+            chi_txrsp.bits.tgtID:expect(srcID)
+            chi_txrsp.bits.txnID:expect(dbID)
+
+            env.negedge(100)
+        end
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: Get not preferCache
  
@@ -7222,6 +7290,7 @@ verilua "mainTask" { function ()
     test_fwd_snoop()
     test_snpHitReq_block_mshrRefill()
     test_chi_retry()
+    test_homeNID_dbID()
     end
 
    

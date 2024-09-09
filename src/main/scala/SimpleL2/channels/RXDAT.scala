@@ -34,6 +34,7 @@ class RXDAT()(implicit p: Parameters) extends L2Module {
     io.resp.bits.resp      := io.rxdat.bits.resp
     io.resp.bits.respErr   := io.rxdat.bits.respErr
     io.resp.bits.srcID     := io.rxdat.bits.srcID
+    io.resp.bits.homeNID   := io.rxdat.bits.homeNID
     io.resp.bits.dbID      := io.rxdat.bits.dbID
     io.resp.bits.txnID     := io.rxdat.bits.txnID
     io.resp.bits.last      := last

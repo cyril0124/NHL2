@@ -204,10 +204,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reallocOpcode   = RegInit(0.U(req.opcode.getWidth.W))
     val reallocRetToSrc = RegInit(false.B)
 
-    val rspDBID  = RegInit(0.U(chiBundleParams.dbIdBits.W))
-    val rspSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
-    val datDBID  = RegInit(0.U(chiBundleParams.dbIdBits.W))
-    val datSrcID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val rspDBID    = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val rspSrcID   = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val datDBID    = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val datSrcID   = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val datHomeNID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
 
     // Registers for retry retry
     val lastReqState   = RegInit(0.U(4.W)) // A register to store the last fired txreq transaction.
@@ -269,11 +270,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         needWb      := false.B
 
         isRealloc := false.B
-
-        rspDBID  := 0.U
-        rspSrcID := 0.U
-        datDBID  := 0.U
-        datSrcID := 0.U
 
         lastReqState   := 0.U
         gotRetry       := false.B
@@ -399,8 +395,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.respErr  := RespErr.NormalOkay
     io.tasks.txrsp.bits.pCrdType := DontCare
-    io.tasks.txrsp.bits.txnID    := Mux(needRead, datDBID, rspDBID) // TODO:
+    io.tasks.txrsp.bits.txnID    := Mux(needRead, datDBID, rspDBID)
     io.tasks.txrsp.bits.dbID     := DontCare
+    io.tasks.txrsp.bits.tgtID    := Mux(needRead, datHomeNID, rspSrcID)
     io.tasks.txrsp.bits.srcID    := DontCare
     io.tasks.txrsp.bits.resp     := DontCare
     when(io.tasks.txrsp.fire) {
@@ -816,10 +813,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             when(rxdat.bits.chiOpcode === CompData) {
                 gotCompData := true.B
 
-                gotT     := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
-                gotDirty := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
-                datDBID  := rxdat.bits.dbID
-                datSrcID := rxdat.bits.srcID
+                gotT       := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
+                gotDirty   := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
+                datDBID    := rxdat.bits.dbID
+                datSrcID   := rxdat.bits.srcID
+                datHomeNID := rxdat.bits.homeNID
             }
         }.otherwise {
             state.w_compdat_first := true.B

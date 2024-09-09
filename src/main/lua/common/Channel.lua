@@ -339,6 +339,7 @@ local function build_channel(tl_prefix, chi_prefix)
         | dataID
         | resp
         | data
+        | homeNID
         | txnID
         | dbID
     ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = chi_prefix .. "rxdat_", name = "rxdat"}
