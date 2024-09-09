@@ -1164,6 +1164,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val nested = io.nested.release
 
         when(nested.setDirty) {
+            meta.state := MixedState.setDirty(meta.state)
+
             when(nedtedHitMatch) {
                 releaseGotDirty := true.B
             }.otherwise {
