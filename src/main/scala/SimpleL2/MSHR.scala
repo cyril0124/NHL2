@@ -1352,7 +1352,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
         tempDsWriteFinish &&
-        state.w_replResp &&
         !(isAcquireHit && gotCompResp) && // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
         hasPendingRefill &&               // Does not grant to upstream cache
         gotReplProbeAck &&                // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
