@@ -1,5 +1,3 @@
---[[verilua]]
-
 local utils = require "LuaUtils"
 local env = require "env"
 local tl = require "TileLink"
