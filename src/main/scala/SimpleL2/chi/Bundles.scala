@@ -102,8 +102,10 @@ class CHIBundleSNP(params: CHIBundleParameters) extends Bundle {
     val fwdTxnID    = UInt(params.txnIdBits.W)  // Used for DCT
     val opcode      = UInt(5.W)
     val addr        = UInt((params.addressBits - 3).W)
+    val ns          = Bool()
     val doNotGoToSD = Bool()
     val retToSrc    = Bool()
+    val traceTag    = Bool()
 }
 
 class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
