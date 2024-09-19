@@ -52,83 +52,83 @@ object CHIBundleParameters {
 class CHIBundleREQ(params: CHIBundleParameters) extends Bundle {
     val channelName = "'REQ' channel"
 
-    val qos           = UInt(4.W)                 // TODO: not use?
-    val tgtID         = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID         = UInt(params.nodeIdBits.W)
-    val txnID         = UInt(params.txnIdBits.W)
-    val returnNID     = UInt(params.nodeIdBits.W) // TODO: not use?
-    val stashNIDValid = Bool()
-    val returnTxnID   = UInt(8.W)
-    val opcode        = UInt(params.reqOpcodeBits.W)
-    val size          = UInt(3.W)
-    val addr          = UInt(params.addressBits.W)
-    val ns            = Bool()                    // TODO: not use?
-    val likelyshared  = Bool()
-    val allowRetry    = Bool()
-    val order         = UInt(2.W)
-    val pCrdType      = UInt(4.W)
-    val memAttr       = new MemAttr
-    val snpAttr       = UInt(1.W)
-    val lpID          = UInt(5.W)
-    val snoopMe       = Bool()
-    val expCompAck    = Bool()
-    val traceTag      = Bool()
     val rsvdc         = UInt(4.W)
+    val traceTag      = Bool()
+    val expCompAck    = Bool()
+    val snoopMe       = Bool()
+    val lpID          = UInt(5.W)
+    val snpAttr       = UInt(1.W)
+    val memAttr       = new MemAttr
+    val pCrdType      = UInt(4.W)
+    val order         = UInt(2.W)
+    val allowRetry    = Bool()
+    val likelyshared  = Bool()
+    val ns            = Bool()                    // TODO: not use?
+    val addr          = UInt(params.addressBits.W)
+    val size          = UInt(3.W)
+    val opcode        = UInt(params.reqOpcodeBits.W)
+    val returnTxnID   = UInt(8.W)
+    val stashNIDValid = Bool()
+    val returnNID     = UInt(params.nodeIdBits.W) // TODO: not use?
+    val txnID         = UInt(params.txnIdBits.W)
+    val srcID         = UInt(params.nodeIdBits.W)
+    val tgtID         = UInt(params.nodeIdBits.W) // TODO: not use?
+    val qos           = UInt(4.W)                 // TODO: not use?
 }
 
 class CHIBundleRSP(params: CHIBundleParameters) extends Bundle {
     val channelName = "'RSP' channel"
 
-    val qos      = UInt(4.W)                 // TODO: not use?
-    val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID    = UInt(params.nodeIdBits.W)
-    val txnID    = UInt(params.txnIdBits.W)
-    val opcode   = UInt(params.rspOpcodeBits.W)
-    val respErr  = UInt(2.W)
-    val resp     = UInt(3.W)
-    val fwdState = UInt(3.W)                 // Used for DCT
-    val dbID     = UInt(params.dbIdBits.W)
-    val pCrdType = UInt(4.W)
     val traceTag = Bool()
+    val pCrdType = UInt(4.W)
+    val dbID     = UInt(params.dbIdBits.W)
+    val fwdState = UInt(3.W)                 // Used for DCT
+    val resp     = UInt(3.W)
+    val respErr  = UInt(2.W)
+    val opcode   = UInt(params.rspOpcodeBits.W)
+    val txnID    = UInt(params.txnIdBits.W)
+    val srcID    = UInt(params.nodeIdBits.W)
+    val tgtID    = UInt(params.nodeIdBits.W) // TODO: not use?
+    val qos      = UInt(4.W)                 // TODO: not use?
 }
 
 class CHIBundleSNP(params: CHIBundleParameters) extends Bundle {
     val channelName = "'SNP' channel"
 
-    val qos         = UInt(4.W)                 // TODO: not use?
-    val srcID       = UInt(params.nodeIdBits.W)
-    val txnID       = UInt(params.txnIdBits.W)
-    val fwdNID      = UInt(params.nodeIdBits.W) // Used for DCT
-    val fwdTxnID    = UInt(params.txnIdBits.W)  // Used for DCT
-    val opcode      = UInt(5.W)
-    val addr        = UInt((params.addressBits - 3).W)
-    val ns          = Bool()
-    val doNotGoToSD = Bool()
-    val retToSrc    = Bool()
     val traceTag    = Bool()
+    val retToSrc    = Bool()
+    val doNotGoToSD = Bool()
+    val ns          = Bool()
+    val addr        = UInt((params.addressBits - 3).W)
+    val opcode      = UInt(5.W)
+    val fwdTxnID    = UInt(params.txnIdBits.W)  // Used for DCT
+    val fwdNID      = UInt(params.nodeIdBits.W) // Used for DCT
+    val txnID       = UInt(params.txnIdBits.W)
+    val srcID       = UInt(params.nodeIdBits.W)
+    val qos         = UInt(4.W)                 // TODO: not use?
 }
 
 class CHIBundleDAT(params: CHIBundleParameters) extends Bundle {
     val channelName = "'DAT' channel"
 
-    val qos       = UInt(4.W)                 // TODO: not use?
-    val tgtID     = UInt(params.nodeIdBits.W) // TODO: not use?
-    val srcID     = UInt(params.nodeIdBits.W)
-    val txnID     = UInt(params.txnIdBits.W)
-    val homeNID   = UInt(params.nodeIdBits.W) // Used for DCT
-    val opcode    = UInt(params.datOpcodeBits.W)
-    val respErr   = UInt(2.W)
-    val resp      = UInt(3.W)
-    val fwdState  = UInt(3.W)                 // Used for DCT
-    val dbID      = UInt(params.dbIdBits.W)
-    val ccID      = UInt(2.W)                 // TODO: not use?
-    val dataID    = UInt(2.W)
-    val traceTag  = Bool()
-    val rsvdc     = UInt(4.W)
-    val be        = UInt((params.dataBits / 8).W)
-    val data      = UInt(params.dataBits.W)
-    val dataCheck = if (params.dataCheck) Some(UInt((params.dataBits / 8).W)) else None
     val poison    = if (params.dataCheck) Some(UInt((params.dataBits / 64).W)) else None
+    val dataCheck = if (params.dataCheck) Some(UInt((params.dataBits / 8).W)) else None
+    val data      = UInt(params.dataBits.W)
+    val be        = UInt((params.dataBits / 8).W)
+    val rsvdc     = UInt(4.W)
+    val traceTag  = Bool()
+    val dataID    = UInt(2.W)
+    val ccID      = UInt(2.W)                 // TODO: not use?
+    val dbID      = UInt(params.dbIdBits.W)
+    val fwdState  = UInt(3.W)                 // Used for DCT
+    val resp      = UInt(3.W)
+    val respErr   = UInt(2.W)
+    val opcode    = UInt(params.datOpcodeBits.W)
+    val homeNID   = UInt(params.nodeIdBits.W) // Used for DCT
+    val txnID     = UInt(params.txnIdBits.W)
+    val srcID     = UInt(params.nodeIdBits.W)
+    val tgtID     = UInt(params.nodeIdBits.W) // TODO: not use?
+    val qos       = UInt(4.W)                 // TODO: not use?
 }
 
 class CHIChannelIO[T <: Data](gen: T, aggregateIO: Boolean = false) extends Bundle {
