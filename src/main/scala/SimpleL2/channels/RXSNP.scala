@@ -56,8 +56,13 @@ class RXSNP()(implicit p: Parameters) extends L2Module {
         task_sn1.isCHIOpcode := true.B
         task_sn1.opcode      := io.rxsnp.bits.opcode
         task_sn1.txnID       := io.rxsnp.bits.txnID
+        task_sn1.srcID       := io.rxsnp.bits.srcID
         task_sn1.retToSrc    := io.rxsnp.bits.retToSrc
-        io.rxsnp.ready       := !full_s0
+
+        task_sn1.fwdNID_opt.foreach(_ := io.rxsnp.bits.fwdNID)
+        task_sn1.fwdTxnID_opt.foreach(_ := io.rxsnp.bits.fwdTxnID)
+
+        io.rxsnp.ready := !full_s0
 
         // -----------------------------------------------------------------------------------------
         // Stage 0

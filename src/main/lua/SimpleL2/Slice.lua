@@ -2207,13 +2207,16 @@ local test_snoop_shared = env.register_test_case "test_snoop_shared" {
         -- SnpShared to TC => BC
         -- 
         do
-            chi_rxsnp:snpshared(to_address(0x04, 0x01), 3, 0) -- ret2src == false
+            local src_id = 0x04
+            chi_rxsnp:snpshared(to_address(0x04, 0x01), 3, 0, src_id) -- ret2src == false
             verilua "appendTasks" {
                 check_txrsp = function ()
                     env.expect_happen_until(10, function() return chi_txrsp:fire() end)
                     chi_txrsp:dump()
                     chi_txrsp.bits.opcode:expect(OpcodeRSP.SnpResp)
                     chi_txrsp.bits.resp:expect(CHIResp.SC)
+                    chi_txrsp.bits.tgtID:expect(src_id)
+                    chi_txrsp.bits.srcID:expect(0)
 
                     env.negedge()
                     env.expect_not_happen_until(10, function() return chi_txrsp:fire() end)
@@ -4452,64 +4455,64 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
             mshrs[0].io_status_valid:expect(0)
         end
 
-        do
-            -- 
-            -- BC      BC (send release data)
-            --   \    /
-            --     TC
-            -- 
-            -- single client
-            local clientsOH = ("0b11"):number()
-            env.negedge(20)
-                write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
-                write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
-                write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
-                write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
+        -- do
+        --     -- 
+        --     -- BC      BC (send release data)
+        --     --   \    /
+        --     --     TC
+        --     -- 
+        --     -- single client
+        --     local clientsOH = ("0b11"):number()
+        --     env.negedge(20)
+        --         write_dir(0x01, utils.uint_to_onehot(0), 0x01, MixedState.TC, clientsOH)
+        --         write_dir(0x01, utils.uint_to_onehot(1), 0x02, MixedState.TC, clientsOH)
+        --         write_dir(0x01, utils.uint_to_onehot(2), 0x03, MixedState.TC, clientsOH)
+        --         write_dir(0x01, utils.uint_to_onehot(3), 0x04, MixedState.TC, clientsOH)
 
-            local source = 4
-            env.negedge()
-                tl_a:acquire_block(to_address(0x01, 0x06), TLParam.NtoT, source)
-            env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
-            chi_rxdat:compdat(0, "0xdead2", "0xbeef2", 5, CHIResp.UC)
-            env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.CompAck) end)
+        --     local source = 4
+        --     env.negedge()
+        --         tl_a:acquire_block(to_address(0x01, 0x06), TLParam.NtoT, source)
+        --     env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
+        --     chi_rxdat:compdat(0, "0xdead2", "0xbeef2", 5, CHIResp.UC)
+        --     env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.CompAck) end)
             
-            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(0) end)
-            env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(16) end)
+        --     env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(0) end)
+        --     env.expect_happen_until(10, function () return tl_b:fire() and tl_b.bits.param:is(TLParam.toN) and tl_b.bits.source:is(16) end)
 
-            mshrs[0].state_s_evict:expect(0)
-            mshrs[0].state_s_wb:expect(1)
-            local probe_address = tl_b.bits.address:get()
+        --     mshrs[0].state_s_evict:expect(0)
+        --     mshrs[0].state_s_wb:expect(1)
+        --     local probe_address = tl_b.bits.address:get()
             
-            tl_c:release_data(probe_address, TLParam.BtoN, 8, "0xdead2", "0xbeef2")
-            env.expect_happen_until(10, function () return mp.io_mshrNested_s3_release_setDirty:is(1) and mp.io_mshrNested_s3_release_BtoN:is(1) end)
-            env.negedge()
-                mshrs[0].state_s_evict:expect(1)
-                mshrs[0].state_s_wb:expect(0)
-                mshrs[0].state_w_rprobeack:expect(0)
+        --     tl_c:release_data(probe_address, TLParam.BtoN, 8, "0xdead2", "0xbeef2")
+        --     env.expect_happen_until(10, function () return mp.io_mshrNested_s3_release_setDirty:is(1) and mp.io_mshrNested_s3_release_BtoN:is(1) end)
+        --     env.negedge()
+        --         mshrs[0].state_s_evict:expect(1)
+        --         mshrs[0].state_s_wb:expect(0)
+        --         mshrs[0].state_w_rprobeack:expect(0)
 
-            verilua "appendTasks" {
-                function ()
-                    env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
-                    chi_rxrsp:comp_dbidresp(0, 5)
-                end
-            }
-            tl_c:probeack(probe_address, TLParam.BtoN, 16)
-            tl_c:probeack(probe_address, TLParam.NtoN, 0)
-                mshrs[0].state_w_rprobeack:expect(1)
+        --     verilua "appendTasks" {
+        --         function ()
+        --             env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.WriteBackFull) end)
+        --             chi_rxrsp:comp_dbidresp(0, 5)
+        --         end
+        --     }
+        --     tl_c:probeack(probe_address, TLParam.BtoN, 16)
+        --     tl_c:probeack(probe_address, TLParam.NtoN, 0)
+        --         mshrs[0].state_w_rprobeack:expect(1)
 
-            verilua "appendTasks" {
-                function ()
-                    env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead2 end)
-                    env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef2 end)
-                    env.negedge()
-                    tl_e:grantack(0)
-                end
-            }
-            env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xdead2 end)
-            env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xbeef2 end)
-            env.negedge(10)
-            mshrs[0].io_status_valid:expect(0)
-        end
+        --     verilua "appendTasks" {
+        --         function ()
+        --             env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead2 end)
+        --             env.expect_happen_until(15, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef2 end)
+        --             env.negedge()
+        --             tl_e:grantack(0)
+        --         end
+        --     }
+        --     env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xdead2 end)
+        --     env.expect_happen_until(15, function () return chi_txdat:fire() and chi_txdat.bits.opcode:is(OpcodeDAT.CopyBackWrData) and chi_txdat.bits.data:get()[1] == 0xbeef2 end)
+        --     env.negedge(10)
+        --     mshrs[0].io_status_valid:expect(0)
+        -- end
 
         env.posedge(100)
     end

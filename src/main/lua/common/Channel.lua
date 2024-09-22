@@ -277,6 +277,7 @@ local function build_channel(tl_prefix, chi_prefix)
         | opcode
         | resp
         | tgtID
+        | srcID
         | txnID
     ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = chi_prefix .. "txrsp_", name = "chi_txrsp"}
     
@@ -375,10 +376,11 @@ local function build_channel(tl_prefix, chi_prefix)
         | retToSrc
     ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = chi_prefix .. "rxsnp_", name = "chi_rxsnp"}
     
-    chi_rxsnp.send_request = function(this, addr, opcode, txn_id, ret2src)
+    chi_rxsnp.send_request = function(this, addr, opcode, txn_id, ret2src, src_id)
         local addr = bit.rshift(addr, 3) -- Addr in CHI SNP channel has 3 fewer bits than full address
         env.negedge()
             chi_rxsnp.ready:expect(1)
+            chi_rxsnp.bits.srcID:set(src_id or 0)
             chi_rxsnp.bits.txnID:set(txn_id)
             chi_rxsnp.bits.addr:set(addr, true)
             chi_rxsnp.bits.opcode:set(opcode)
@@ -410,12 +412,12 @@ local function build_channel(tl_prefix, chi_prefix)
             chi_rxsnp.valid:set(0)
     end
     
-    chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src)
-        chi_rxsnp:send_request(addr, OpcodeSNP.SnpShared, txn_id, ret2src)
+    chi_rxsnp.snpshared = function (this, addr, txn_id, ret2src, src_id)
+        chi_rxsnp:send_request(addr, OpcodeSNP.SnpShared, txn_id, ret2src, src_id)
     end
     
-    chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src)
-        chi_rxsnp:send_request(addr, OpcodeSNP.SnpUnique, txn_id, ret2src)
+    chi_rxsnp.snpunique = function (this, addr, txn_id, ret2src, src_id)
+        chi_rxsnp:send_request(addr, OpcodeSNP.SnpUnique, txn_id, ret2src, src_id)
     end
 
     return {
