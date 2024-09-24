@@ -761,6 +761,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
 
     when(fire_s4) {
         task_s5 := task_s4
+
+        when(valid_snpdata_s4) {
+            task_s5.tgtID := task_s4.srcID
+        }
+
         when(!task_s4.isMshrTask) {
             task_s5.wayOH  := dirRespWayOH_s4
             task_s5.opcode := respOpcode_s4
