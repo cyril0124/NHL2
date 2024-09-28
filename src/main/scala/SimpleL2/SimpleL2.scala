@@ -6,7 +6,6 @@ import chisel3.experimental.{SourceInfo, SourceLine}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.tilelink.MasterMuxNode
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
@@ -16,6 +15,9 @@ import SimpleL2.chi._
 import Utils.GenerateVerilog
 import scala.math.BigInt
 import freechips.rocketchip.util.SeqToAugmentedSeq
+
+abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HadMixedStateOps
+abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
 
 object _assert {
     def apply(cond: Bool, message: String, data: Bits*)(implicit s: SourceInfo) = {
@@ -541,6 +543,10 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 
 class SimpleL2CacheWrapper(nrCore: Int = 1, nrSlice: Int = 1, sets: Option[Int] = None, ways: Option[Int] = None, idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
+
+    val capacityInBytes  = nrSlice * ways.getOrElse(cacheParams.ways) * sets.getOrElse(cacheParams.sets) * cacheParams.blockBytes
+    val capacityInKBytes = capacityInBytes / 1024
+    println(s"[${this.getClass}] capacity: ${capacityInBytes} B / ${capacityInKBytes} KB")
 
     def createDCacheNode(name: String, sources: Int) = {
         val masterNode = TLClientNode(
