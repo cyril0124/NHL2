@@ -251,6 +251,7 @@ verilua "appendTasks" {
 
         test_chi_retry()
 
+        env.TEST_SUCCESS()
         sim.finish()
     end
 }

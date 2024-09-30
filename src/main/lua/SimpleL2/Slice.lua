@@ -236,14 +236,14 @@ local test_load_to_use = env.register_test_case "test_load_to_use" {
             sourceD.io_d_valid:expect(1)
             sourceD.io_d_bits_data:dump()
             sourceD.io_d_bits_opcode:expect(TLOpcodeD.GrantData)
-            sourceD.io_d_bits_data:expect(0xdead)
+            sourceD.io_d_bits_data:expect_hex_str("0xdead")
 
         env.posedge()
             sourceD.io_d_ready:expect(1)
             sourceD.io_d_valid:expect(1)
             sourceD.io_d_bits_data:dump()
             sourceD.io_d_bits_opcode:expect(TLOpcodeD.GrantData)
-            sourceD.io_d_bits_data:expect(0xbeef)
+            sourceD.io_d_bits_data:expect_hex_str("0xbeef")
 
         env.posedge()
         env.posedge(10, function ()

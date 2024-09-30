@@ -343,6 +343,7 @@ hs_err_pid*
 .metals/
 .bloop/
 .verilua/
+.xmake/
 vrtl_gen_src/
 verdiLog
 build_archive

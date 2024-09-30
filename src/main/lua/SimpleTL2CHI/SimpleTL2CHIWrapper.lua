@@ -369,6 +369,7 @@ verilua "appendTasks" {
         test_block_get()
         test_block_put()
 
+        env.TEST_SUCCESS()
         sim.finish()
     end
 }
