@@ -12,13 +12,34 @@ case class CHIBundleParameters(
     addressBits: Int,
     dataBits: Int,
     dataCheck: Boolean,
-    txnIdBits: Int = 8,     // issueB: 8, issueE: 12
-    dbIdBits: Int = 8,      // issueB: 8, issueE: 12
-    reqOpcodeBits: Int = 6, // issueB: 6, issueE: 7
-    rspOpcodeBits: Int = 4, // issueB: 4, issueE: 5
-    datOpcodeBits: Int = 3  // issueB: 3, issueE: 4
+    issue: String = "G"
 // TODO: has snoop
 ) {
+    val txnIdBits: Int = issue match {
+        case "B"       => 8
+        case "E" | "G" => 12
+        case _         => 12
+    }
+    val dbIdBits: Int = issue match {
+        case "B"       => 8
+        case "E" | "G" => 12
+        case _         => 12
+    }
+    val reqOpcodeBits: Int = issue match {
+        case "B"       => 6
+        case "E" | "G" => 7
+        case _         => 7
+    }
+    val rspOpcodeBits: Int = issue match {
+        case "B"       => 4
+        case "E" | "G" => 5
+        case _         => 5
+    }
+    val datOpcodeBits: Int = issue match {
+        case "B"       => 3
+        case "E" | "G" => 4
+        case _         => 4
+    }
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
     require(addressBits >= 44 && addressBits <= 52)
     require(isPow2(dataBits))
@@ -31,21 +52,13 @@ object CHIBundleParameters {
         addressBits: Int = 48,
         dataBits: Int = 256,
         dataCheck: Boolean = false,
-        txnIdBits: Int = 8,
-        dbIdBits: Int = 8,
-        reqOpcodeBits: Int = 6,
-        rspOpcodeBits: Int = 4,
-        datOpcodeBits: Int = 3
+        issue: String = "G"
     ): CHIBundleParameters = new CHIBundleParameters(
         nodeIdBits = nodeIdBits,
         addressBits = addressBits,
         dataBits = dataBits,
         dataCheck = dataCheck,
-        txnIdBits = txnIdBits,
-        dbIdBits = dbIdBits,
-        reqOpcodeBits = reqOpcodeBits,
-        rspOpcodeBits = rspOpcodeBits,
-        datOpcodeBits = datOpcodeBits
+        issue = issue
     )
 }
 

@@ -23,6 +23,8 @@ local OpcodeREQ = setmetatable({
 
     WriteUniqueFull   = 0x19 + lshift(0, 6),
     WriteBackFull     = 0x1B + lshift(0, 6),
+    WriteNoSnpPtl     = 0x1C + lshift(0, 6),
+    WriteNoSnpFull    = 0x1D + lshift(0, 6),
 
     ReadNotSharedDirty = 0x26 + lshift(0, 6),
 }, { __call = enum_search })
@@ -108,6 +110,16 @@ local CHIResp = utils.enum_define {
     SD_PD = ("0b111"):number(),
 }
 
+local CHIOrder = utils.enum_define {
+    name = "CHIOrder",
+
+    None            = ("0b00"):number(),
+    RequestAccepted = ("0b01"):number(),
+    RequestOrder    = ("0b10"):number(),
+    OWO             = ("0b10"):number(), -- Ordered Write Observation
+    EndpointOrder   = ("0b11"):number()
+}
+
 return {
     OpcodeREQ = OpcodeREQ,
     OpcodeDAT = OpcodeDAT,
@@ -117,4 +129,5 @@ return {
     req_need_data = req_need_data,
     dat_is_snpresp = dat_is_snpresp,
     CHIResp = CHIResp,
+    CHIOrder = CHIOrder
 }

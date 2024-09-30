@@ -48,6 +48,8 @@ local MixedState = utils.enum_define {
 
 local TLOpcodeA = utils.enum_define {
     name = "TLOpcodeA",
+    PutFullData = 0,
+    PutPartialData = 1,
     Get = 4,
     AcquireBlock = 6,
     AcquirePerm = 7,

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 object CHIOpcodeREQ {
-    val width = 6 // TODO: issueE has opcode bits of 7
+    val width = 7 // TODO: issueE has opcode bits of 7
 
     val ReqLCrdReturn = 0x00.U(width.W)
     val ReadShared    = 0x01.U(width.W)
@@ -63,7 +63,7 @@ object CHIOpcodeREQ {
 }
 
 object CHIOpcodeRSP {
-    val width = 4
+    val width = 5
 
     val RespLCrdReturn = 0x0.U(width.W)
     val SnpResp        = 0x1.U(width.W)
@@ -188,16 +188,17 @@ object CHIOpcodeSNP {
 }
 
 object CHIOpcodeDAT {
-    val width = 3
+    val width = 4
 
-    val DataLCrdReturn    = 0x0.U(width.W)
-    val SnpRespData       = 0x1.U(width.W)
-    val CopyBackWrData    = 0x2.U(width.W)
-    val NonCopyBackWrData = 0x3.U(width.W)
-    val CompData          = 0x4.U(width.W)
-    val SnpRespDataPtl    = 0x5.U(width.W)
-    val SnpRespDataFwded  = 0x6.U(width.W)
-    val WriteDataCancel   = 0x7.U(width.W)
+    val DataLCrdReturn           = 0x0.U(width.W)
+    val SnpRespData              = 0x1.U(width.W)
+    val CopyBackWrData           = 0x2.U(width.W)
+    val NonCopyBackWrData        = 0x3.U(width.W)
+    val CompData                 = 0x4.U(width.W)
+    val SnpRespDataPtl           = 0x5.U(width.W)
+    val SnpRespDataFwded         = 0x6.U(width.W)
+    val WriteDataCancel          = 0x7.U(width.W)
+    val NonCopyBackWrDataCompAck = 0xc.U(width.W)
 
     def widthCheck(opcode: UInt): Unit = { require(opcode.getWidth >= width) }
     def isSnpRespDataX(opcode: UInt): Bool = {
