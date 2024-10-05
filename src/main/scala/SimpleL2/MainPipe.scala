@@ -123,7 +123,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     if (enableDataECC) {
         txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
         txdat_s2.bits         := DontCare
-        txdat_s2.bits.tgtID   := task_s2.tgtID
+        txdat_s2.bits.tgtID   := Mux(isTXDAT_s2, task_s2.srcID, task_s2.tgtID)
         txdat_s2.bits.txnID   := task_s2.txnID
         txdat_s2.bits.homeNID := task_s2.srcID
         txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
@@ -133,7 +133,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     } else {
         io.txdat_s2.valid        := valid_s2 && !io.reqDrop_s2_opt.getOrElse(false.B) && (isMshrTXDAT_s2 || isTXDAT_s2)
         io.txdat_s2.bits         := DontCare
-        io.txdat_s2.bits.tgtID   := task_s2.tgtID
+        io.txdat_s2.bits.tgtID   := Mux(isTXDAT_s2, task_s2.srcID, task_s2.tgtID)
         io.txdat_s2.bits.txnID   := task_s2.txnID
         io.txdat_s2.bits.homeNID := task_s2.srcID
         io.txdat_s2.bits.dbID    := Mux(isCompData_s2, task_s2.dbID, Mux(task_s2.snpHitReq, task_s2.snpHitMshrId, task_s2.mshrId))
@@ -762,7 +762,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     when(fire_s4) {
         task_s5 := task_s4
 
-        when(valid_snpdata_s4) {
+        when(valid_snpdata_s4 || valid_snpdata_mp_s4 && !snpRetry_s4) {
             task_s5.tgtID := task_s4.srcID
         }
 
