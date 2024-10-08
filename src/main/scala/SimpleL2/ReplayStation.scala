@@ -31,9 +31,14 @@ class ReplaySubEntry(implicit p: Parameters) extends L2Bundle {
     val opcode      = UInt(setBits.W)
     val param       = UInt(math.max(3, Resp.width).W)                 // if isCHIOpcode is true, param is equals to the resp field in CHI
     val source      = UInt(math.max(tlBundleParams.sourceBits, 12).W) // CHI RXRSP TxnID ==> 12.W, if isCHIOpcode is true, source is equals to the resp field in CHI
+    val srcID       = UInt(chiBundleParams.nodeIdBits.W)
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
     val isAliasTask = Bool()
     val retToSrc    = Bool()
+
+    val fwdState_opt = if (supportDCT) Some(UInt(3.W)) else None
+    val fwdNID_opt   = if (supportDCT) Some(UInt(chiBundleParams.nodeIdBits.W)) else None
+    val fwdTxnID_opt = if (supportDCT) Some(UInt(chiBundleParams.txnIdBits.W)) else None
 
     def resp = param
     def txnID = source     // alias to source
@@ -84,8 +89,15 @@ class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Par
                     subEntry.bits.channel     := io.replay_s4.bits.task.channel
                     subEntry.bits.source      := io.replay_s4.bits.task.source
                     subEntry.bits.retToSrc    := io.replay_s4.bits.task.retToSrc
+                    subEntry.bits.srcID       := io.replay_s4.bits.task.srcID
                     subEntry.bits.isAliasTask := io.replay_s4.bits.task.isAliasTask
                     subEntry.bits.aliasOpt.foreach(_ := io.replay_s4.bits.task.aliasOpt.get)
+
+                    if (supportDCT) {
+                        subEntry.bits.fwdState_opt.get := io.replay_s4.bits.task.fwdState_opt.get
+                        subEntry.bits.fwdNID_opt.get   := io.replay_s4.bits.task.fwdNID_opt.get
+                        subEntry.bits.fwdTxnID_opt.get := io.replay_s4.bits.task.fwdTxnID_opt.get
+                    }
 
                     entry.bits.enqIdx.inc()
 
@@ -111,8 +123,15 @@ class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Par
                     subEntry.bits.channel     := io.replay_s4.bits.task.channel
                     subEntry.bits.source      := io.replay_s4.bits.task.source
                     subEntry.bits.retToSrc    := io.replay_s4.bits.task.retToSrc
+                    subEntry.bits.srcID       := io.replay_s4.bits.task.srcID
                     subEntry.bits.isAliasTask := io.replay_s4.bits.task.isAliasTask
                     subEntry.bits.aliasOpt.foreach(_ := io.replay_s4.bits.task.aliasOpt.get)
+
+                    if (supportDCT) {
+                        subEntry.bits.fwdState_opt.get := io.replay_s4.bits.task.fwdState_opt.get
+                        subEntry.bits.fwdNID_opt.get   := io.replay_s4.bits.task.fwdNID_opt.get
+                        subEntry.bits.fwdTxnID_opt.get := io.replay_s4.bits.task.fwdTxnID_opt.get
+                    }
 
                     entry.bits.enqIdx.inc()
                 }
@@ -137,9 +156,17 @@ class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Par
         in.bits.channel      := subEntry.bits.channel
         in.bits.source       := subEntry.bits.source
         in.bits.retToSrc     := subEntry.bits.retToSrc
+        in.bits.srcID        := subEntry.bits.srcID
         in.bits.isAliasTask  := subEntry.bits.isAliasTask
         in.bits.isReplayTask := true.B
         in.bits.aliasOpt.foreach(_ := subEntry.bits.aliasOpt.get)
+
+        if (supportDCT) {
+            in.bits.fwdState_opt.get := subEntry.bits.fwdState_opt.get
+            in.bits.fwdNID_opt.get   := subEntry.bits.fwdNID_opt.get
+            in.bits.fwdTxnID_opt.get := subEntry.bits.fwdTxnID_opt.get
+        }
+
         when(in.fire) {
             val conflictWithInput = io.replay_s4.fire && hasMatch && matchVec(i)
 

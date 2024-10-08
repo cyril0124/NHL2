@@ -56,7 +56,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
             val willRefillDS_s2 = Output(Bool())
         }
 
-        val status = Output(new MpStatus123) // Output status signals for RequestArbiterV2
+        val status = Output(new MpStatus123) // Output status signals for RequestArbiterV2 (Stage 1, Stage 2, Stage 3)
 
         val mshrStatus         = Vec(nrMSHR, Input(new MshrStatus))
         val replayFreeCntSinkA = Input(UInt((log2Ceil(nrReplayEntrySinkA) + 1).W))
@@ -194,6 +194,10 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val mayReadDS_a_s1_dup = WireInit(false.B)
     if (!optParam.sinkaStallOnReqArb) {
+        /** 
+         * Deal with conflict in [[RequestBufferV2]].
+         * This is a strategy to optimize timing issue.
+         */
 
         /** 
          * We need to check if stage2 will read the [[DataStorage]]. 
