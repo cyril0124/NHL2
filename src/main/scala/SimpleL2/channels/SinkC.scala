@@ -153,6 +153,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      */
     io.toTempDS.write.valid     := c.fire && last && hasData && respDataToTempDS
     io.toTempDS.write.bits.data := Cat(c.bits.data, RegEnable(c.bits.data, c.fire))
+    io.toTempDS.write.bits.mask := Fill(nrBeat, 1.U(1.W))
     io.toTempDS.write.bits.idx  := OHToUInt(respMatchOH)
 
     // -----------------------------------------------------------------------------------------

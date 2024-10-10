@@ -805,9 +805,27 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     assert(!(PopCount(retryVec_s2) > 1.U), "only allow one retry task at stage2! retryVec_s2:0b%b", retryVec_s2)
 
     /** Receive [[RXDAT]] responses, including: CompData */
-    val rxdat = io.resps.rxdat
+    val rxdat           = io.resps.rxdat
+    val rxdatFirstData  = RegInit(false.B)
+    val rxdatSecondData = RegInit(false.B)
     when(rxdat.fire) {
-        when(rxdat.bits.last) {
+        val isFirstData  = rxdat.bits.dataID === "b00".U
+        val isSecondData = rxdat.bits.dataID === "b10".U
+
+        when(isFirstData) {
+            rxdatFirstData := true.B
+            assert(!rxdatFirstData)
+        }
+
+        when(isSecondData) {
+            rxdatSecondData := true.B
+            assert(!rxdatSecondData)
+        }
+
+        when(rxdatFirstData && isSecondData || rxdatSecondData && isFirstData) {
+            rxdatFirstData  := false.B
+            rxdatSecondData := false.B
+
             state.w_compdat := true.B
 
             when(rxdat.bits.chiOpcode === CompData) {
@@ -827,7 +845,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
-    when(rxrsp.fire && rxrsp.bits.last) {
+    when(rxrsp.fire) {
         rspDBID  := rxrsp.bits.dbID
         rspSrcID := rxrsp.bits.srcID
 

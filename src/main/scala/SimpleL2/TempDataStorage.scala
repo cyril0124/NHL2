@@ -18,6 +18,7 @@ class TempDataBeatWrite()(implicit p: Parameters) extends L2Bundle {
 class TempDataWrite()(implicit p: Parameters) extends L2Bundle {
     val idx  = UInt(log2Ceil(nrMSHR).W)
     val data = UInt(dataBits.W)
+    val mask = UInt(nrBeat.W)
 }
 
 class TempDataReadReq()(implicit p: Parameters) extends L2Bundle {
@@ -124,11 +125,12 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     }
 
     def genEccVec(data: UInt): Vec[UInt] = {
-        VecInit(data.asTypeOf(Vec(eccProtectBytes, UInt(64.W))).map(genEcc))
+        VecInit(data.asTypeOf(Vec(blockBytes / eccProtectBytes, UInt(eccProtectBits.W))).map(genEcc))
     }
 
     val wen_ds_ts1      = io.fromDS.write_s5.valid
     val wen_rxdat_ts1   = io.fromRXDAT.write.valid
+    val wMsk_rxdat_ts1  = io.fromRXDAT.write.bits.mask // Only RXDAT has valid mask beacuse RXDAT needs to deal with out-of-order refill data, other sources are all full mask
     val wen_sinkc_ts1   = full_ts1
     val wIdx_sinkc_ts1  = RegEnable(wIdx_sinkc_ts0, fire_ts0)
     val wData_sinkc_ts1 = RegEnable(wData_sinkc_ts0, fire_ts0)
@@ -159,10 +161,20 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     io.fromRXDAT.write.ready    := !wen_ds_ts1
     io.fromSinkC.write.ready    := !full_ts1
 
+    val groupValidMask = WireInit(0.U(group.W))
+    when(wen_rxdat_ts1) {
+        val _groupValidMask = FillInterleaved(group / nrBeat, wMsk_rxdat_ts1)
+        require(_groupValidMask.getWidth == groupValidMask.getWidth)
+
+        groupValidMask := _groupValidMask
+    }.otherwise {
+        groupValidMask := Fill(group, 1.U(1.W))
+    }
+
     tempDataSRAMs.zipWithIndex.foreach { case (sram, i) =>
-        sram.io.w.req.valid             := wen_ts1
+        sram.io.w.req.valid             := wen_ts1 && groupValidMask(i)
         sram.io.w.req.bits.setIdx       := wIdx_ts1
-        sram.io.w.req.bits.data(0).data := wData_ts1(groupBytes * 8 * (i + 1) - 1, groupBytes * 8 * i) // TODO: ECC
+        sram.io.w.req.bits.data(0).data := wData_ts1(groupBytes * 8 * (i + 1) - 1, groupBytes * 8 * i)
         sram.io.w.req.bits.waymask.foreach(_ := 1.U)
         assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "tempDataSRAM should always be ready for write")
 
@@ -175,7 +187,20 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
 
     if (enableDataECC) {
         when(wen_ts1) {
-            tempDataEccVecs(wIdx_ts1) := wEcc_ts1.asTypeOf(Vec(blockBytes / eccProtectBytes, UInt(dataEccBits.W)))
+            when(wen_rxdat_ts1) {
+                val groupValidMaskExtend = FillInterleaved(groupBytes / eccProtectBytes, groupValidMask)
+                val dataVec              = wData_ts1.asTypeOf(Vec(blockBytes / eccProtectBytes, UInt(eccProtectBits.W)))
+                val eccVec               = tempDataEccVecs(wIdx_ts1) // WireInit(tempDataEccVecs(wIdx_ts1))
+                require(dataVec.length == groupValidMaskExtend.getWidth, s"${dataVec.length} != ${groupValidMaskExtend.getWidth}")
+
+                dataVec.zip(groupValidMaskExtend.asBools).zipWithIndex.foreach { case ((data, valid), i) =>
+                    when(valid) {
+                        eccVec(i) := genEcc(data)
+                    }
+                }
+            }.otherwise {
+                tempDataEccVecs(wIdx_ts1) := wEcc_ts1.asTypeOf(Vec(blockBytes / eccProtectBytes, UInt(dataEccBits.W)))
+            }
         }
     }
     assert(!(wen_ts1 && ren_ts1 && wIdx_ts1 === rIdx_ts1), "wen_ts1 && ren_ts1 && wIdx_ts1 === rIdx_ts1")

@@ -1786,7 +1786,7 @@ local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
         }
         
         env.posedge()
-            env.expect_happen_until(10, function() return tl_d:fire() end)
+            env.expect_happen_until(15, function() return tl_d:fire() end)
             tl_d:dump()
             tl_d.bits.source:expect(source); expect.equal(tl_d.bits.data:get()[1], 0xdead)
         env.negedge()
@@ -7014,6 +7014,7 @@ local test_snpHitReq_block_mshrRefill = env.register_test_case "test_snpHitReq_b
                 chi_rxdat.bits.dataID:set(2) -- last data beat
             env.negedge()
                 chi_rxdat.valid:set(0)
+            env.negedge()
                 chi_rxsnp.ready:expect(1)
                 chi_rxsnp.bits.txnID:set(4)
                 chi_rxsnp.bits.addr:set(bit.rshift(addr, 3), true)
@@ -7212,6 +7213,106 @@ local test_homeNID_dbID = env.register_test_case "test_homeNID_dbID" {
     end
 }
 
+local test_ooo_rxdat_refill = env.register_test_case "test_ooo_rxdat_refill" {
+    function ()
+        -- out-of-order rxdat data refill
+
+        env.dut_reset()
+        resetFinish:posedge()
+
+        tl_b.ready:set(1); tl_d.ready:set(1); chi_txrsp.ready:set(1); chi_txreq.ready:set(1); chi_txdat.ready:set(1)
+
+        env.negedge()
+            write_dir(0x01, ("0b0001"):number(), 0x01, MixedState.I)
+            write_dir(0x01, ("0b0010"):number(), 0x02, MixedState.I)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.addr:is(to_address(0x01, 0x01)) and chi_txreq.bits.txnID:is(0) end)
+                chi_txreq:dump()
+                env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.addr:is(to_address(0x01, 0x02)) and chi_txreq.bits.txnID:is(1) end)
+                chi_txreq:dump()
+            end
+        }
+        env.negedge()
+            tl_a:acquire_block(to_address(0x01, 0x01), TLParam.NtoB, 0)
+        env.negedge()
+            tl_a:acquire_block(to_address(0x01, 0x02), TLParam.NtoB, 1)
+        
+        env.negedge(20)
+        
+        local first = 0x00
+        local last = 0x02
+        local rxdat_common = function(data_id, data_str, txn_id, db_id)
+            printf("send CompData data_id:%x data_str:%s txn_id:%d db_id:%d\n", data_id, data_str, txn_id, db_id)
+            env.negedge()
+                chi_rxdat.valid:set(1)
+                chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+                chi_rxdat.bits.data:set_str(data_str)
+                chi_rxdat.bits.dataID:set(data_id)
+                chi_rxdat.bits.txnID:set(txn_id)
+                chi_rxdat.bits.dbID:set(db_id)
+                chi_rxdat.bits.resp:set(CHIResp.UC)
+            env.negedge()
+                chi_rxdat.valid:set(0)
+        end
+
+        local resps = {
+            function() rxdat_common(first, "0xdead", 0, 0) end,
+            function() rxdat_common(last, "0xbeef", 0, 0) end,
+            function() rxdat_common(first, "0x1dead", 1, 1) end,
+            function() rxdat_common(last, "0x1beef", 1, 1) end,
+        }
+
+        math.randomseed(os.time())
+        utils.shuffle(resps)
+
+        verilua "appendTasks" {
+            function ()
+                local got_first = false
+                for i = 1, 4 do
+                    env.negedge()
+                    env.expect_happen_until(20, function () return tl_d:fire() end)
+                    tl_d:dump()
+
+                    if tl_d.bits.source:is(0) then
+                        if not got_first then
+                            tl_d.bits.data:expect_hex_str("0xdead")
+                            got_first = true
+                        else
+                            tl_d.bits.data:expect_hex_str("0xbeef")
+                            got_first = false
+                        end
+                    elseif tl_d.bits.source:is(1) then
+                        if not got_first then
+                            tl_d.bits.data:expect_hex_str("0x1dead")
+                            got_first = true
+                        else
+                            tl_d.bits.data:expect_hex_str("0x1beef")
+                            got_first = false
+                        end
+                    end
+                end
+
+                env.negedge()
+                    tl_e:grantack(0)
+                env.negedge()
+                    tl_e:grantack(1)
+            end,
+        }
+
+        for _, resp in ipairs(resps) do
+            resp()
+        end
+
+        env.negedge(100)
+        mshrs[0].io_status_valid:expect(0)
+        mshrs[1].io_status_valid:expect(0)
+        write_dir(0x01, ("0b0001"):number(), 0x01, MixedState.I)
+        write_dir(0x01, ("0b0010"):number(), 0x02, MixedState.I)
+    end
+}
+
 -- TODO: SnpOnce / Hazard
 -- TODO: Get not preferCache
  
@@ -7292,6 +7393,7 @@ verilua "mainTask" { function ()
     test_snpHitReq_block_mshrRefill()
     test_chi_retry()
     test_homeNID_dbID()
+    test_ooo_rxdat_refill()
     end
 
    

@@ -143,7 +143,7 @@ generate_test_targets {
         files = {"build/SimpleL2CacheWrapper.v"}, top = "SimpleL2CacheWrapper", lua_main = "src/main/lua/SimpleL2/SimpleL2CacheWrapper.lua"
     },
     {
-        files = {"build/SimpleL2CacheWrapperDecoupled/*.sv"}, top = "SimpleL2CacheWrapperDecoupled", lua_main = "src/main/lua/SimpleL2/SimpleL2CacheWrapperDecoupled.lua"
+        files = {"build/SimpleL2CacheWrapperDecoupled/*.sv"}, top = "SimpleL2CacheWrapperDecoupled", lua_main = "src/main/lua/SimpleL2/SimpleL2CacheWrapperDecoupled.lua", sim = "vcs"
     },
 }
 

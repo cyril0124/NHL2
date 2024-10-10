@@ -194,6 +194,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     val mayReadDS_a_s1_dup = WireInit(false.B)
     if (!optParam.sinkaStallOnReqArb) {
+
         /** 
          * Deal with conflict in [[RequestBufferV2]].
          * This is a strategy to optimize timing issue.

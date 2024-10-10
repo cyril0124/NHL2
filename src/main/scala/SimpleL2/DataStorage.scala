@@ -234,6 +234,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     rdData_s5                      := rdDataVec_s5.asUInt
     io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
     io.toTempDS.write_s5.bits.data := rdData_s5 // rdData without ECC bits, ECC check is located in TempDataStorage, so we don't need to add ECC bits here
+    io.toTempDS.write_s5.bits.mask := Fill(nrBeat, 1.U(1.W))
     io.toTempDS.write_s5.bits.idx  := rdMshrIdx_s5
     if (enableDataECC) {
         io.toTempDS.eccVec_s5 := VecInit(
