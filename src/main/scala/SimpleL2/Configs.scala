@@ -19,6 +19,11 @@ case object L2ParamKey extends Field[L2Param](L2Param())
 
 case object EdgeInKey extends Field[TLEdgeIn]
 
+case class L1Param(
+    aliasBitsOpt: Option[Int] = None,
+    vaddrBitsOpt: Option[Int] = None
+)
+
 case class L2OptimizationParam(
     reqBufOutLatch: Boolean = true,
     rxsnpHasLatch: Boolean = true,   // Whether to latch the request for one cycle delay in the RXSNP module
@@ -40,7 +45,7 @@ case class L2Param(
     dataBits: Int = 64 * 8, // 64 Byte
     addressBits: Int = 44,
     chiBundleParams: Option[CHIBundleParameters] = None, // This will overwrite the default chi bundle parameters
-    nrClients: Int = 2,                                  // Number of L1 DCache
+    clientCaches: Seq[L1Param] = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
     nrMSHR: Int = 16,
     nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntrySinkA: Int = 4,
@@ -53,6 +58,8 @@ case class L2Param(
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
+    vaddrBitsOpt: Option[Int] = None,
+    prefetchParams: Seq[coupledL2.prefetch.PrefetchParameters] = Nil,
     replacementPolicy: String = "plru", // Option: "random", "plru", "lru"
     dataEccCode: String = "secded",     // Option: "none", "identity", "parity", "sec", "secded"
     useDiplomacy: Boolean = false       // If use diplomacy, EdgeInKey should be passed in
@@ -62,7 +69,7 @@ case class L2Param(
     require(dataBits == 64 * 8)
     require(nrSlice >= 1)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
-    require(nrClients >= 1)
+    require(clientCaches.length >= 1)
     require(dataEccCode == "none" || dataEccCode == "identity" || dataEccCode == "parity" || dataEccCode == "sec" || dataEccCode == "secded")
 }
 
@@ -120,6 +127,18 @@ trait HasL2Param {
 
     val aliasBitsOpt = Some(2)
 
+    /**
+     * Prefetch related parameters
+     */
+    val vaddrBitsOpt   = l2param.vaddrBitsOpt
+    val prefetchParams = l2param.prefetchParams
+    val enablePrefetch = if (prefetchParams.nonEmpty) true else false
+    def hasBOP = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.BOPParameters])
+    def hasReceiver = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.PrefetchReceiverParams])
+    def hasTPPrefetcher = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.TPParameters])
+    def hasPrefetchBit = prefetchParams.exists(_.hasPrefetchBit)
+    def hasPrefetchSrc = prefetchParams.exists(_.hasPrefetchSrc)
+
     lazy val edgeIn = p(EdgeInKey)
 
     // @formatter:off
@@ -130,7 +149,12 @@ trait HasL2Param {
         sinkBits = 7,
         sizeBits = 3,
         echoFields = Nil,
-        requestFields = Seq(AliasField(2)),
+        requestFields = Seq(AliasField(2)) ++ { 
+            if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
+                Seq(coupledL2.VaddrField(l2param.clientCaches.map(_.vaddrBitsOpt.get).max), huancun.PrefetchField())
+            else 
+                Nil
+        },
         responseFields = Nil,
         hasBCE = true
     )
@@ -142,11 +166,8 @@ trait HasL2Param {
         _tlBundleParams
     }
 
-    lazy val nrClients = if (l2param.useDiplomacy) {
-        edgeIn.client.clients.count(_.supports.probe)
-    } else {
-        l2param.nrClients
-    }
+    val clientCaches = l2param.clientCaches
+    val nrClients    = l2param.clientCaches.length
 
     val chiBundleParams = if (l2param.chiBundleParams.isDefined) {
         l2param.chiBundleParams.get
@@ -161,6 +182,17 @@ trait HasL2Param {
 
     def widthCheck(in: UInt, width: Int) = {
         assert(in.getWidth == width)
+    }
+
+    def getClientBitOH(sourceId: UInt, edgeIn: TLEdgeIn): UInt = {
+        Cat(
+            edgeIn.client.clients
+                .filter(_.supports.probe)
+                .map(c => {
+                    c.sourceId.contains(sourceId).asInstanceOf[Bool]
+                })
+                .reverse
+        )
     }
 
     def getClientBitOH(sourceId: UInt): UInt = {
@@ -276,5 +308,9 @@ trait HasL2Param {
 
     def restoreTxnID(txnID: UInt): UInt = {
         if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits))
+    }
+
+    def bank_eq(set: UInt, bankId: Int, bankBits: Int): Bool = {
+        if (bankBits == 0) true.B else set(bankBits - 1, 0) === bankId.U
     }
 }

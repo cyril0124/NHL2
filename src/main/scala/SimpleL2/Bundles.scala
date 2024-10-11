@@ -17,11 +17,12 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     val set         = UInt(setBits.W)
     val tag         = UInt(tagBits.W)
     val source      = UInt(math.max(tlBundleParams.sourceBits, chiBundleParams.txnIdBits).W) // CHI RXRSP TxnID ==> 12.W, if isCHIOpcode is true, source is equals to the resp field in CHI
-    val isPrefetch  = Bool()
     val corrupt     = Bool()
     val sink        = UInt(math.max(tlBundleParams.sinkBits, mshrBits).W)                    // also the alias name for mshrId
     val wayOH       = UInt(ways.W)
     val retToSrc    = Bool()
+    val vaddrOpt    = vaddrBitsOpt.map(width => UInt(width.W))
+    val needHintOpt = if (enablePrefetch) Some(Bool()) else None
     val aliasOpt    = aliasBitsOpt.map(width => UInt(width.W))
     val isAliasTask = Bool()
     val isMshrTask  = Bool()
@@ -62,6 +63,15 @@ class TaskBundle(implicit p: Parameters) extends L2Bundle {
     def isTXREQ = channel === L2Channel.TXREQ && !isMshrTask
     def isTXRSP = channel === L2Channel.TXRSP && !isMshrTask
     def isTXDAT = channel === L2Channel.TXDAT && !isMshrTask
+}
+
+class MergeTaskBundle(implicit p: Parameters) extends L2Bundle {
+    val mshrId = UInt(mshrBits.W)
+    val task   = new TaskBundle
+}
+
+class PrefetchRespWithSource(sourceBits: Int)(implicit p: Parameters) extends coupledL2.prefetch.PrefetchResp {
+    val source = UInt(sourceBits.W)
 }
 
 class CreditIO[T <: Data](gen: T) extends Bundle {

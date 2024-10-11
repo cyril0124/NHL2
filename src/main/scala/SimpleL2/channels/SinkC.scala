@@ -165,15 +165,14 @@ class SinkC()(implicit p: Parameters) extends L2Module {
      * If the incoming transaction is a Release/ReleaseData, we need to pack the transaction and send it to [[RequestArbiter]].
      * Otherwise, we can bypass the [[RequestArbiter]] and send the transaction(response) directly to [[MSHR]].
      */
-    io.task.valid           := c.valid && (isReleaseData && last || isRelease && !hasData)
-    io.task.bits            := DontCare
-    io.task.bits.channel    := L2Channel.ChannelC
-    io.task.bits.opcode     := c.bits.opcode
-    io.task.bits.param      := c.bits.param
-    io.task.bits.source     := c.bits.source
-    io.task.bits.isPrefetch := false.B
-    io.task.bits.set        := set
-    io.task.bits.tag        := tag
+    io.task.valid        := c.valid && (isReleaseData && last || isRelease && !hasData)
+    io.task.bits         := DontCare
+    io.task.bits.channel := L2Channel.ChannelC
+    io.task.bits.opcode  := c.bits.opcode
+    io.task.bits.param   := c.bits.param
+    io.task.bits.source  := c.bits.source
+    io.task.bits.set     := set
+    io.task.bits.tag     := tag
 
     /**
      * ReleaseData is allowed to write data into [[DataStorage]] directly since L2Cache is inclusive.

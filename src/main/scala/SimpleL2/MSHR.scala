@@ -26,6 +26,7 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val s_sprobe     = Bool() // probe upwards, cause by Snoop
     val s_grant      = Bool() // response grant upwards
     val s_accessack  = Bool()
+    val s_hintack    = Bool() // send prefetch response
     val s_cbwrdata   = Bool()
     val s_snpresp    = Bool() // resposne SnpResp downwards
     val s_compdat    = Bool() // send CompData for DCT
@@ -73,6 +74,10 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val dirHit    = Bool()
     val lockWay   = Bool()
     val state     = UInt(MixedState.width.W)
+
+    // for prefetch
+    val opcode = UInt(5.W)
+    val param  = UInt(math.max(3, Resp.width).W)
 
     val w_replResp   = Bool()
     val w_rprobeack  = Bool()
@@ -248,6 +253,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         nestedRelease,
         Cat(req.tag, req.set, 0.U(6.W))
     )
+    assert(!(valid && reqIsPrefetch && dirResp.hit), "MSHR can not receive prefetch hit req")
 
     val promoteT_normal = dirResp.hit && metaNoClients && meta.isTip
     val promoteT_l3     = !dirResp.hit && gotT
@@ -472,16 +478,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val needTempDsData      = needRefillData || needProbeAckData
     val mpGrant             = !state.s_grant && !state.w_grantack
     val mpAccessAck         = !state.s_accessack
+    val mpHintAck           = !state.s_hintack                                           // send HintAck for prefetch
 
     // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
     mpTask_refill.valid := valid &&
-        (mpGrant || mpAccessAck) &&
+        (mpGrant || mpAccessAck || mpHintAck) &&
         (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
         (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
         (state.s_makeunique && state.w_comp && state.s_compack) &&
         (state.s_aprobe && state.w_aprobeack) &&  // need to wait for aProbe to finish (cause by Acquire)
         (state.s_snpresp && state.w_snpresp_sent) // need to wait for snpresp to finish (cause by realloc)
-    mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData)) // TODO:
+    mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData, (req.opcode === Hint) -> HintAck));
     mpTask_refill.bits.param := Mux(
         reqIsGet || reqIsPrefetch,
         0.U,       // Get -> AccessAckData
@@ -533,7 +540,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 )
             )
         ),
-        fromPrefetch = reqIsPrefetch
+        fromPrefetchOpt = Some(reqIsPrefetch || dirResp.hit && meta.fromPrefetchOpt.getOrElse(false.B))
     )
     assert(
         !(io.tasks.mpTask.fire && mpTask_refill.valid && mpTask_refill.bits.opcode === AccessAckData && mpTask_refill.bits.updateDir && !dirResp.hit && mpTask_refill.bits.newMetaEntry.clientsOH.orR),
@@ -648,7 +655,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         state = snprespFinalState,
         alias = req.aliasOpt.getOrElse(0.U),
         clientsOH = Mux(isSnpToB || isSnpOnceX, meta.clientsOH, Fill(nrClients, false.B)),
-        fromPrefetch = false.B
+        fromPrefetchOpt = Some(!isSnpToN && meta.fromPrefetchOpt.getOrElse(false.B))
     )
     mpTask_snpresp.bits.fwdState_opt.foreach(_ := CHICohState.setPassDirty(fwdCacheState, fwdPassDirty))
     assert(!(valid && snprespPassDirty && snprespFinalDirty))
@@ -676,6 +683,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         when(mpTask_refill.valid) {
             state.s_grant     := true.B
             state.s_accessack := true.B
+            state.s_hintack   := true.B
         }
 
         when(mpTask_wbdata.valid) {
@@ -1337,7 +1345,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.wayOH     := dirResp.wayOH
     io.status.dirHit    := dirResp.hit               // Used by Directory to occupy a particular way.
     io.status.state     := meta.state
-    io.status.lockWay := !dirResp.hit && meta.isInvalid && !dirResp.needsRepl || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent) // Lock the CacheLine way that will be used in later Evict or WriteBackFull
+    io.status.opcode    := req.opcode                // for prefetch
+    io.status.param     := req.param                 // for prefetch
+    io.status.lockWay := !dirResp.hit && meta.isInvalid && !dirResp.needsRepl || !dirResp.hit && state.w_replResp && (!state.s_grant || !state.w_grant_sent || !state.w_grantack || !state.s_accessack || !state.w_accessack_sent || !state.s_hintack) // Lock the CacheLine way that will be used in later Evict or WriteBackFull
 
     io.status.w_replResp   := state.w_replResp
     io.status.w_rprobeack  := state.w_rprobeack
@@ -1364,7 +1374,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
-    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent
+    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent || !state.s_hintack
     val gotCompResp      = state.w_comp && state.w_compdat_first
     val isAcquireHit     = dirResp.hit && req.isChannelA
     io.status.reqAllowSnoop := {

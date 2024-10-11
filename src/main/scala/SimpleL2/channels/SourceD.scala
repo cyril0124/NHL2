@@ -33,6 +33,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val nonDataRespCntSinkC = Output(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))   // for RequestArbiter(SinkC task)
         val nonDataRespCntMp    = Output(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))   // for MainPipe
         val bufferStatus        = Output(new BufferStatusSourceD)
+        val prefetchRespOpt     = if (enablePrefetch) Some(DecoupledIO(new PrefetchRespWithSource(tlBundleParams.sourceBits))) else None
     })
 
     val nonDataRespQueue = Module(
@@ -71,7 +72,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     io.data_s2.ready   := skidBuffer.io.enq.ready && needData(task.opcode) && grantMapReady
     io.data_s6s7.ready := skidBuffer.io.enq.ready && needData(task.opcode) && grantMapReady && !io.data_s2.valid
 
-    nonDataRespQueue.io.enq.valid          := taskFire && !needData(task.opcode)
+    nonDataRespQueue.io.enq.valid          := taskFire && !needData(task.opcode) && task.opcode =/= HintAck
     nonDataRespQueue.io.enq.bits.task      := task
     nonDataRespQueue.io.enq.bits.task.sink := Mux(task.isMshrTask, task.sink, sinkId)
 
@@ -159,6 +160,41 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     skidBuffer.io.deq.ready       := !choseNonData && io.d.ready && last
 
     LeakChecker(io.d.valid, io.d.fire, Some("SourceD_io_d_valid"), maxCount = deadlockThreshold)
+
+    /**
+     * Send response to [[Prefetcher]].
+     * Prefetch response does not need to be sent via SourceD.
+     */
+    io.prefetchRespOpt.foreach { resp =>
+        val pftRespEntry = new Bundle() {
+            val tag      = UInt(tagBits.W)
+            val set      = UInt(setBits.W)
+            val pfSource = UInt(utility.MemReqSource.reqSourceBits.W)
+            val source   = UInt(tlBundleParams.sourceBits.W) // sourceId is used for identifying the request client.
+            val vaddr    = vaddrBitsOpt.map(_ => UInt(vaddrBitsOpt.get.W))
+        }
+
+        // TODO: this may not need 10 entries, but this does not take much space
+        val pftQueueLen  = 10
+        val pftRespQueue = Module(new Queue(pftRespEntry, entries = pftQueueLen, flow = true))
+
+        pftRespQueue.io.enq.valid         := taskFire && task.opcode === HintAck // && io.d_task.bits.task.fromL2pft.getOrElse(false.B)
+        pftRespQueue.io.enq.bits.tag      := task.tag
+        pftRespQueue.io.enq.bits.set      := task.set
+        pftRespQueue.io.enq.bits.pfSource := DontCare                            // TODO: io.d_task.bits.task.reqSource
+        pftRespQueue.io.enq.bits.source   := task.source
+        pftRespQueue.io.enq.bits.vaddr.foreach(_ := task.vaddrOpt.getOrElse(0.U))
+
+        resp.valid         := pftRespQueue.io.deq.valid
+        resp.bits.tag      := pftRespQueue.io.deq.bits.tag
+        resp.bits.set      := pftRespQueue.io.deq.bits.set
+        resp.bits.pfSource := pftRespQueue.io.deq.bits.pfSource
+        resp.bits.source   := pftRespQueue.io.deq.bits.source
+        resp.bits.vaddr.foreach(_ := pftRespQueue.io.deq.bits.vaddr.getOrElse(0.U))
+        pftRespQueue.io.deq.ready := resp.ready
+
+        assert(pftRespQueue.io.enq.ready, "pftRespQueue should never be full, no back pressure logic")
+    }
 
     dontTouch(io)
 }

@@ -72,10 +72,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val txdat_s6s7   = DecoupledIO(new CHIBundleDAT(chiBundleParams))
 
         /** Other status signals */
-        val status         = Output(new MpStatus4567) // to SoruceB + ReqArb
-        val retryTasks     = new MpMshrRetryTasks
-        val nonDataRespCnt = Input(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
-        val txrspCnt       = Input(UInt(log2Ceil(nrTXRSPEntry + 1).W))
+        val status           = Output(new MpStatus4567) // to SoruceB + ReqArb
+        val retryTasks       = new MpMshrRetryTasks
+        val nonDataRespCnt   = Input(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
+        val txrspCnt         = Input(UInt(log2Ceil(nrTXRSPEntry + 1).W))
+        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new coupledL2.prefetch.PrefetchTrain())) else None
     })
 
     io <> DontCare
@@ -92,7 +93,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     valid_s2 := io.mpReq_s2.valid
     task_s2  := io.mpReq_s2.bits
 
-    val isMshrSourceD_resp_s2 = (task_s2.opcode === Grant || task_s2.opcode === AccessAck || task_s2.opcode === ReleaseAck) && !task_s2.readTempDs
+    val isMshrSourceD_resp_s2 = (task_s2.opcode === Grant || task_s2.opcode === AccessAck || task_s2.opcode === ReleaseAck || task_s2.opcode === HintAck) && !task_s2.readTempDs
     val isMshrSourceD_data_s2 = (task_s2.opcode === GrantData || task_s2.opcode === AccessAckData) && task_s2.readTempDs
     val isMshrSourceD_s2      = !task_s2.isCHIOpcode && task_s2.isMshrTask && !task_s2.isReplTask && (isMshrSourceD_resp_s2 || isMshrSourceD_data_s2)
     val isSourceD_s2          = !task_s2.isCHIOpcode && !task_s2.isMshrTask && task_s2.isChannelC && (task_s2.opcode === Release || task_s2.opcode === ReleaseData)
@@ -160,6 +161,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         retryTasks_s2.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
         retryTasks_s2.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
         retryTasks_s2.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
+
+        assert(
+            !(!task_s2.isCHIOpcode && task_s2.opcode === HintAck && retryTasks_s2.stage2.valid && retryTasks_s2.stage2.bits.isRetry_s2),
+            "HintAck should not trigger retryTasks_s2"
+        )
     } else {
         io.retryTasks.mshrId_s2                := task_s2.mshrId
         io.retryTasks.stage2.valid             := (isMshrSourceD_s2 || isMshrTXDAT_s2 || dropMshrTask_s2) && valid_s2
@@ -169,6 +175,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         io.retryTasks.stage2.bits.cbwrdata_s2  := task_s2.isCHIOpcode && (task_s2.opcode === CopyBackWrData) // TODO: remove this since CopyBackWrData will be handled in stage 6 or stage 7
         io.retryTasks.stage2.bits.snpresp_s2   := task_s2.isCHIOpcode && (task_s2.opcode === SnpRespData)
         io.retryTasks.stage2.bits.compdat_opt_s2.foreach(_ := task_s2.isCHIOpcode && (task_s2.opcode === CompData))
+
+        assert(
+            !(!task_s2.isCHIOpcode && task_s2.opcode === HintAck && io.retryTasks.stage2.valid && io.retryTasks.stage2.bits.isRetry_s2),
+            "HintAck should not trigger io.retryTasks"
+        )
     }
 
     /**
@@ -194,7 +205,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         io.sourceD_s2.valid := sourceD_s2e.valid && valid_s2e
         io.sourceD_s2.bits  := sourceD_s2e.bits
         when(isSourceD_s2e) {
-            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 should not be blocked")
+            assert(!(io.sourceD_s2.valid && !io.sourceD_s2.ready), "SourceD_s2 at stage2e should not be blocked")
         }
     }
 
@@ -254,7 +265,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val mpTask_snpresp_s3 = valid_s3 && task_s3.isMshrTask && task_s3.isCHIOpcode && (task_s3.opcode === SnpResp || task_s3.opcode === SnpRespData)
 
     val needReadOnMiss_a_s3   = !hit_s3 && (isGet_s3 || isAcquire_s3 || isPrefetch_s3)
-    val needReadOnHit_a_s3    = hit_s3 && (!isPrefetch_s3 && reqNeedT_s3 && meta_s3.isBranch) // send MakeUnique
+    val needReadOnHit_a_s3    = hit_s3 && (!isPrefetch_s3 && reqNeedT_s3 && meta_s3.isBranch) // send MakeUnique. Notice: Prefetch and hit while permission is not enough will not lead to permission upgrade.
     val needReadDownward_a_s3 = task_s3.isChannelA && (needReadOnHit_a_s3 || needReadOnMiss_a_s3)
     val needProbeOnHit_a_s3 = if (nrClients > 1) {
         isGet_s3 && hit_s3 && meta_s3.isTrunk ||
@@ -303,6 +314,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             mshrAllocStates.s_grant      := false.B
             mshrAllocStates.w_grant_sent := false.B
             mshrAllocStates.w_grantack   := false.B
+        }
+
+        when(isPrefetch_s3) {
+            mshrAllocStates.s_hintack := false.B
         }
 
         when(needReadDownward_a_s3) {
@@ -487,8 +502,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val newMeta_mshr_s3 = DirectoryMetaEntry(task_s3.tag, task_s3.newMetaEntry)
 
     val newMeta_a_s3 = DirectoryMetaEntry(
-        fromPrefetch = false.B,                                                                                                 // TODO:
-        state = Mux(reqNeedT_s3 || sinkRespPromoteT_a_s3, Mux(meta_s3.isDirty, MixedState.TTD, MixedState.TTC), meta_s3.state), // TODO:
+        state = Mux(reqNeedT_s3 || sinkRespPromoteT_a_s3, Mux(meta_s3.isDirty, MixedState.TTD, MixedState.TTC), meta_s3.state),
         tag = task_s3.tag,
         aliasOpt = Some(task_s3.aliasOpt.getOrElse(0.U)),
         clientsOH = reqClientOH_s3 | meta_s3.clientsOH
@@ -497,7 +511,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val snprespPassDirty_s3  = !isSnpOnceX_s3 && meta_s3.isDirty && hit_s3 || task_s3.snpHitWriteBack && task_s3.snpGotDirty
     val snprespFinalState_s3 = Mux(isSnpToN_s3, MixedState.I, Mux(task_s3.opcode === SnpCleanShared, meta_s3.state, MixedState.BC))
     val newMeta_b_s3 = DirectoryMetaEntry(
-        fromPrefetch = false.B, // TODO:
         state = snprespFinalState_s3,
         tag = meta_s3.tag,
         aliasOpt = Some(meta_s3.aliasOpt.getOrElse(0.U)),
@@ -505,7 +518,6 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     )
 
     val newMeta_c_s3 = DirectoryMetaEntry(
-        fromPrefetch = false.B, // TODO:
         state = MuxCase(
             MixedState.I,
             Seq(
@@ -872,6 +884,19 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val addr_debug_s6 = Cat(task_s6.tag, task_s6.set, 0.U(6.W))
     val addr_debug_s7 = Cat(task_s7.tag, task_s7.set, 0.U(6.W))
     MultiDontTouch(addr_debug_s2, addr_debug_s3, addr_debug_s4, addr_debug_s5, addr_debug_s6, addr_debug_s7)
+
+    io.prefetchTrainOpt.foreach { train =>
+        train.valid           := valid_s3 && ((isAcquire_s3 || isGet_s3) && task_s3.needHintOpt.getOrElse(false.B) && (!dirResp_s3.hit || meta_s3.fromPrefetchOpt.getOrElse(false.B)))
+        train.bits.hit        := dirResp_s3.hit
+        train.bits.tag        := task_s3.tag
+        train.bits.set        := task_s3.set
+        train.bits.needT      := reqNeedT_s3 // TODO: mergeA
+        train.bits.source     := task_s3.source
+        train.bits.prefetched := meta_s3.fromPrefetchOpt.getOrElse(false.B)
+        train.bits.pfsource   := DontCare    // TODO: only for TopDown?
+        train.bits.reqsource  := DontCare    // TODO: only for TopDown?
+        train.bits.vaddr.foreach(_ := task_s3.vaddrOpt.getOrElse(0.U))
+    }
 
     dontTouch(io)
 }

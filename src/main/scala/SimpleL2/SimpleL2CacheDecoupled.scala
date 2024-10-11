@@ -2,7 +2,6 @@ package SimpleL2
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.{SourceInfo, SourceLine}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -20,65 +19,7 @@ import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
 
-abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HadMixedStateOps
-abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
-
-object _assert {
-    def apply(cond: Bool, message: String, data: Bits*)(implicit s: SourceInfo) = {
-        val regData = data.map(RegNext(_))
-        val debugInfo = s match {
-            case SourceLine(filename, line, col) => s"($filename:$line:$col)"
-            case _                               => ""
-        }
-        assert(RegNext(cond), message + " at " + debugInfo, regData: _*)
-    }
-
-    def apply(cond: Bool)(implicit s: SourceInfo) = {
-        val debugInfo = s match {
-            case SourceLine(filename, line, col) => s"($filename:$line:$col)"
-            case _                               => ""
-        }
-        assert(RegNext(cond), "at " + debugInfo)
-    }
-}
-
-class CHIBundleDownstream_1(params: CHIBundleParameters, aggregateIO: Boolean = false) extends Bundle {
-    val tx_req: CHIChannelIO[CHIBundleREQ] = CHIChannelIO(new CHIBundleREQ(params), aggregateIO)
-    val tx_dat: CHIChannelIO[CHIBundleDAT] = CHIChannelIO(new CHIBundleDAT(params), aggregateIO)
-    val tx_rsp: CHIChannelIO[CHIBundleRSP] = CHIChannelIO(new CHIBundleRSP(params), aggregateIO)
-
-    val rx_rsp: CHIChannelIO[CHIBundleRSP] = Flipped(CHIChannelIO(new CHIBundleRSP(params), aggregateIO))
-    val rx_dat: CHIChannelIO[CHIBundleDAT] = Flipped(CHIChannelIO(new CHIBundleDAT(params), aggregateIO))
-    val rx_snp: CHIChannelIO[CHIBundleSNP] = Flipped(CHIChannelIO(new CHIBundleSNP(params), aggregateIO))
-}
-
-// Only for simulation
-class SimpleEndpointCHI()(implicit p: Parameters) extends L2Module {
-    val io = IO(new Bundle {
-        val chi = Flipped(new CHIBundleDownstream_1(chiBundleParams))
-
-        val chi_tx_txsactive     = Input(Bool())
-        val chi_tx_rxsactive     = Output(Bool())
-        val chi_tx_linkactivereq = Input(Bool())
-        val chi_tx_linkactiveack = Output(Bool())
-        val chi_rx_linkactivereq = Output(Bool())
-        val chi_rx_linkactiveack = Input(Bool())
-    })
-
-    val fakeCHIBundle = WireInit(0.U.asTypeOf(new CHIBundleDownstream_1(chiBundleParams)))
-    io.chi <> fakeCHIBundle
-
-    io.elements.foreach(x => x._2 := DontCare)
-
-    // Keep clock and reset
-    val (_, cnt) = Counter(true.B, 10)
-    dontTouch(cnt)
-
-    dontTouch(io)
-    io.elements.foreach(x => dontTouch(x._2))
-}
-
-class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasL2Param {
+class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasL2Param {
     val xfer   = TransferSizes(blockBytes, blockBytes)
     val atom   = TransferSizes(1, beatBytes)
     val access = TransferSizes(1, blockBytes)
@@ -127,7 +68,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     println(s"[${this.getClass().toString()}] enablePrefetch:$enablePrefetch")
 
     lazy val module = new Impl
-    class Impl extends LazyModuleImp(this) with HasL2Param {
+    class Impl extends LazyModuleImp(this) {
 
         val l2ToTlbParams: Parameters = p.alterPartial {
             case EdgeInKey            => sinkNodes.head.in.head._2
@@ -136,11 +77,8 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         }
 
         val io = IO(new Bundle {
-            // val chi         = CHIBundleDownstream(chiBundleParams)
-            // val chiLinkCtrl = new CHILinkCtrlIO()
-
             // compatible with kmh
-            val chi                  = new CHIBundleDownstream_1(chiBundleParams)
+            val chi                  = new CHIBundleDecoupled(chiBundleParams)
             val chi_tx_txsactive     = Output(Bool())
             val chi_tx_rxsactive     = Input(Bool())
             val chi_tx_linkactivereq = Output(Bool())
@@ -189,9 +127,6 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         sinkNodes.zipWithIndex.foreach { case (node, i) =>
             val edgeIn   = node.in.head._2
             val bundleIn = node.in.head._1
-            // edgeIn.client.clients.foreach { c =>
-            //     println(s"[ALL] client_name:${c.name} sourceId_start:${c.sourceId.start} sourceId_end:${c.sourceId.end}")
-            // }
             edgeIn.client.clients.filter(_.supports.probe).foreach { c =>
                 println(s"[node_$i][TL-C ] client_name:${c.name} sourceId_start:${c.sourceId.start} sourceId_end:${c.sourceId.end}")
             }
@@ -200,7 +135,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
             }
         }
 
-        val linkMonitor = Module(new LinkMonitor)
+        val linkMonitor = Module(new LinkMonitorDecoupled())
         val slices = (0 until nrSlice).map { i =>
             val edgeIn = sinkNodes(i).in.head._2
 
@@ -311,6 +246,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
             pCrdRetryInfoVec <> slices(i).io.pCrdRetryInfoVec
         }
 
+        // val rxrspSliceID = getSliceID(rxrsp.bits.txnID)
         slices.zipWithIndex.foreach { case (slice, i) =>
             slice.io.chi.rxrsp.valid      := rxrspOut.valid && rxrspSliceID === i.U
             slice.io.chi.rxrsp.bits       := rxrspOut.bits
@@ -338,12 +274,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         linkMonitor.io.nodeID       := io.nodeID
 
         // compatible with kmh
-        io.chi.tx_req           <> linkMonitor.io.out.chi.txreq
-        io.chi.tx_dat           <> linkMonitor.io.out.chi.txdat
-        io.chi.tx_rsp           <> linkMonitor.io.out.chi.txrsp
-        io.chi.rx_rsp           <> linkMonitor.io.out.chi.rxrsp
-        io.chi.rx_snp           <> linkMonitor.io.out.chi.rxsnp
-        io.chi.rx_dat           <> linkMonitor.io.out.chi.rxdat
+        io.chi                  <> linkMonitor.io.out.chi
         io.chi_tx_txsactive     <> linkMonitor.io.out.chiLinkCtrl.txsactive
         io.chi_tx_rxsactive     <> linkMonitor.io.out.chiLinkCtrl.rxsactive
         io.chi_tx_linkactivereq <> linkMonitor.io.out.chiLinkCtrl.txactivereq
@@ -354,19 +285,14 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
     }
 }
 
-class SimpleL2CacheWrapper(idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: Boolean = true)(implicit p: Parameters) extends LazyModule {
+class SimpleL2CacheWrapperDecoupled(idRangeMax: Int = 16, nodeID: Int = 0)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
-    val blockBytes     = cacheParams.blockBytes
     val nrCore         = cacheParams.clientCaches.length
     val nrSlice        = cacheParams.nrSlice
     val ways           = cacheParams.ways
     val sets           = cacheParams.sets
     val enablePrefetch = cacheParams.prefetchParams.nonEmpty
-
-    val capacityInBytes  = nrSlice * ways * sets * blockBytes
-    val capacityInKBytes = capacityInBytes / 1024
-    println(s"[${this.getClass}] capacity: ${capacityInBytes} B / ${capacityInKBytes} KB")
 
     def createDCacheNode(name: String, sources: Int) = {
         val masterNode = TLClientNode(
@@ -419,7 +345,7 @@ class SimpleL2CacheWrapper(idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: B
     val l1d_nodes  = (0 until nrCore).map { i => createDCacheNode(s"L1D_$i", idRangeMax) }
     val l1i_nodes  = (0 until nrCore).map { i => createICacheNode(s"L1I_$i", idRangeMax) }
 
-    val l2     = LazyModule(new SimpleL2Cache)
+    val l2     = LazyModule(new SimpleL2CacheDecoupled)
     val l1xbar = TLXbar()
 
     (0 until nrCore).foreach { i =>
@@ -446,50 +372,34 @@ class SimpleL2CacheWrapper(idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: B
 
         l2EccIntSinkNode.makeIOs()(ValName("l2EccInt"))
 
-        // l2.module.io     <> DontCare
-        // l2.module.io.chi <> DontCare
-        // l2.module.io.chiLinkCtrl <> DontCare
         l2.module.io.nodeID := nodeID.U
 
         io.prefetchOpt.foreach { prefetch =>
             prefetch <> l2.module.io.prefetchOpt.get
         }
 
-        if (hasEndpoint) {
-            val endpoint = Module(new SimpleEndpointCHI)
-            endpoint.io.chi                  <> l2.module.io.chi
-            endpoint.io.chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
-            endpoint.io.chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
-            endpoint.io.chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
-            endpoint.io.chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
-            endpoint.io.chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
-            endpoint.io.chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
-            dontTouch(endpoint.io)
-        } else {
-            val l2_chi                  = IO(l2.module.io.chi.cloneType)
-            val l2_chi_rx_linkactiveack = IO(l2.module.io.chi_rx_linkactiveack.cloneType)
-            val l2_chi_rx_linkactivereq = IO(Flipped(l2.module.io.chi_rx_linkactivereq.cloneType))
-            val l2_chi_tx_linkactiveack = IO(Flipped(l2.module.io.chi_tx_linkactiveack.cloneType))
-            val l2_chi_tx_linkactivereq = IO(l2.module.io.chi_tx_linkactivereq.cloneType)
-            val l2_chi_tx_rxsactive     = IO(Flipped(l2.module.io.chi_tx_rxsactive.cloneType))
-            val l2_chi_tx_txsactive     = IO(l2.module.io.chi_tx_txsactive.cloneType)
-            l2_chi                  <> l2.module.io.chi
-            l2_chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
-            l2_chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
-            l2_chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
-            l2_chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
-            l2_chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
-            l2_chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
-        }
+        val l2_chi                  = IO(l2.module.io.chi.cloneType)
+        val l2_chi_rx_linkactiveack = IO(l2.module.io.chi_rx_linkactiveack.cloneType)
+        val l2_chi_rx_linkactivereq = IO(Flipped(l2.module.io.chi_rx_linkactivereq.cloneType))
+        val l2_chi_tx_linkactiveack = IO(Flipped(l2.module.io.chi_tx_linkactiveack.cloneType))
+        val l2_chi_tx_linkactivereq = IO(l2.module.io.chi_tx_linkactivereq.cloneType)
+        val l2_chi_tx_rxsactive     = IO(Flipped(l2.module.io.chi_tx_rxsactive.cloneType))
+        val l2_chi_tx_txsactive     = IO(l2.module.io.chi_tx_txsactive.cloneType)
+        l2_chi                  <> l2.module.io.chi
+        l2_chi_rx_linkactiveack <> l2.module.io.chi_rx_linkactiveack
+        l2_chi_rx_linkactivereq <> l2.module.io.chi_rx_linkactivereq
+        l2_chi_tx_linkactiveack <> l2.module.io.chi_tx_linkactiveack
+        l2_chi_tx_linkactivereq <> l2.module.io.chi_tx_linkactivereq
+        l2_chi_tx_rxsactive     <> l2.module.io.chi_tx_rxsactive
+        l2_chi_tx_txsactive     <> l2.module.io.chi_tx_txsactive
 
         dontTouch(l2.module.io)
     }
 }
 
-// For integration test
-object SimpleL2Cache extends App {
-    val nrCore  = 4
-    val nrSlice = 1
+object SimpleL2CacheDecoupled extends App {
+    val nrCore  = 2
+    val nrSlice = 2
     val nodeID  = 12
 
     utility.Constantin.init(false)
@@ -510,79 +420,12 @@ object SimpleL2Cache extends App {
         case coupledL2.L2ParamKey =>
             coupledL2.L2Param(
                 clientCaches = Seq(coupledL2.L1Param(vaddrBitsOpt = Some(48))),
-                prefetch = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true))
+                prefetch = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true), coupledL2.prefetch.PrefetchReceiverParams())
             )
         case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
     })
 
-    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(idRangeMax = 64, nodeID = nodeID, hasEndpoint = true)(p)))(config)
+    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapperDecoupled(idRangeMax = 64, nodeID = 12)(p)))(config)
 
-    GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapper", release = false, split = false)
-}
-
-// For logic synthesis
-object SimpleL2CacheFinal extends App {
-    val nodeID = 12
-
-    val config_256kb_8way_2slice_1core = new Config((_, _, _) => {
-        case L2ParamKey =>
-            L2Param(
-                ways = 8,
-                sets = 256,
-                nrSlice = 2,
-                useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
-            )
-        case DebugOptionsKey => DebugOptions()
-    })
-
-    val config_256kb_8way_4slice_1core = new Config((_, _, _) => {
-        case L2ParamKey =>
-            L2Param(
-                ways = 8,
-                sets = 128,
-                nrSlice = 4,
-                useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
-            )
-        case DebugOptionsKey => DebugOptions()
-    })
-
-    val config_128kb_8way_2slice_1core = new Config((_, _, _) => {
-        case L2ParamKey =>
-            L2Param(
-                ways = 8,
-                sets = 128,
-                nrSlice = 2,
-                useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
-            )
-        case DebugOptionsKey => DebugOptions()
-    })
-
-    val config_1024kb_8way_2slice_2core = new Config((_, _, _) => {
-        case L2ParamKey =>
-            L2Param(
-                ways = 8,
-                sets = 1024,
-                nrSlice = 2,
-                useDiplomacy = true,
-                clientCaches = Seq.fill(2)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
-            )
-        case DebugOptionsKey => DebugOptions()
-    })
-
-    // 256-KB, 8-way, 2 slice, 1 core
-    // val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nodeID = 12, hasEndpoint = false)(p)))(config_256kb_8way_2slice_1core)
-
-    // 256-KB, 8-way, 4 slice, 1 core
-    // val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nodeID = 12, hasEndpoint = false)(p)))(config_256kb_8way_4slice_1core)
-
-    // 128-KB, 8-way, 2 slice, 1 core
-    // val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nodeID = 12, hasEndpoint = false)(p)))(config_128kb_8way_2slice_1core)
-
-    // 1024-KB, 8-way, 2 slice, 2 core
-    val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(nodeID = 12, hasEndpoint = false)(p)))(config_1024kb_8way_2slice_2core)
-
-    GenerateVerilog(args, () => top.module, release = true, name = "SimpleL2CacheFinal", split = true)
+    GenerateVerilog(args, () => top.module, name = "SimpleL2CacheWrapperDecoupled", release = false, split = true)
 }

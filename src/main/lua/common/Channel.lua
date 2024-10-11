@@ -34,8 +34,10 @@ local function build_channel(tl_prefix, chi_prefix)
         | size
         | source
         | address
+        | user_needHint
+        | user_vaddr
         | user_alias
-    ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = tl_prefix .. "a_", name = "tl_a"}
+    ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = tl_prefix .. "a_", name = "tl_a", optional_signals = {"user_needHint", "user_vaddr", "user_alias"} }
     
     local tl_b = ([[
         | valid
@@ -87,7 +89,7 @@ local function build_channel(tl_prefix, chi_prefix)
         this.bits.size:set(6) -- 2^6 == 64
     end
     
-    tl_a.acquire_block = function (this, addr, param, source)
+    tl_a.acquire_block = function (this, addr, param, source, need_hint)
         assert(addr ~= nil)
         assert(param ~= nil)
     
@@ -100,6 +102,9 @@ local function build_channel(tl_prefix, chi_prefix)
             this.bits.source:set(source or 0)
             this.bits.user_alias:set(0)
             this.bits.size:set(6) -- 2^6 == 64
+            if need_hint ~= nil then
+                this.bits.user_needHint:set(need_hint)
+            end
             env.posedge()
             this.ready:expect(1)
         env.negedge()

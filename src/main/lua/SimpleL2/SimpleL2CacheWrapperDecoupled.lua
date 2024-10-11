@@ -3,6 +3,7 @@ local env = require "env"
 local tl = require "TileLink"
 local chi = require "CHI"
 local verilua = verilua
+local f = string.format
 
 local TLParam = tl.TLParam
 local TLOpcodeA = tl.TLOpcodeA
@@ -31,6 +32,18 @@ local chi_rxsnp = channels.chi_rxsnp
 local chi_rxrsp = channels.chi_rxrsp
 local chi_rxdat = channels.chi_rxdat
 
+local pf_recv_addrs_0 = ([[
+    | valid
+    | addr
+    | pfSource
+]]):bdl {name = "pf_recv_addrs_0", hier = cfg.top, prefix = "io_prefetchOpt_recv_addrs_0_"}
+
+local pf_recv_addrs_1 = ([[
+    | valid
+    | addr
+    | pfSource
+]]):bdl {name = "pf_recv_addrs_1", hier = cfg.top, prefix = "io_prefetchOpt_recv_addrs_1_"}
+
 local l2 = dut.u_SimpleL2CacheWrapperDecoupled.l2
 local slices_0 = l2.slices_0
 local slices_1 = l2.slices_1
@@ -55,6 +68,26 @@ local offset_bits = 6
 local bank_bits = 1
 local set_bits = mp_0.task_s3_set.get_width()
 local tag_bits = mp_0.task_s3_tag.get_width()
+
+local function switch_channel(core_id)
+    if core_id == 0 or core_id == 1 then
+        local channels = require("Channel").build_channel(f("tl_adcache_in_%d_0_", core_id), "l2_chi_")
+
+        tl_a = channels.tl_a
+        tl_b = channels.tl_b
+        tl_c = channels.tl_c
+        tl_d = channels.tl_d
+        tl_e = channels.tl_e
+        chi_txreq = channels.chi_txreq
+        chi_txdat = channels.chi_txdat
+        chi_txrsp = channels.chi_txrsp
+        chi_rxsnp = channels.chi_rxsnp
+        chi_rxrsp = channels.chi_rxrsp
+        chi_rxdat = channels.chi_rxdat
+    else
+        assert(false, "Unknown core_id: " .. core_id)
+    end
+end
 
 local function to_address(bank, set, tag)
     assert(bank == 0 or bank == 1)
@@ -245,14 +278,88 @@ local test_chi_retry = env.register_test_case "test_chi_retry" {
     end
 }
 
+local test_prefetch_recv_req = env.register_test_case "test_prefetch_recv_req" {
+    function ()
+        env.dut_reset()
+
+        initialize_tl_ports()
+        initialize_chi_ports()
+        wait_resetFinish()
+
+        local recv_addr = 0x1000
+        env.negedge()
+            pf_recv_addrs_0.valid:set(1)
+            pf_recv_addrs_0.bits.addr:set(recv_addr, true)
+            pf_recv_addrs_0.bits.pfSource:set(10) -- MemReqSource.Prefetch2L2SMS
+        env.negedge()
+            pf_recv_addrs_0.valid:set(0)
+
+        env.expect_happen_until(10, function () return slices_0.io_prefetchReqOpt_valid:is(1) and slices_0.io_prefetchReqOpt_ready:is(1) end)
+        env.expect_happen_until(20, function () return chi_txreq:fire() and chi_txreq.bits.addr:is(recv_addr) end)
+        chi_txreq:dump()
+
+        chi_rxdat:compdat(0, "0xdead", "0xbeef", 0, CHIResp.UC)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_not_happen_until(50, function () return tl_d:fire() end)
+            end
+        }
+
+        env.expect_happen_until(10, function () return slices_0.io_prefetchRespOpt_valid:is(1) and slices_0.io_prefetchRespOpt_ready:is(1) end)
+        env.negedge()
+        env.expect_not_happen_until(10, function () return slices_0.io_prefetchRespOpt_valid:is(1) end)
+
+        env.posedge(100)
+    end
+}
+
+local test_prefetch_train = env.register_test_case "test_prefetch_train" {
+    function ()
+        env.dut_reset()
+
+        initialize_tl_ports()
+        initialize_chi_ports()
+        wait_resetFinish()
+
+        local req_addr = to_address(0, 0x01, 0x01)
+        local req_source = 10
+        local need_hint = 1
+        env.negedge()
+            write_dir(0, 0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0x00, 0)
+        tl_a:acquire_block(req_addr, TLParam.NtoB, req_source, need_hint)
+
+        verilua "appendTasks" {
+            function ()
+                env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.addr:is(req_addr) end)    
+            end,
+            function ()
+                env.expect_happen_until(10, function () return slices_0.io_prefetchTrainOpt_valid:is(1) and slices_0.io_prefetchTrainOpt_ready:is(1) end)
+            end
+        }
+
+        env.negedge(10)
+            chi_rxdat:compdat(0, "0xdead", "0xbeef", 0, CHIResp.UC)
+        env.negedge()
+            env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.source:is(req_source) and tl_d.bits.data:is_hex_str("0xdead") end)
+            env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.source:is(req_source) and tl_d.bits.data:is_hex_str("0xbeef") end)
+
+        env.posedge(100)
+        env.dut_reset()
+    end
+}
+
 verilua "appendTasks" {
     function ()
         sim.dump_wave()
 
         test_chi_retry()
+        test_prefetch_recv_req()
+        test_prefetch_train()
+        -- TODO: prefetch tlb_req_resp
 
+        env.posedge(100)
         env.TEST_SUCCESS()
-        sim.finish()
     end
 }
 

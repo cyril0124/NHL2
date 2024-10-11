@@ -105,53 +105,57 @@ trait HadMixedStateOps {
 }
 
 class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {
-    val dirty        = Bool()
-    val state        = UInt(TLState.width.W)
-    val fromPrefetch = Bool()
-    val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
-    val clientsOH    = UInt(nrClients.W)
+    val dirty           = Bool()
+    val state           = UInt(TLState.width.W)
+    val clientsOH       = UInt(nrClients.W)
+    val aliasOpt        = aliasBitsOpt.map(width => UInt(width.W))
+    val fromPrefetchOpt = if (hasPrefetchBit) Some(Bool()) else None
+    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(coupledL2.prefetch.PfSource.pfSourceBits.W)) else None
 }
 
 object DirectoryMetaEntryNoTag {
-    def apply(dirty: Bool, state: UInt, alias: UInt, clientsOH: UInt, fromPrefetch: Bool)(implicit p: Parameters) = {
+    def apply(dirty: Bool, state: UInt, alias: UInt, clientsOH: UInt, fromPrefetchOpt: Option[Bool] = None, prefetchSrcOpt: Option[UInt] = None)(implicit p: Parameters) = {
         require(state.getWidth == TLState.width)
 
         val meta = Wire(new DirectoryMetaEntryNoTag)
-        meta.aliasOpt.map(_ := alias)
-        meta.fromPrefetch := fromPrefetch
-        meta.dirty        := dirty
-        meta.state        := state
-        meta.clientsOH    := clientsOH
+        meta.aliasOpt.foreach(_ := alias)
+        meta.fromPrefetchOpt.foreach(_ := fromPrefetchOpt.getOrElse(false.B))
+        meta.prefetchSrcOpt.foreach(_ := prefetchSrcOpt.getOrElse(0.U))
+        meta.dirty     := dirty
+        meta.state     := state
+        meta.clientsOH := clientsOH
         meta
     }
 }
 
 class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedState {
-    val fromPrefetch = Bool()
-    val tag          = UInt(tagBits.W)
-    val aliasOpt     = aliasBitsOpt.map(width => UInt(width.W))
-    val clientsOH    = UInt(nrClients.W)
-    // val noData       = Bool() // TODO: Indicate that whether DataStorage has data, if L2 receive Comp from lower level, this fild will be set to true
+    val tag             = UInt(tagBits.W)
+    val clientsOH       = UInt(nrClients.W)
+    val aliasOpt        = aliasBitsOpt.map(width => UInt(width.W))
+    val fromPrefetchOpt = if (hasPrefetchBit) Some(Bool()) else None
+    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(coupledL2.prefetch.PfSource.pfSourceBits.W)) else None
 }
 
 object DirectoryMetaEntry {
-    def apply(fromPrefetch: Bool, state: UInt, tag: UInt, aliasOpt: Option[UInt], clientsOH: UInt)(implicit p: Parameters) = {
+    def apply(state: UInt, tag: UInt, aliasOpt: Option[UInt], clientsOH: UInt, fromPrefetchOpt: Option[Bool] = None, prefetchSrcOpt: Option[UInt] = None)(implicit p: Parameters) = {
         val meta = Wire(new DirectoryMetaEntry)
-        meta.aliasOpt.map(_ := aliasOpt.getOrElse(0.U))
-        meta.fromPrefetch := fromPrefetch
-        meta.state        := state
-        meta.tag          := tag
-        meta.clientsOH    := clientsOH
+        meta.aliasOpt.foreach(_ := aliasOpt.getOrElse(0.U))
+        meta.fromPrefetchOpt.foreach(_ := fromPrefetchOpt.getOrElse(false.B))
+        meta.prefetchSrcOpt.foreach(_ := prefetchSrcOpt.getOrElse(0.U))
+        meta.state     := state
+        meta.tag       := tag
+        meta.clientsOH := clientsOH
         meta
     }
 
     def apply(tag: UInt, dirMetaEntryNoTag: DirectoryMetaEntryNoTag)(implicit p: Parameters) = {
         val meta = WireInit(0.U.asTypeOf(new DirectoryMetaEntry))
-        meta.aliasOpt.map(_ := dirMetaEntryNoTag.aliasOpt.getOrElse(0.U))
-        meta.fromPrefetch := dirMetaEntryNoTag.fromPrefetch
-        meta.state        := MixedState(dirMetaEntryNoTag.dirty, dirMetaEntryNoTag.state)
-        meta.tag          := tag
-        meta.clientsOH    := dirMetaEntryNoTag.clientsOH
+        meta.aliasOpt.foreach(_ := dirMetaEntryNoTag.aliasOpt.getOrElse(0.U))
+        meta.fromPrefetchOpt.foreach(_ := dirMetaEntryNoTag.fromPrefetchOpt.getOrElse(false.B))
+        meta.prefetchSrcOpt.foreach(_ := dirMetaEntryNoTag.prefetchSrcOpt.getOrElse(0.U))
+        meta.state     := MixedState(dirMetaEntryNoTag.dirty, dirMetaEntryNoTag.state)
+        meta.tag       := tag
+        meta.clientsOH := dirMetaEntryNoTag.clientsOH
         meta
     }
 

@@ -2,9 +2,12 @@ package SimpleL2
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.SourceInfo
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import utility.ReqSourceKey
 import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -30,11 +33,23 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val eccError    = Output(Bool())
 
         val pCrdRetryInfoVec = Output(Vec(nrMSHR, new PCrdRetryInfo))
+
+        val prefetchReqOpt   = if (enablePrefetch) Some(Flipped(DecoupledIO(new coupledL2.prefetch.PrefetchReq))) else None
+        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new coupledL2.prefetch.PrefetchTrain)) else None
+        val prefetchRespOpt  = if (enablePrefetch) Some(DecoupledIO(new PrefetchRespWithSource(tlBundleParams.sourceBits))) else None
     })
 
     println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
     println(s"[${this.getClass().toString()}] optParam:${optParam}")
     println(s"[${this.getClass().toString()}] TaskBundle bits:${(new TaskBundle).getWidth}")
+
+    if (l2param.useDiplomacy) {
+        val _nrClients = edgeIn.client.clients.count(_.supports.probe)
+        require(
+            _nrClients == nrClients,
+            s"Number of Diplomatic clients (${_nrClients}) does not match number of client caches (${l2param.clientCaches.length})"
+        )
+    }
 
     io.tl          <> DontCare
     io.chi         <> DontCare
@@ -105,6 +120,8 @@ class Slice()(implicit p: Parameters) extends L2Module {
         reqArb.io.replayFreeCntSinkA := replayStationSinkA.io.freeCnt
         arbTask(Seq(Queue(replayStationSinkA.io.req_s1, 1), reqBuf.io.taskOut), reqArbTaskSinkA)
     }
+
+    sinkA.io.sliceId := io.sliceId
 
     reqArb.io.taskCMO_s1               := DontCare // TODO: CMO Task
     reqArb.io.taskMSHR_s0              <> missHandler.io.tasks.mpTask
@@ -213,6 +230,12 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
     io.eccError := RegNext(ds.io.eccError, false.B) || RegNext(tempDS.io.eccError, false.B)
 
+    if (enablePrefetch) {
+        sinkA.io.prefetchReqOpt.get <> io.prefetchReqOpt.get
+        io.prefetchRespOpt.get      <> sourceD.io.prefetchRespOpt.get
+        io.prefetchTrainOpt.get     <> mainPipe.io.prefetchTrainOpt.get
+    }
+
     io.tl.d      <> sourceD.io.d
     io.tl.b      <> sourceB.io.b
     io.chi.txreq <> txreq.io.out
@@ -229,12 +252,36 @@ object Slice extends App {
     val CFG_CLIENT = sys.env.get("CFG_CLIENT").getOrElse("2")
     println(s"CFG_CLIENT = $CFG_CLIENT")
 
+    utility.Constantin.init(false)
+
     val config = new Config((_, _, _) => {
+        // Fake EdgeInKey for prefetcher depends on it
+        case coupledL2.EdgeInKey =>
+            new TLEdgeIn(
+                client = TLClientPortParameters(
+                    Seq(
+                        TLMasterParameters.v1(
+                            name = "TLMaster",
+                            supportsProbe = TransferSizes(64, 64)
+                        )
+                    )
+                ),
+                manager = TLManagerPortParameters(
+                    managers = Seq(TLSlaveParameters.v1(address = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)))),
+                    beatBytes = 32,
+                    requestKeys = Seq(AliasKey, coupledL2.VaddrKey, ReqSourceKey)
+                ),
+                params = Parameters.empty,
+                sourceInfo = SourceInfo.materialize
+            )
+        case coupledL2.L2ParamKey => coupledL2.L2Param(clientCaches = Seq(coupledL2.L1Param(vaddrBitsOpt = Some(48))))
+
         case L2ParamKey =>
             L2Param(
-                nrClients = CFG_CLIENT.toInt,
+                clientCaches = Seq.fill(CFG_CLIENT.toInt)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
                 supportDCT = true,
-                dataEccCode = "none",
+                // dataEccCode = "none",
+                dataEccCode = "secded",
                 optParam = L2OptimizationParam(
                     reqBufOutLatch = false,
                     rxsnpHasLatch = false,
@@ -244,7 +291,9 @@ object Slice extends App {
                     sinkaStallOnReqArb = true,
                     mshrStallOnReqArb = true,
                     latchTempDsToDs = true
-                )
+                ),
+                vaddrBitsOpt = Some(48),
+                prefetchParams = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true))
             )
         case DebugOptionsKey => DebugOptions()
     })
