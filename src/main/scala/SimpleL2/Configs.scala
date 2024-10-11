@@ -267,7 +267,7 @@ trait HasL2Param {
 
     // finalTxnID => | bankID | txnID |
     def setTxnID(txnID: UInt, sliceID: UInt): UInt = {
-        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits + 1))
+        if (nrSlice <= 1) txnID else Cat(sliceID(bankBits - 1, 0), txnID.tail(bankBits))
     }
 
     def getSliceID(txnID: UInt): UInt = {
@@ -275,6 +275,6 @@ trait HasL2Param {
     }
 
     def restoreTxnID(txnID: UInt): UInt = {
-        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits + 1))
+        if (nrSlice <= 1) txnID else Cat(0.U(bankBits.W), txnID.tail(bankBits))
     }
 }
