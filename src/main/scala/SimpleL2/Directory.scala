@@ -230,10 +230,11 @@ class Directory()(implicit p: Parameters) extends L2Module {
     val replacerSRAM_opt =
         if (isRandomRepl) None
         else {
+            val width = if (isPow2(repl.nBits)) repl.nBits else (repl.nBits + 1) // Make sure repl.nBits is a power of 2
             Some(
                 Module(
                     new SRAMTemplate(
-                        gen = UInt(repl.nBits.W),
+                        gen = UInt(width.W),
                         set = sets,
                         way = 1,
                         singlePort = true,
@@ -304,7 +305,7 @@ class Directory()(implicit p: Parameters) extends L2Module {
         }
         0.U
     } else {
-        val replacerResult_s2 = replacerSRAM_opt.get.io.r(io.dirRead_s1.fire, io.dirRead_s1.bits.set).resp.data(0)
+        val replacerResult_s2 = replacerSRAM_opt.get.io.r(io.dirRead_s1.fire, io.dirRead_s1.bits.set).resp.data(0)(repl.nBits - 1, 0)
         val _replacerState_s3 = RegEnable(replacerResult_s2, 0.U(repl.nBits.W), reqValid_s2)
         _replacerState_s3
     }
@@ -364,9 +365,10 @@ class Directory()(implicit p: Parameters) extends L2Module {
         0.U
     }
     replacerSRAM_opt.foreach { sram =>
+        val replacerWrData = if (isPow2(repl.nBits)) repl.get_next_state(replacerState_s3, way_s3) else Cat(0.U(1.W), repl.get_next_state(replacerState_s3, way_s3))
         sram.io.w(
             valid = !io.resetFinish || replacerUpdate_s3,
-            data = Mux(io.resetFinish, repl.get_next_state(replacerState_s3, way_s3), replacerInitialState_s3),
+            data = Mux(io.resetFinish, replacerWrData, replacerInitialState_s3),
             setIdx = Mux(io.resetFinish, reqSet_s3, resetIdx - 1.U),
             waymask = 1.U
         )
