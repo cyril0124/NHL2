@@ -719,6 +719,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         reqBufReplay_s4.valid             := valid_reqbuf_s4
         reqBufReplay_s4.bits.shouldReplay := valid_replay_s4
         reqBufReplay_s4.bits.source       := task_s4.source
+        reqBufReplay_s4.bits.isPrefetch   := task_s4.opcode === Hint
+        reqBufReplay_s4.bits.set          := task_s4.set
+        reqBufReplay_s4.bits.tag          := task_s4.tag
     }
 
     io.allocDestSinkC_s4.valid         := needAllocDestSinkC_s4

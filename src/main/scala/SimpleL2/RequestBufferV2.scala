@@ -30,6 +30,9 @@ class RequestBufferEntryV2(implicit p: Parameters) extends L2Bundle {
 class ReqBufReplay(implicit p: Parameters) extends L2Bundle {
     val shouldReplay = Bool()
     val source       = UInt(tlBundleParams.sourceBits.W)
+    val isPrefetch   = Bool()
+    val set          = UInt(setBits.W) // for prefetch request
+    val tag          = UInt(tagBits.W) // for prefetch request
 }
 
 /**
@@ -59,7 +62,11 @@ class RequestBufferV2()(implicit p: Parameters) extends L2Module {
     val taskOut = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
     io.taskIn.ready := hasEntry
 
-    val replayMatchVec = VecInit(buffers.map(buf => buf.task.source === io.replay_s4.bits.source && buf.state =/= ReqBufState.INVALID)).asUInt
+    val replay_s4 = io.replay_s4.bits
+    val replayMatchVec = VecInit(buffers.map { buf =>
+        Mux(enablePrefetch.B && replay_s4.isPrefetch, buf.task.set === replay_s4.set && buf.task.tag === replay_s4.tag, buf.task.source === replay_s4.source) &&
+        buf.state =/= ReqBufState.INVALID
+    }).asUInt
     assert(!(io.replay_s4.fire && PopCount(replayMatchVec) > 1.U), "replay_s4 match multiple buffers: %b source: %d", replayMatchVec, io.replay_s4.bits.source)
 
     def addrConflict(set: UInt, tag: UInt): Bool = {

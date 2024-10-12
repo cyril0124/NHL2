@@ -370,6 +370,9 @@ local test_prefetch_dup_req = env.register_test_case "test_prefetch_dup_req" {
         
         local nr_req_buf = 4
         for i = 1, nr_req_buf do
+            -- 
+            -- available when optParam.sinkaStallOnReqArb = false
+            -- 
             local buf_state = reqBuf_0["buffers_" .. (i - 1) .. "_state"]
             local buf_opcode = reqBuf_0["buffers_" .. (i - 1) .. "_task_opcode"]
 
@@ -390,6 +393,38 @@ local test_prefetch_dup_req = env.register_test_case "test_prefetch_dup_req" {
     end
 }
 
+local test_prefetch_replay = env.register_test_case "test_prefetch_replay" {
+    function ()
+        -- optParam.sinkaStallOnReqArb = false
+        init_all()
+
+        mp_0.io_mshrAlloc_s3_valid:set_force(0)
+        mp_0.io_mshrAlloc_s3_ready:set_force(0)
+
+        local addr = 0x1000
+        env.negedge()
+            pf_recv_addrs_0.valid:set(1)
+            pf_recv_addrs_0.bits.addr:set(addr, true)
+            pf_recv_addrs_0.bits.pfSource:set(10) -- MemReqSource.Prefetch2L2SMS
+        env.negedge()
+            pf_recv_addrs_0.valid:set(0)
+
+        env.expect_happen_until(10, function () return mp_0.valid_s3:is(1) and mp_0.task_s3_opcode:is(TLOpcodeA.Hint) and mp_0.task_s3_isMshrTask:is(0) end)
+        env.negedge()
+            mp_0.io_reqBufReplay_s4_opt_valid:expect(1)
+            mp_0.io_reqBufReplay_s4_opt_bits_isPrefetch:expect(1)
+            reqBuf_0.replayMatchVec:expect(0x01)
+        mp_0.io_mshrAlloc_s3_valid:set_release()
+        mp_0.io_mshrAlloc_s3_ready:set_release()
+
+        -- reissue the task
+        env.expect_happen_until(10, function () return mp_0.valid_s3:is(1) and mp_0.task_s3_opcode:is(TLOpcodeA.Hint) and mp_0.task_s3_isMshrTask:is(0) and mp_0.task_s3_isReplayTask:is(1) end)
+
+        env.posedge(100)
+        env.dut_reset()
+    end
+}
+
 verilua "appendTasks" {
     function ()
         sim.dump_wave()
@@ -398,6 +433,7 @@ verilua "appendTasks" {
         test_prefetch_recv_req()
         test_prefetch_train()
         test_prefetch_dup_req()
+        test_prefetch_replay()
         -- TODO: prefetch tlb_req_resp
 
         env.posedge(100)
