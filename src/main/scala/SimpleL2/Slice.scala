@@ -113,6 +113,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val reqBuf             = Module(new RequestBuffer)
 
         reqBuf.io.taskIn                      <> sinkA.io.task
+        reqBuf.io.mshrStatus                  <> missHandler.io.mshrStatus
         replayStationSinkA.io.replay_s4       <> mainPipe.io.replay_s4
         replayStationSinkA.io.replay_s4.valid := mainPipe.io.replay_s4.valid && mainPipe.io.replay_s4.bits.task.isChannelA
         replayStationSinkA.io.replay_s4.bits  := mainPipe.io.replay_s4.bits

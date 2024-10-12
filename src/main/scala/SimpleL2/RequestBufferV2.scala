@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
@@ -76,8 +77,20 @@ class RequestBufferV2()(implicit p: Parameters) extends L2Module {
         mshrAddrConflict || mpAddrConflict || bufferAddrConflict
     }
 
+    val dupVec = VecInit(
+        io.mshrStatus.map { s =>
+            s.valid &&
+            s.reqTag === io.taskIn.bits.tag && s.set === io.taskIn.bits.set &&
+            (s.opcode === Hint || s.opcode === AcquireBlock || s.opcode === AcquirePerm)
+        } ++ buffers.map { b =>
+            b.state =/= ReqBufState.INVALID &&
+            b.task.set === io.taskIn.bits.set && b.task.tag === io.taskIn.bits.tag
+        }
+    ).asUInt
+    val isDupPrefetch = io.taskIn.bits.opcode === Hint && dupVec.orR // Duplicate prefetch requests will be ignored
+
     buffers.zipWithIndex.zip(insertOH.asBools).foreach { case ((buf, i), en) =>
-        when(en && io.taskIn.fire) {
+        when(en && io.taskIn.fire && !(enablePrefetch.B && isDupPrefetch)) {
             buf.state := ReqBufState.WAIT
             buf.task  := io.taskIn.bits
             assert(buf.state === ReqBufState.INVALID)

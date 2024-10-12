@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tilelink.TLMessages._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
@@ -20,6 +21,8 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val taskIn  = Flipped(DecoupledIO(new TaskBundle))
         val taskOut = DecoupledIO(new TaskBundle)
+
+        val mshrStatus = Vec(nrMSHR, Input(new MshrStatus))
     })
 
     val issueArb = Module(new FastArbiter(new TaskBundle, nrReqBufEntry))
@@ -29,8 +32,20 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
     val hasEntry = freeVec.orR
     val insertOH = PriorityEncoderOH(freeVec)
 
+    val dupVec = VecInit(
+        io.mshrStatus.map { s =>
+            s.valid &&
+            s.reqTag === io.taskIn.bits.tag && s.set === io.taskIn.bits.set &&
+            (s.opcode === Hint || s.opcode === AcquireBlock || s.opcode === AcquirePerm)
+        } ++ buffers.zipWithIndex.map { case (b, i) =>
+            valids(i) &&
+            b.task.set === io.taskIn.bits.set && b.task.tag === io.taskIn.bits.tag
+        }
+    ).asUInt
+    val isDupPrefetch = io.taskIn.bits.opcode === Hint && dupVec.orR // Duplicate prefetch requests will be ignored
+
     val taskOut   = WireInit(0.U.asTypeOf(Decoupled(new TaskBundle)))
-    val storeTask = io.taskIn.valid && !taskOut.ready
+    val storeTask = io.taskIn.valid && !taskOut.ready && !(enablePrefetch.B && isDupPrefetch)
     io.taskIn.ready := hasEntry
 
     buffers.zipWithIndex.zip(insertOH.asBools).foreach { case ((buf, i), en) =>
@@ -53,7 +68,7 @@ class RequestBuffer()(implicit p: Parameters) extends L2Module {
 
     taskOut               <> issueArb.io.out
     taskOut.bits          := Mux(io.taskIn.fire, io.taskIn.bits, issueArb.io.out.bits)
-    taskOut.valid         := io.taskIn.fire || issueArb.io.out.valid
+    taskOut.valid         := io.taskIn.fire && !(enablePrefetch.B && isDupPrefetch) || issueArb.io.out.valid
     issueArb.io.out.ready := taskOut.ready && !io.taskIn.fire
 
     println(s"[${this.getClass().toString()}] reqBufOutLatch:${optParam.reqBufOutLatch}")

@@ -47,6 +47,8 @@ local pf_recv_addrs_1 = ([[
 local l2 = dut.u_SimpleL2CacheWrapperDecoupled.l2
 local slices_0 = l2.slices_0
 local slices_1 = l2.slices_1
+local reqBuf_0 = slices_0.reqBuf
+local reqBuf_1 = slices_1.reqBuf
 local mp_0 = slices_0.mainPipe
 local mp_1 = slices_1.mainPipe
 local dir_0 = slices_0.dir
@@ -184,13 +186,17 @@ local function initialize_chi_ports()
     chi_txreq.ready:set(1)
 end
 
+local function init_all()
+    env.dut_reset()
+
+    initialize_tl_ports()
+    initialize_chi_ports()
+    wait_resetFinish()
+end
+
 local test_chi_retry = env.register_test_case "test_chi_retry" {
     function ()
-        env.dut_reset()
-        
-        initialize_tl_ports()
-        initialize_chi_ports()
-        wait_resetFinish()
+        init_all()
 
         local function test(retry_after_pcrd)
             local retry_after_pcrd = retry_after_pcrd or false
@@ -280,11 +286,7 @@ local test_chi_retry = env.register_test_case "test_chi_retry" {
 
 local test_prefetch_recv_req = env.register_test_case "test_prefetch_recv_req" {
     function ()
-        env.dut_reset()
-
-        initialize_tl_ports()
-        initialize_chi_ports()
-        wait_resetFinish()
+        init_all()
 
         local recv_addr = 0x1000
         env.negedge()
@@ -316,11 +318,7 @@ local test_prefetch_recv_req = env.register_test_case "test_prefetch_recv_req" {
 
 local test_prefetch_train = env.register_test_case "test_prefetch_train" {
     function ()
-        env.dut_reset()
-
-        initialize_tl_ports()
-        initialize_chi_ports()
-        wait_resetFinish()
+        init_all()
 
         local req_addr = to_address(0, 0x01, 0x01)
         local req_source = 10
@@ -349,6 +347,49 @@ local test_prefetch_train = env.register_test_case "test_prefetch_train" {
     end
 }
 
+local test_prefetch_dup_req = env.register_test_case "test_prefetch_dup_req" {
+    function ()
+        init_all()
+
+        local addr = 0x1000
+        local req_source = 10
+        local need_hint = 0
+
+        env.negedge()
+            write_dir(0, 0x01, utils.uint_to_onehot(0), 0x01, MixedState.I, 0x00, 0)
+        tl_a:acquire_block(addr, TLParam.NtoB, req_source, need_hint)
+
+        env.negedge()
+            pf_recv_addrs_0.valid:set(1)
+            pf_recv_addrs_0.bits.addr:set(addr, true)
+            pf_recv_addrs_0.bits.pfSource:set(10) -- MemReqSource.Prefetch2L2SMS
+        env.negedge()
+            pf_recv_addrs_0.valid:set(0)
+
+        env.expect_happen_until(5, function () return reqBuf_0.io_taskIn_valid:is(1) and reqBuf_0.io_taskIn_ready:is(1) and reqBuf_0.io_taskIn_bits_opcode:is(TLOpcodeA.Hint) and reqBuf_0.isDupPrefetch:is(1) end)
+        
+        local nr_req_buf = 4
+        for i = 1, nr_req_buf do
+            local buf_state = reqBuf_0["buffers_" .. (i - 1) .. "_state"]
+            local buf_opcode = reqBuf_0["buffers_" .. (i - 1) .. "_task_opcode"]
+
+            -- this would make sure that the buffer is not containing a prefetch request
+            buf_opcode:_if(function() return buf_state:is_not(0) end):expect_not(TLOpcodeA.Hint)
+
+
+            -- 
+            -- available when optParam.sinkaStallOnReqArb = true
+            -- 
+            -- local buf_valid = reqBuf_0["valids_" .. (i - 1)]
+            -- local buf_opcode = reqBuf_0["buffers_" .. (i - 1) .. "_task_opcode"]
+            -- buf_opcode:_if(function() return buf_valid:is_not(0) end):expect_not(TLOpcodeA.Hint)
+        end
+
+        env.posedge(100)
+        env.dut_reset()
+    end
+}
+
 verilua "appendTasks" {
     function ()
         sim.dump_wave()
@@ -356,6 +397,7 @@ verilua "appendTasks" {
         test_chi_retry()
         test_prefetch_recv_req()
         test_prefetch_train()
+        test_prefetch_dup_req()
         -- TODO: prefetch tlb_req_resp
 
         env.posedge(100)

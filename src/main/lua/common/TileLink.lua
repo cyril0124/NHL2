@@ -51,6 +51,7 @@ local TLOpcodeA = utils.enum_define {
     PutFullData = 0,
     PutPartialData = 1,
     Get = 4,
+    Hint = 5,
     AcquireBlock = 6,
     AcquirePerm = 7,
 }
