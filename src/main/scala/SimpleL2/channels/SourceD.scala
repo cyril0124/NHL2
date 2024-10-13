@@ -3,6 +3,7 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
+import xs.utils.tl.MemReqSource
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, SkidBuffer, LeakChecker, IDPoolAlloc}
 import SimpleL2.Configs._
@@ -169,7 +170,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
         val pftRespEntry = new Bundle() {
             val tag      = UInt(tagBits.W)
             val set      = UInt(setBits.W)
-            val pfSource = UInt(utility.MemReqSource.reqSourceBits.W)
+            val pfSource = UInt(MemReqSource.reqSourceBits.W)
             val source   = UInt(tlBundleParams.sourceBits.W) // sourceId is used for identifying the request client.
             val vaddr    = vaddrBitsOpt.map(_ => UInt(vaddrBitsOpt.get.W))
         }

@@ -5,6 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.TLMessages._
+import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, ControlKey}
 import org.chipsalliance.cde.config._
 import xs.utils.FastArbiter
@@ -12,8 +13,17 @@ import xs.utils.Code
 import SimpleL2._
 import SimpleL2.chi._
 
+// Extra address bits for alias request
 case object AliasKey extends ControlKey[UInt]("alias")
 case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), _ := 0.U(width.W))
+
+// Pass virtual address of upper level cache
+case object VaddrKey extends ControlKey[UInt]("vaddr")
+case class VaddrField(width: Int) extends BundleField[UInt](VaddrKey, Output(UInt(width.W)), _ := 0.U(width.W))
+
+// Indicate whether the request needs to trigger prefetch
+case object PrefetchKey extends ControlKey[Bool](name = "needHint")
+case class PrefetchField() extends BundleField[Bool](PrefetchKey, Output(Bool()), _ := false.B)
 
 case object L2ParamKey extends Field[L2Param](L2Param())
 
@@ -42,9 +52,10 @@ case class L2Param(
     nrSlice: Int = 1,
     blockBytes: Int = 64,
     beatBytes: Int = 32,
-    dataBits: Int = 64 * 8, // 64 Byte
-    addressBits: Int = 44,
+    dataBits: Int = 64 * 8,                              // 64 Byte
+    addressBits: Int = 44,                               // used when diplomacy is not enabled
     chiBundleParams: Option[CHIBundleParameters] = None, // This will overwrite the default chi bundle parameters
+    pageBytes: Int = 4096,                               // for prefetcher
     clientCaches: Seq[L1Param] = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
     nrMSHR: Int = 16,
     nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
@@ -58,8 +69,7 @@ case class L2Param(
     rxrspCreditMAX: Int = 2,
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
-    vaddrBitsOpt: Option[Int] = None,
-    prefetchParams: Seq[coupledL2.prefetch.PrefetchParameters] = Nil,
+    prefetchParams: Seq[SimpleL2.prefetch.PrefetchParameters] = Nil,
     replacementPolicy: String = "plru", // Option: "random", "plru", "lru"
     dataEccCode: String = "secded",     // Option: "none", "identity", "parity", "sec", "secded"
     useDiplomacy: Boolean = false       // If use diplomacy, EdgeInKey should be passed in
@@ -80,7 +90,6 @@ trait HasL2Param {
     val ways          = l2param.ways
     val sets          = l2param.sets
     val wayBits       = log2Ceil(l2param.ways)
-    val addressBits   = l2param.addressBits
     val dataBits      = l2param.dataBits
     val beatBytes     = l2param.beatBytes
     val setBits       = log2Ceil(l2param.sets)
@@ -89,13 +98,17 @@ trait HasL2Param {
     val nrSlice       = l2param.nrSlice
     val bankBits      = log2Ceil(nrSlice)
     val sliceBits     = bankBits
-    val tagBits       = l2param.addressBits - setBits - bankBits - offsetBits
     val nrMSHR        = l2param.nrMSHR
     val nrExtraSinkId = l2param.nrExtraSinkId
     val nrGrantMap    = nrMSHR
     val mshrBits      = log2Ceil(l2param.nrMSHR)
     val nrBeat        = l2param.blockBytes / l2param.beatBytes
     val idsAll        = 256
+
+    def tlAddressBits = if (l2param.useDiplomacy) edgeIn.bundle.addressBits else l2param.addressBits
+    def chiAddressBits = if (l2param.chiBundleParams.isDefined) l2param.chiBundleParams.get.addressBits else 44
+    def addressBits = tlAddressBits
+    def tagBits = l2param.addressBits - setBits - bankBits - offsetBits
 
     val optParam              = l2param.optParam
     val supportDCT            = l2param.supportDCT
@@ -125,58 +138,78 @@ trait HasL2Param {
 
     val deadlockThreshold = 10000 * 2
 
-    val aliasBitsOpt = Some(2)
+    val clientCaches = l2param.clientCaches
+    val nrClients    = l2param.clientCaches.length
+
+    val aliasBitsOpt =
+        if (clientCaches.isEmpty) None
+        else {
+            val maxAliasBits = clientCaches.map(_.aliasBitsOpt.getOrElse(0)).max
+            if (maxAliasBits == 0) None else Some(maxAliasBits)
+        }
+
+    lazy val edgeIn = p(EdgeInKey)
+
+    /**
+     * vaddr without offset bits
+     */
+    def fullAddressBits = edgeIn.bundle.addressBits
+    val vaddrBitsOpt =
+        if (clientCaches.isEmpty) None
+        else {
+            val maxVaddrBits = clientCaches.map(_.vaddrBitsOpt.getOrElse(0)).max
+            if (maxVaddrBits == 0) None else Some(maxVaddrBits)
+        }
+    val fullVAddrBits = vaddrBitsOpt.getOrElse(0) + offsetBits
+    def fullTagBits = fullAddressBits - setBits - offsetBits
 
     /**
      * Prefetch related parameters
      */
-    val vaddrBitsOpt   = l2param.vaddrBitsOpt
     val prefetchParams = l2param.prefetchParams
     val enablePrefetch = if (prefetchParams.nonEmpty) true else false
-    def hasBOP = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.BOPParameters])
-    def hasReceiver = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.PrefetchReceiverParams])
-    def hasTPPrefetcher = prefetchParams.exists(_.isInstanceOf[coupledL2.prefetch.TPParameters])
+    val pageOffsetBits = log2Ceil(l2param.pageBytes)
+    def hasBOP = prefetchParams.exists(_.isInstanceOf[SimpleL2.prefetch.BOPParameters])
+    def hasReceiver = prefetchParams.exists(_.isInstanceOf[SimpleL2.prefetch.PrefetchReceiverParams])
+    // def hasTPPrefetcher = prefetchParams.exists(_.isInstanceOf[SimpleL2.prefetch.TPParameters])
     def hasPrefetchBit = prefetchParams.exists(_.hasPrefetchBit)
     def hasPrefetchSrc = prefetchParams.exists(_.hasPrefetchSrc)
-
-    lazy val edgeIn = p(EdgeInKey)
-
-    // @formatter:off
-    val _tlBundleParams = TLBundleParameters(
-        addressBits = addressBits,
-        dataBits = beatBytes * 8,
-        sourceBits = 6, // TODO: Parameterize it
-        sinkBits = 7,
-        sizeBits = 3,
-        echoFields = Nil,
-        requestFields = Seq(AliasField(2)) ++ { 
-            if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                Seq(coupledL2.VaddrField(l2param.clientCaches.map(_.vaddrBitsOpt.get).max), huancun.PrefetchField())
-            else 
-                Nil
-        },
-        responseFields = Nil,
-        hasBCE = true
-    )
-    // @formatter:on
+    def hartIdLen: Int = p(MaxHartIdBits)
 
     def tlBundleParams: TLBundleParameters = if (l2param.useDiplomacy) {
         edgeIn.bundle
     } else {
+        // @formatter:off
+        val _tlBundleParams = TLBundleParameters(
+            addressBits = addressBits,
+            dataBits = beatBytes * 8,
+            sourceBits = 6, // TODO: Parameterize it
+            sinkBits = 7,
+            sizeBits = 3,
+            echoFields = Nil,
+            requestFields = Seq(AliasField(2)) ++ { 
+                if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
+                    Seq(VaddrField(l2param.clientCaches.map(_.vaddrBitsOpt.get).max), PrefetchField())
+                else 
+                    Nil
+            },
+            responseFields = Nil,
+            hasBCE = true
+        )
+        // @formatter:on
+
         _tlBundleParams
     }
 
-    val clientCaches = l2param.clientCaches
-    val nrClients    = l2param.clientCaches.length
-
-    val chiBundleParams = if (l2param.chiBundleParams.isDefined) {
+    def chiBundleParams: CHIBundleParameters = if (l2param.chiBundleParams.isDefined) {
         l2param.chiBundleParams.get
     } else {
         CHIBundleParameters(
             nodeIdBits = 7,
-            addressBits = addressBits,
+            addressBits = chiAddressBits,
             dataBits = beatBytes * 8,
-            dataCheck = false
+            dataCheck = false,
+            issue = "G"
         )
     }
 
@@ -256,8 +289,14 @@ trait HasL2Param {
         val offset = x
         val set    = offset >> (offsetBits + bankBits)
         val tag    = set >> setBits
-        // (tag(tagBits - 1, 0), set(setBits - 1, 0), offset(offsetBits - 1, 0)) // TODO:
         (tag, set(setBits - 1, 0), offset(offsetBits - 1, 0))
+    }
+
+    def parseFullAddress(x: UInt): (UInt, UInt, UInt) = {
+        val offset = x
+        val set    = offset >> offsetBits
+        val tag    = set >> setBits
+        (tag(fullTagBits - 1, 0), set(setBits - 1, 0), offset(offsetBits - 1, 0))
     }
 
     def fastArb[T <: Data](in: Seq[DecoupledIO[T]], out: DecoupledIO[T], name: Option[String] = None): Unit = {

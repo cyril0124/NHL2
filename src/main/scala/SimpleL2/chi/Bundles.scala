@@ -41,7 +41,7 @@ case class CHIBundleParameters(
         case _         => 4
     }
     require(nodeIdBits >= 7 && nodeIdBits <= 11)
-    require(addressBits >= 44 && addressBits <= 52)
+    require(addressBits >= 44 && addressBits <= 52, s"addressBits: ${addressBits}")
     require(isPow2(dataBits))
     require(dataBits == 128 || dataBits == 256 || dataBits == 512)
 }

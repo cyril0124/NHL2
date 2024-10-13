@@ -70,7 +70,7 @@ class MergeTaskBundle(implicit p: Parameters) extends L2Bundle {
     val task   = new TaskBundle
 }
 
-class PrefetchRespWithSource(sourceBits: Int)(implicit p: Parameters) extends coupledL2.prefetch.PrefetchResp {
+class PrefetchRespWithSource(sourceBits: Int)(implicit p: Parameters) extends SimpleL2.prefetch.PrefetchResp {
     val source = UInt(sourceBits.W)
 }
 

@@ -23,7 +23,7 @@ local function generate_mill_build_targets(build_info_tbl)
             for i, module in ipairs(modules) do
                 print("")
                 print("-------------------------------------------------------------")
-                print("[%d/%d] ==> build_all %s.%s", #modules, i, package, module)
+                print("[%d/%d] ==> build_all %s.%s", i, #modules, package, module)
                 print("-------------------------------------------------------------")
                 os.exec("mill -i %s.runMain %s.%s -td %s", mill_project, package, module, mill_build_dir)
             end

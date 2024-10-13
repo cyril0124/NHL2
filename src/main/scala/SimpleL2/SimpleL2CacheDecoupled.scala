@@ -10,11 +10,8 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptionsKey, PerfCounterOptions}
 import xs.utils.FastArbiter
-import coupledL2.prefetch.Prefetcher
-import utility.PerfCounterOptionsKey
-import utility.PerfCounterOptions
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
@@ -46,7 +43,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
         responseFields = Nil,
         requestKeys = Seq(AliasKey) ++ {
             if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                Seq(coupledL2.VaddrKey, huancun.PrefetchKey)
+                Seq(VaddrKey, PrefetchKey)
             else
                 Nil
         },
@@ -60,20 +57,12 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
     val device     = new SimpleDevice("l2", Seq("xiangshan,simpleL2"))
     val eccIntNode = IntSourceNode(IntSourcePortSimple(resources = device.int))
 
-    println(s"[${this.getClass().toString()}] addressBits:$addressBits")
-    println(s"[${this.getClass().toString()}] tagBits:$tagBits")
-    println(s"[${this.getClass().toString()}] setBits:$setBits")
-    println(s"[${this.getClass().toString()}] bankBits:$bankBits")
-    println(s"[${this.getClass().toString()}] offsetBits:$offsetBits")
-    println(s"[${this.getClass().toString()}] enablePrefetch:$enablePrefetch")
-
     lazy val module = new Impl
     class Impl extends LazyModuleImp(this) {
+        def finalEdgeIn = sinkNodes.head.in.head._2
 
-        val l2ToTlbParams: Parameters = p.alterPartial {
-            case EdgeInKey            => sinkNodes.head.in.head._2
-            case coupledL2.EdgeInKey  => sinkNodes.head.in.head._2
-            case coupledL2.EdgeOutKey => sinkNodes.head.out.head._2
+        val l2ToTlbParams: Parameters = p.alterPartial { case EdgeInKey =>
+            finalEdgeIn
         }
 
         val io = IO(new Bundle {
@@ -90,8 +79,8 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 
             val prefetchOpt =
                 if (enablePrefetch) Some(new Bundle {
-                    val tlbReqs    = Vec(nrClients, new coupledL2.L2ToL1TlbIO(nRespDups = 1)(l2ToTlbParams))
-                    val recv_addrs = Vec(nrClients, Flipped((new coupledL2.prefetch.PrefetchIO)(l2ToTlbParams).recv_addr.cloneType))
+                    val tlbReqs    = Vec(nrClients, new SimpleL2.prefetch.L2ToL1TlbIO(nRespDups = 1)(l2ToTlbParams))
+                    val recv_addrs = Vec(nrClients, Flipped((new SimpleL2.prefetch.PrefetchIO)(l2ToTlbParams).recv_addr.cloneType))
                 })
                 else None
         })
@@ -101,10 +90,9 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
             // TODO: prefetcher receiver
             if (enablePrefetch)
                 Some(
-                    Module(new coupledL2.prefetch.Prefetcher()(p.alterPartial {
-                        case EdgeInKey           => sinkNodes.head.in.head._2
-                        case coupledL2.EdgeInKey => sinkNodes.head.in.head._2
-                        case MaxHartIdBits       => 12 // TODO:
+                    Module(new SimpleL2.prefetch.Prefetcher()(p.alterPartial {
+                        case EdgeInKey     => finalEdgeIn
+                        case MaxHartIdBits => 12 // TODO:
                     }))
                 )
             else None
@@ -137,11 +125,8 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 
         val linkMonitor = Module(new LinkMonitorDecoupled())
         val slices = (0 until nrSlice).map { i =>
-            val edgeIn = sinkNodes(i).in.head._2
-
-            Module(new Slice()(p.alterPartial {
-                case EdgeInKey           => edgeIn
-                case coupledL2.EdgeInKey => edgeIn
+            Module(new Slice()(p.alterPartial { case EdgeInKey =>
+                sinkNodes(i).in.head._2
             }))
         }
 
@@ -160,7 +145,6 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
         }
 
         if (enablePrefetch) {
-            val edgeIn = sinkNodes.head.in.head._2
 
             /** Prefetcher Req */
             slices.zipWithIndex.foreach { case (slice, i) =>
@@ -181,7 +165,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
             /** Prefetch Train */
             val prefetchTrain    = WireInit(0.U.asTypeOf(slices.head.io.prefetchTrainOpt.get.cloneType))
             val prefetchTrainArb = Module(new FastArbiter(slices.head.io.prefetchTrainOpt.get.bits.cloneType, nrSlice))
-            val trainClientOH    = getClientBitOH(prefetchTrain.bits.source, edgeIn)
+            val trainClientOH    = getClientBitOH(prefetchTrain.bits.source, finalEdgeIn)
             prefetchTrainArb.io.in <> slices.map(_.io.prefetchTrainOpt.get)
             prefetchTrain          <> prefetchTrainArb.io.out
             prefetchTrain.ready    := prefetchersOpt.map(_.get.io.train.ready).reduce(_ || _)
@@ -197,7 +181,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
             /** Prefetch Resp */
             val prefetchResp    = WireInit(0.U.asTypeOf(slices.head.io.prefetchRespOpt.get.cloneType))
             val prefetchRespArb = Module(new FastArbiter(slices.head.io.prefetchRespOpt.get.bits.cloneType, nrSlice))
-            val respClientOH    = getClientBitOH(prefetchResp.bits.source, edgeIn)
+            val respClientOH    = getClientBitOH(prefetchResp.bits.source, finalEdgeIn)
             prefetchRespArb.io.in <> slices.map(_.io.prefetchRespOpt.get)
             prefetchResp          <> prefetchRespArb.io.out
             prefetchResp.ready    := prefetchersOpt.map(_.get.io.resp.ready).reduce(_ || _)
@@ -310,7 +294,7 @@ class SimpleL2CacheWrapperDecoupled(idRangeMax: Int = 16, nodeID: Int = 0)(impli
                     echoFields = Nil,
                     requestFields = Seq(AliasField(2)) ++ {
                         if (cacheParams.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                            Seq(coupledL2.VaddrField(cacheParams.clientCaches.map(_.vaddrBitsOpt.get).max), huancun.PrefetchField())
+                            Seq(VaddrField(cacheParams.clientCaches.map(_.vaddrBitsOpt.get).max), PrefetchField())
                         else
                             Nil
                     },
@@ -402,7 +386,7 @@ object SimpleL2CacheDecoupled extends App {
     val nrSlice = 2
     val nodeID  = 12
 
-    utility.Constantin.init(false)
+    xs.utils.Constantin.init(false)
 
     val config = new Config((_, _, _) => {
         case DebugOptionsKey => DebugOptions()
@@ -413,15 +397,10 @@ object SimpleL2CacheDecoupled extends App {
                 nrSlice = nrSlice,
                 useDiplomacy = true,
                 clientCaches = Seq.fill(nrCore)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
-                prefetchParams = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true))
+                // optParam = L2OptimizationParam(sinkaStallOnReqArb = true),
+                prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true), SimpleL2.prefetch.PrefetchReceiverParams())
             )
 
-        // for prefetch
-        case coupledL2.L2ParamKey =>
-            coupledL2.L2Param(
-                clientCaches = Seq(coupledL2.L1Param(vaddrBitsOpt = Some(48))),
-                prefetch = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true), coupledL2.prefetch.PrefetchReceiverParams())
-            )
         case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
     })
 

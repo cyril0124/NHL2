@@ -12,7 +12,7 @@ import SimpleL2.Bundles._
 class SinkA()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
         val a              = Flipped(DecoupledIO(new TLBundleA(tlBundleParams)))
-        val prefetchReqOpt = if (enablePrefetch) Some(Flipped(DecoupledIO(new coupledL2.prefetch.PrefetchReq))) else None
+        val prefetchReqOpt = if (enablePrefetch) Some(Flipped(DecoupledIO(new SimpleL2.prefetch.PrefetchReq))) else None
         val task           = DecoupledIO(new TaskBundle)
         val sliceId        = Input(UInt(bankBits.W))
     })
@@ -35,8 +35,8 @@ class SinkA()(implicit p: Parameters) extends L2Module {
             io.task.bits.set    := set
             io.task.bits.tag    := tag
 
-            io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(coupledL2.VaddrKey).getOrElse(0.U))
-            io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(huancun.PrefetchKey).getOrElse(false.B))
+            io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(VaddrKey).getOrElse(0.U))
+            io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(PrefetchKey).getOrElse(false.B))
             io.task.bits.aliasOpt.foreach(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
         }.otherwise {
             val req    = io.prefetchReqOpt.get.bits
@@ -74,8 +74,8 @@ class SinkA()(implicit p: Parameters) extends L2Module {
         io.task.bits.set     := set
         io.task.bits.tag     := tag
 
-        io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(coupledL2.VaddrKey).getOrElse(0.U))
-        io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(huancun.PrefetchKey).getOrElse(false.B))
+        io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(VaddrKey).getOrElse(0.U))
+        io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(PrefetchKey).getOrElse(false.B))
         io.task.bits.aliasOpt.foreach(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
 
         io.a.ready := io.task.ready

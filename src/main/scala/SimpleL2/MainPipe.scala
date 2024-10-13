@@ -76,7 +76,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         val retryTasks       = new MpMshrRetryTasks
         val nonDataRespCnt   = Input(UInt(log2Ceil(nrNonDataSourceDEntry + 1).W))
         val txrspCnt         = Input(UInt(log2Ceil(nrTXRSPEntry + 1).W))
-        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new coupledL2.prefetch.PrefetchTrain())) else None
+        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new SimpleL2.prefetch.PrefetchTrain())) else None
     })
 
     io <> DontCare

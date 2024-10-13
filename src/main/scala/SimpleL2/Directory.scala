@@ -110,7 +110,7 @@ class DirectoryMetaEntryNoTag(implicit p: Parameters) extends L2Bundle {
     val clientsOH       = UInt(nrClients.W)
     val aliasOpt        = aliasBitsOpt.map(width => UInt(width.W))
     val fromPrefetchOpt = if (hasPrefetchBit) Some(Bool()) else None
-    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(coupledL2.prefetch.PfSource.pfSourceBits.W)) else None
+    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(SimpleL2.prefetch.PfSource.pfSourceBits.W)) else None
 }
 
 object DirectoryMetaEntryNoTag {
@@ -133,7 +133,7 @@ class DirectoryMetaEntry(implicit p: Parameters) extends L2Bundle with HasMixedS
     val clientsOH       = UInt(nrClients.W)
     val aliasOpt        = aliasBitsOpt.map(width => UInt(width.W))
     val fromPrefetchOpt = if (hasPrefetchBit) Some(Bool()) else None
-    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(coupledL2.prefetch.PfSource.pfSourceBits.W)) else None
+    val prefetchSrcOpt  = if (hasPrefetchSrc) Some(UInt(SimpleL2.prefetch.PfSource.pfSourceBits.W)) else None
 }
 
 object DirectoryMetaEntry {

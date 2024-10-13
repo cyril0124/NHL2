@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import utility.ReqSourceKey
+import xs.utils.tl.ReqSourceKey
 import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -34,11 +34,17 @@ class Slice()(implicit p: Parameters) extends L2Module {
 
         val pCrdRetryInfoVec = Output(Vec(nrMSHR, new PCrdRetryInfo))
 
-        val prefetchReqOpt   = if (enablePrefetch) Some(Flipped(DecoupledIO(new coupledL2.prefetch.PrefetchReq))) else None
-        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new coupledL2.prefetch.PrefetchTrain)) else None
+        val prefetchReqOpt   = if (enablePrefetch) Some(Flipped(DecoupledIO(new SimpleL2.prefetch.PrefetchReq))) else None
+        val prefetchTrainOpt = if (enablePrefetch) Some(DecoupledIO(new SimpleL2.prefetch.PrefetchTrain)) else None
         val prefetchRespOpt  = if (enablePrefetch) Some(DecoupledIO(new PrefetchRespWithSource(tlBundleParams.sourceBits))) else None
     })
 
+    println(s"[${this.getClass().toString()}] addressBits:$addressBits")
+    println(s"[${this.getClass().toString()}] tagBits:$tagBits")
+    println(s"[${this.getClass().toString()}] setBits:$setBits")
+    println(s"[${this.getClass().toString()}] bankBits:$bankBits")
+    println(s"[${this.getClass().toString()}] offsetBits:$offsetBits")
+    println(s"[${this.getClass().toString()}] enablePrefetch:$enablePrefetch")
     println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
     println(s"[${this.getClass().toString()}] optParam:${optParam}")
     println(s"[${this.getClass().toString()}] TaskBundle bits:${(new TaskBundle).getWidth}")
@@ -253,11 +259,11 @@ object Slice extends App {
     val CFG_CLIENT = sys.env.get("CFG_CLIENT").getOrElse("2")
     println(s"CFG_CLIENT = $CFG_CLIENT")
 
-    utility.Constantin.init(false)
+    xs.utils.Constantin.init(false)
 
     val config = new Config((_, _, _) => {
         // Fake EdgeInKey for prefetcher depends on it
-        case coupledL2.EdgeInKey =>
+        case EdgeInKey =>
             new TLEdgeIn(
                 client = TLClientPortParameters(
                     Seq(
@@ -270,12 +276,11 @@ object Slice extends App {
                 manager = TLManagerPortParameters(
                     managers = Seq(TLSlaveParameters.v1(address = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)))),
                     beatBytes = 32,
-                    requestKeys = Seq(AliasKey, coupledL2.VaddrKey, ReqSourceKey)
+                    requestKeys = Seq(AliasKey, VaddrKey, ReqSourceKey)
                 ),
                 params = Parameters.empty,
                 sourceInfo = SourceInfo.materialize
             )
-        case coupledL2.L2ParamKey => coupledL2.L2Param(clientCaches = Seq(coupledL2.L1Param(vaddrBitsOpt = Some(48))))
 
         case L2ParamKey =>
             L2Param(
@@ -293,8 +298,7 @@ object Slice extends App {
                     mshrStallOnReqArb = true,
                     latchTempDsToDs = true
                 ),
-                vaddrBitsOpt = Some(48),
-                prefetchParams = Seq(coupledL2.prefetch.BOPParameters(virtualTrain = true))
+                prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true))
             )
         case DebugOptionsKey => DebugOptions()
     })
