@@ -181,6 +181,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         val respMapCancel = DecoupledIO(UInt(mshrBits.W))
         val pCrdRetryInfo = Output(new PCrdRetryInfo) // Each MSHR has a pCrdRetryInfo interface which provides the essential information for the PCrdGrant transaction to match exactly one MSHR.
         val id            = Input(UInt(mshrBits.W))
+        val sliceId       = Input(UInt(bankBits.W))
     })
 
     val valid   = RegInit(false.B)
@@ -426,7 +427,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         Mux(CHIOpcodeSNP.isSnpUniqueX(req.opcode) || CHIOpcodeSNP.isSnpToN(req.opcode), toN, toB),
         Mux(!state.s_rprobe, toN, Mux(reqNeedT || req.isAliasTask, toN, toB))
     )
-    io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, 0.U(6.W)) // TODO: MultiBank
+    io.tasks.sourceb.bits.address := Cat(Mux(!state.s_rprobe, meta.tag, req.tag), req.set, io.sliceId, 0.U(6.W))
     io.tasks.sourceb.bits.size    := log2Ceil(blockBytes).U
     io.tasks.sourceb.bits.data    := Cat(dirResp.meta.aliasOpt.getOrElse(0.U), 0.U(1.W))
     io.tasks.sourceb.bits.mask    := DontCare

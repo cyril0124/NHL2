@@ -193,6 +193,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
     missHandler.io.retryTasks         <> mainPipe.io.retryTasks
     missHandler.io.mshrEarlyNested_s2 <> mainPipe.io.mshrEarlyNested_s2
     missHandler.io.mshrNested_s3      <> mainPipe.io.mshrNested_s3
+    missHandler.io.sliceId            := io.sliceId
 
     io.pCrdRetryInfoVec <> missHandler.io.pCrdRetryInfoVec
 

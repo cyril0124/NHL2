@@ -37,6 +37,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
         val retryTasks         = Flipped(new MpMshrRetryTasks)
         val respMapCancel      = DecoupledIO(UInt(mshrBits.W))          // to SinkC
         val pCrdRetryInfoVec   = Output(Vec(nrMSHR, new PCrdRetryInfo)) // used by L2 top to match the desired Slice
+        val sliceId            = Input(UInt(bankBits.W))
     })
 
     io <> DontCare
@@ -101,7 +102,8 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     )
 
     mshrs.zip(UIntToOH(io.mshrAlloc_s3.bits.mshrId).asBools).zipWithIndex.foreach { case ((mshr, en), i) =>
-        mshr.io.id := i.U
+        mshr.io.id      := i.U
+        mshr.io.sliceId := io.sliceId
 
         mshr.io.alloc_s3.valid := io.mshrAlloc_s3.fire && en
         mshr.io.alloc_s3.bits  := io.mshrAlloc_s3.bits
