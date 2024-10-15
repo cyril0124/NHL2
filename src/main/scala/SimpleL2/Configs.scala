@@ -109,7 +109,7 @@ trait HasL2Param {
     val idsAll        = 256
 
     def tlAddressBits = if (l2param.useDiplomacy) edgeIn.bundle.addressBits else l2param.addressBits
-    def chiAddressBits = if (l2param.chiBundleParams.isDefined) l2param.chiBundleParams.get.addressBits else 44
+    def chiAddressBits = if (l2param.chiBundleParams.isDefined) l2param.chiBundleParams.get.addressBits else l2param.addressBits
     def addressBits = tlAddressBits
     def tagBits = l2param.addressBits - setBits - bankBits - offsetBits
 
