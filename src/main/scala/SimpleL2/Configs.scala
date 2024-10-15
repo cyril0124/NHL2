@@ -12,6 +12,7 @@ import xs.utils.FastArbiter
 import xs.utils.Code
 import SimpleL2._
 import SimpleL2.chi._
+import freechips.rocketchip.diplomacy.AddressSet
 
 // Extra address bits for alias request
 case object AliasKey extends ControlKey[UInt]("alias")
@@ -53,7 +54,7 @@ case class L2Param(
     blockBytes: Int = 64,
     beatBytes: Int = 32,
     dataBits: Int = 64 * 8,                              // 64 Byte
-    addressBits: Int = 44,                               // used when diplomacy is not enabled
+    addressBits: Int = 48,                               // used when diplomacy is not enabled
     chiBundleParams: Option[CHIBundleParameters] = None, // This will overwrite the default chi bundle parameters
     pageBytes: Int = 4096,                               // for prefetcher
     clientCaches: Seq[L1Param] = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
@@ -81,6 +82,8 @@ case class L2Param(
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
     require(clientCaches.length >= 1)
     require(dataEccCode == "none" || dataEccCode == "identity" || dataEccCode == "parity" || dataEccCode == "sec" || dataEccCode == "secded")
+    private val addressMask = (1L << addressBits) - 1
+    val addressSet = AddressSet(0, addressMask)
 }
 
 trait HasL2Param {

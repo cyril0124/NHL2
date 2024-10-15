@@ -21,7 +21,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
     val atom   = TransferSizes(1, beatBytes)
     val access = TransferSizes(1, blockBytes)
 
-    val addressRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)) // TODO: parameterize this
+    val addressRange = Seq(l2param.addressSet)
     val managerParameters = TLSlavePortParameters.v1(
         managers = Seq(
             TLSlaveParameters.v1(
