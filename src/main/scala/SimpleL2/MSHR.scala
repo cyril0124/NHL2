@@ -6,7 +6,6 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import xs.utils.{ParallelPriorityMux}
 import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.chi._
@@ -1410,10 +1409,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 }
 
 object MSHR extends App {
-    val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
-    })
+    val config = SimpleL2.DefaultConfig()
 
     GenerateVerilog(args, () => new MSHR()(config), name = "MSHR", split = false)
 }

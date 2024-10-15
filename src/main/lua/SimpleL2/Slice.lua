@@ -714,7 +714,7 @@ local test_sinkA_hit = env.register_test_case "test_sinkA_hit" {
         write_dir(0x00, ("0b0010"):number(), 0x04, MixedState.TC, 2)
         env.negedge()
             tl_a:acquire_block_1(to_address(0, 4), TLParam.NtoT, 28)
-            tl_a.bits.user_alias:set(1)
+            tl_a.bits.user_nanhu_alias:set(1)
         env.negedge()
             tl_a.valid:set(0)
         sync:send()

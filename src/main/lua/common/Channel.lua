@@ -34,10 +34,10 @@ local function build_channel(tl_prefix, chi_prefix)
         | size
         | source
         | address
-        | user_needHint
-        | user_vaddr
-        | user_alias
-    ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = tl_prefix .. "a_", name = "tl_a", optional_signals = {"user_needHint", "user_vaddr", "user_alias"} }
+        | user_nanhu_pfHint
+        | user_nanhu_vaddr
+        | user_nanhu_alias
+    ]]):bundle {hier = cfg.top, is_decoupled=true, prefix = tl_prefix .. "a_", name = "tl_a", optional_signals = {"user_nanhu_pfHint", "user_nanhu_vaddr", "user_nanhu_alias"} }
     
     local tl_b = ([[
         | valid
@@ -100,10 +100,10 @@ local function build_channel(tl_prefix, chi_prefix)
             this.bits.address:set(addr, true)
             this.bits.param:set(param)
             this.bits.source:set(source or 0)
-            this.bits.user_alias:set(0)
+            this.bits.user_nanhu_alias:set(0)
             this.bits.size:set(6) -- 2^6 == 64
             if need_hint ~= nil then
-                this.bits.user_needHint:set(need_hint)
+                this.bits.user_nanhu_pfHint:set(need_hint)
             end
             env.posedge()
             this.ready:expect(1)
@@ -123,7 +123,7 @@ local function build_channel(tl_prefix, chi_prefix)
             this.bits.address:set(addr, true)
             this.bits.param:set(param)
             this.bits.source:set(source or 0)
-            this.bits.user_alias:set(alias or 0)
+            this.bits.user_nanhu_alias:set(alias or 0)
             this.bits.size:set(6) -- 2^6 == 64
         env.negedge()
             this.valid:set(0)

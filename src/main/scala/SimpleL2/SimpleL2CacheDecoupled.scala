@@ -11,11 +11,11 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
 import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
+import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey, TLUserKey, TLUserParams}
 import xs.utils.FastArbiter
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
-import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey}
 
 class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasL2Param {
     val xfer   = TransferSizes(blockBytes, blockBytes)
@@ -268,7 +268,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 class SimpleL2CacheWrapperDecoupled(idRangeMax: Int = 16, nodeID: Int = 0)(implicit p: Parameters) extends LazyModule {
     val cacheParams = p(L2ParamKey)
 
-    val nrCore         = cacheParams.clientCaches.length
+    val nrCore         = cacheParams.nrClients
     val nrSlice        = cacheParams.nrSlice
     val ways           = cacheParams.ways
     val sets           = cacheParams.sets
@@ -381,13 +381,14 @@ object SimpleL2CacheDecoupled extends App {
 
     val config = new Config((_, _, _) => {
         case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 4,
                 sets = 256,
                 nrSlice = nrSlice,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(nrCore)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
+                nrClients = nrCore,
                 // optParam = L2OptimizationParam(sinkaStallOnReqArb = true),
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true), SimpleL2.prefetch.PrefetchReceiverParams())
             )

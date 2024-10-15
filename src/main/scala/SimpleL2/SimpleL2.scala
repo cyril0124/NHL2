@@ -12,11 +12,11 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
 import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
+import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey, TLUserKey, TLUserParams}
 import xs.utils.FastArbiter
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
-import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey}
 
 abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HadMixedStateOps
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
@@ -38,6 +38,14 @@ object _assert {
         }
         assert(RegNext(cond), "at " + debugInfo)
     }
+}
+
+object DefaultConfig {
+    def apply() = new Config((_, _, _) => {
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case L2ParamKey      => L2Param()
+        case DebugOptionsKey => DebugOptions()
+    })
 }
 
 class CHIBundleDownstream_1(params: CHIBundleParameters, aggregateIO: Boolean = false) extends Bundle {
@@ -339,7 +347,7 @@ class SimpleL2CacheWrapper(idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: B
     val cacheParams = p(L2ParamKey)
 
     val blockBytes     = cacheParams.blockBytes
-    val nrCore         = cacheParams.clientCaches.length
+    val nrCore         = cacheParams.nrClients
     val nrSlice        = cacheParams.nrSlice
     val ways           = cacheParams.ways
     val sets           = cacheParams.sets
@@ -472,13 +480,14 @@ object SimpleL2Cache extends App {
 
     val config = new Config((_, _, _) => {
         case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 4,
                 sets = 256,
                 nrSlice = nrSlice,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(nrCore)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
+                nrClients = nrCore,
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true), SimpleL2.prefetch.PrefetchReceiverParams())
             )
 
@@ -495,49 +504,53 @@ object SimpleL2CacheFinal extends App {
     val nodeID = 12
 
     val config_256kb_8way_2slice_1core = new Config((_, _, _) => {
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
                 sets = 256,
                 nrSlice = 2,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
+                nrClients = 1
             )
         case DebugOptionsKey => DebugOptions()
     })
 
     val config_256kb_8way_4slice_1core = new Config((_, _, _) => {
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
                 sets = 128,
                 nrSlice = 4,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
+                nrClients = 1
             )
         case DebugOptionsKey => DebugOptions()
     })
 
     val config_128kb_8way_2slice_1core = new Config((_, _, _) => {
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
                 sets = 128,
                 nrSlice = 2,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
+                nrClients = 1
             )
         case DebugOptionsKey => DebugOptions()
     })
 
     val config_1024kb_8way_2slice_2core = new Config((_, _, _) => {
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
                 sets = 1024,
                 nrSlice = 2,
                 useDiplomacy = true,
-                clientCaches = Seq.fill(2)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48)))
+                nrClients = 2
             )
         case DebugOptionsKey => DebugOptions()
     })

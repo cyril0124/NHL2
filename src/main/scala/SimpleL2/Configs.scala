@@ -10,6 +10,7 @@ import freechips.rocketchip.util.{BundleField, BundleFieldBase, BundleKeyBase, C
 import org.chipsalliance.cde.config._
 import xs.utils.FastArbiter
 import xs.utils.Code
+import xs.utils.tl.TLUserKey
 import SimpleL2._
 import SimpleL2.chi._
 import freechips.rocketchip.diplomacy.AddressSet
@@ -46,7 +47,7 @@ case class L2Param(
     addressBits: Int = 48,                               // used when diplomacy is not enabled
     chiBundleParams: Option[CHIBundleParameters] = None, // This will overwrite the default chi bundle parameters
     pageBytes: Int = 4096,                               // for prefetcher
-    clientCaches: Seq[L1Param] = Seq.fill(1)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
+    nrClients: Int = 1,
     nrMSHR: Int = 16,
     nrExtraSinkId: Int = 16, // Extra sink ids for hit Acquire requests which need to wait GrantAck
     nrReplayEntrySinkA: Int = 4,
@@ -69,10 +70,10 @@ case class L2Param(
     require(dataBits == 64 * 8)
     require(nrSlice >= 1)
     require(replacementPolicy == "random" || replacementPolicy == "plru" || replacementPolicy == "lru")
-    require(clientCaches.length >= 1)
     require(dataEccCode == "none" || dataEccCode == "identity" || dataEccCode == "parity" || dataEccCode == "sec" || dataEccCode == "secded")
+
     private val addressMask = (1L << addressBits) - 1
-    val addressSet = AddressSet(0, addressMask)
+    val addressSet          = AddressSet(0, addressMask)
 }
 
 trait HasL2Param {
@@ -130,15 +131,12 @@ trait HasL2Param {
 
     val deadlockThreshold = 10000 * 2
 
-    val clientCaches = l2param.clientCaches
-    val nrClients    = l2param.clientCaches.length
+    val nrClients = l2param.nrClients
 
-    val aliasBitsOpt =
-        if (clientCaches.isEmpty) None
-        else {
-            val maxAliasBits = clientCaches.map(_.aliasBitsOpt.getOrElse(0)).max
-            if (maxAliasBits == 0) None else Some(maxAliasBits)
-        }
+    val aliasBitsOpt = {
+        val aliasBits = p(TLUserKey).aliasBits
+        if (aliasBits == 0) None else Some(aliasBits)
+    }
 
     lazy val edgeIn = p(EdgeInKey)
 
@@ -146,12 +144,10 @@ trait HasL2Param {
      * vaddr without offset bits
      */
     def fullAddressBits = edgeIn.bundle.addressBits
-    val vaddrBitsOpt =
-        if (clientCaches.isEmpty) None
-        else {
-            val maxVaddrBits = clientCaches.map(_.vaddrBitsOpt.getOrElse(0)).max
-            if (maxVaddrBits == 0) None else Some(maxVaddrBits)
-        }
+    val vaddrBitsOpt = {
+        val vaddrBits = p(TLUserKey).vaddrBits
+        if (vaddrBits == 0) None else Some(vaddrBits)
+    }
     val fullVAddrBits = vaddrBitsOpt.getOrElse(0) + offsetBits
     def fullTagBits = fullAddressBits - setBits - offsetBits
 

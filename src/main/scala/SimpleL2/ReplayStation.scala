@@ -3,7 +3,6 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import xs.utils.FastArbiter
 import Utils.GenerateVerilog
 import SimpleL2.chi.Resp
@@ -199,10 +198,7 @@ class ReplayStation(nrReplayEntry: Int = 4, nrSubEntry: Int = 4)(implicit p: Par
 }
 
 object ReplayStation extends App {
-    val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
-    })
+    val config = SimpleL2.DefaultConfig()
 
     GenerateVerilog(args, () => new ReplayStation()(config), name = "ReplayStation", split = false)
 }

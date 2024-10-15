@@ -3,7 +3,6 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, SkidBuffer, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._

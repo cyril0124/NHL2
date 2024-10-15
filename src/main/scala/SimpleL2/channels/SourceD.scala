@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.tl.MemReqSource
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, SkidBuffer, LeakChecker, IDPoolAlloc}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -67,7 +66,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
     assert(!(io.task_s4.fire && needData(io.task_s4.bits.opcode)), "task_s4 is not for data resp")
     assert(!(taskFire && (task.opcode === GrantData || task.opcode === Grant) && !io.allocGrantMap.fire), "need to allocate grantMap entry!")
 
-    val sinkId = io.sinkIdAlloc.idOut
+    val sinkId = io.sinkIdAlloc.idOut // Hit Acquire requests did not require to allocate MSHR so we need to allocate extra sinkId for them.
     io.sinkIdAlloc.valid := taskFire && (task.opcode === GrantData || task.opcode === Grant) && !task.isMshrTask
 
     io.data_s2.ready   := skidBuffer.io.enq.ready && needData(task.opcode) && grantMapReady
@@ -201,10 +200,7 @@ class SourceD()(implicit p: Parameters) extends L2Module {
 }
 
 object SourceD extends App {
-    val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
-    })
+    val config = SimpleL2.DefaultConfig()
 
     GenerateVerilog(args, () => new SourceD()(config), name = "SourceD", split = false)
 }

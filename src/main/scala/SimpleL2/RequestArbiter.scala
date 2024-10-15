@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink.TLMessages._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.GenerateVerilog
 import SimpleL2.chi._
 import SimpleL2.Configs._
@@ -471,10 +470,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 }
 
 object RequestArbiter extends App {
-    val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
-    })
+    val config = SimpleL2.DefaultConfig()
 
     GenerateVerilog(args, () => new RequestArbiter()(config), name = "RequestArbiter", split = false)
 }

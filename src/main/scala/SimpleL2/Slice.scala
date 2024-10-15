@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import xs.utils.tl.{ReqSourceKey, TLNanhuBusKey}
+import xs.utils.tl.{ReqSourceKey, TLNanhuBusKey, TLNanhuUserBundle, TLUserKey, TLUserParams}
 import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -53,7 +53,7 @@ class Slice()(implicit p: Parameters) extends L2Module {
         val _nrClients = edgeIn.client.clients.count(_.supports.probe)
         require(
             _nrClients == nrClients,
-            s"Number of Diplomatic clients (${_nrClients}) does not match number of client caches (${l2param.clientCaches.length})"
+            s"Number of Diplomatic clients (${_nrClients}) does not match number of client caches (${l2param.nrClients})"
         )
     }
 
@@ -282,10 +282,10 @@ object Slice extends App {
                 params = Parameters.empty,
                 sourceInfo = SourceInfo.materialize
             )
-
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
-                clientCaches = Seq.fill(CFG_CLIENT.toInt)(L1Param(aliasBitsOpt = Some(2), vaddrBitsOpt = Some(48))),
+                nrClients = CFG_CLIENT.toInt,
                 supportDCT = true,
                 // dataEccCode = "none",
                 dataEccCode = "secded",

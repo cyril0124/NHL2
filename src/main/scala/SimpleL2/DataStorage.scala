@@ -5,7 +5,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.Code
 import xs.utils.sram.SRAMTemplate
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -328,10 +327,7 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 }
 
 object DataStorage extends App {
-    val config = new Config((_, _, _) => {
-        case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
-    })
+    val config = SimpleL2.DefaultConfig()
 
     GenerateVerilog(args, () => new DataStorage()(config), name = "DataStorage", split = true)
 }
