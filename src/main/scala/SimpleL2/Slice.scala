@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
 import xs.utils.perf.{DebugOptions, DebugOptionsKey}
-import xs.utils.tl.ReqSourceKey
+import xs.utils.tl.{ReqSourceKey, TLNanhuBusKey}
 import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -277,7 +277,7 @@ object Slice extends App {
                 manager = TLManagerPortParameters(
                     managers = Seq(TLSlaveParameters.v1(address = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL)))),
                     beatBytes = 32,
-                    requestKeys = Seq(AliasKey, VaddrKey, ReqSourceKey)
+                    requestKeys = Seq(TLNanhuBusKey, ReqSourceKey)
                 ),
                 params = Parameters.empty,
                 sourceInfo = SourceInfo.materialize

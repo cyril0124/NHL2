@@ -11,11 +11,12 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
-import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptionsKey, PerfCounterOptions}
+import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
 import xs.utils.FastArbiter
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
+import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey}
 
 abstract class L2Module(implicit val p: Parameters) extends Module with HasL2Param with HadMixedStateOps
 abstract class L2Bundle(implicit val p: Parameters) extends Bundle with HasL2Param
@@ -100,12 +101,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         beatBytes = 32,
         minLatency = 2,
         responseFields = Nil,
-        requestKeys = Seq(AliasKey) ++ {
-            if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                Seq(VaddrKey, PrefetchKey)
-            else
-                Nil
-        },
+        requestKeys = Seq(TLNanhuBusKey),
         endSinkId = idsAll * (1 << bankBits)
     )
 
@@ -367,12 +363,7 @@ class SimpleL2CacheWrapper(idRangeMax: Int = 16, nodeID: Int = 0, hasEndpoint: B
                     channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
                     minLatency = 1,
                     echoFields = Nil,
-                    requestFields = Seq(AliasField(2)) ++ {
-                        if (cacheParams.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                            Seq(VaddrField(cacheParams.clientCaches.map(_.vaddrBitsOpt.get).max), PrefetchField())
-                        else
-                            Nil
-                    },
+                    requestFields = Seq(TLNanhuBusField()),
                     responseKeys = Nil
                 )
             )

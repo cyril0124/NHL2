@@ -13,18 +13,7 @@ import xs.utils.Code
 import SimpleL2._
 import SimpleL2.chi._
 import freechips.rocketchip.diplomacy.AddressSet
-
-// Extra address bits for alias request
-case object AliasKey extends ControlKey[UInt]("alias")
-case class AliasField(width: Int) extends BundleField[UInt](AliasKey, Output(UInt(width.W)), _ := 0.U(width.W))
-
-// Pass virtual address of upper level cache
-case object VaddrKey extends ControlKey[UInt]("vaddr")
-case class VaddrField(width: Int) extends BundleField[UInt](VaddrKey, Output(UInt(width.W)), _ := 0.U(width.W))
-
-// Indicate whether the request needs to trigger prefetch
-case object PrefetchKey extends ControlKey[Bool](name = "needHint")
-case class PrefetchField() extends BundleField[Bool](PrefetchKey, Output(Bool()), _ := false.B)
+import xs.utils.tl.TLNanhuBusField
 
 case object L2ParamKey extends Field[L2Param](L2Param())
 
@@ -190,12 +179,7 @@ trait HasL2Param {
             sinkBits = 7,
             sizeBits = 3,
             echoFields = Nil,
-            requestFields = Seq(AliasField(2)) ++ { 
-                if (l2param.clientCaches.exists(_.vaddrBitsOpt.isDefined))
-                    Seq(VaddrField(l2param.clientCaches.map(_.vaddrBitsOpt.get).max), PrefetchField())
-                else 
-                    Nil
-            },
+            requestFields = Seq(TLNanhuBusField()(p)),
             responseFields = Nil,
             hasBCE = true
         )

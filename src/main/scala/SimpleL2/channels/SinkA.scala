@@ -8,6 +8,7 @@ import xs.utils.perf.{DebugOptions, DebugOptionsKey}
 import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
+import xs.utils.tl.{TLNanhuBusKey, TLNanhuUserBundle}
 
 class SinkA()(implicit p: Parameters) extends L2Module {
     val io = IO(new Bundle {
@@ -34,10 +35,10 @@ class SinkA()(implicit p: Parameters) extends L2Module {
             io.task.bits.source := io.a.bits.source
             io.task.bits.set    := set
             io.task.bits.tag    := tag
-
-            io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(VaddrKey).getOrElse(0.U))
-            io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(PrefetchKey).getOrElse(false.B))
-            io.task.bits.aliasOpt.foreach(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
+            val userField = io.a.bits.user.lift(TLNanhuBusKey).getOrElse(0.U.asTypeOf(new TLNanhuUserBundle))
+            io.task.bits.vaddrOpt.foreach(_ := userField.vaddr.getOrElse(0.U))
+            io.task.bits.needHintOpt.foreach(_ := userField.pfHint)
+            io.task.bits.aliasOpt.foreach(_ := userField.alias.getOrElse(0.U))
         }.otherwise {
             val req    = io.prefetchReqOpt.get.bits
             val bankId = req.set(bankBits - 1, 0)
@@ -73,10 +74,10 @@ class SinkA()(implicit p: Parameters) extends L2Module {
         io.task.bits.source  := io.a.bits.source
         io.task.bits.set     := set
         io.task.bits.tag     := tag
-
-        io.task.bits.vaddrOpt.foreach(_ := io.a.bits.user.lift(VaddrKey).getOrElse(0.U))
-        io.task.bits.needHintOpt.foreach(_ := io.a.bits.user.lift(PrefetchKey).getOrElse(false.B))
-        io.task.bits.aliasOpt.foreach(_ := io.a.bits.user.lift(AliasKey).getOrElse(0.U))
+        val userField = io.a.bits.user.lift(TLNanhuBusKey).getOrElse(0.U.asTypeOf(new TLNanhuUserBundle))
+        io.task.bits.vaddrOpt.foreach(_ := userField.vaddr.getOrElse(0.U))
+        io.task.bits.needHintOpt.foreach(_ := userField.pfHint)
+        io.task.bits.aliasOpt.foreach(_ := userField.alias.getOrElse(0.U))
 
         io.a.ready := io.task.ready
 
