@@ -776,7 +776,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     when(fire_s4) {
         task_s5 := task_s4
 
-        when(valid_snpdata_s4 || valid_snpdata_mp_s4 && !snpRetry_s4) {
+        when(valid_snpdata_s4) {
             task_s5.tgtID := task_s4.srcID
         }
 
