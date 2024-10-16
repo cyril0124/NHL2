@@ -161,7 +161,7 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
     io.fromSinkC.write.ready    := !full_ts1
 
     val groupValidMask = WireInit(0.U(group.W))
-    when(wen_rxdat_ts1) {
+    when(wen_rxdat_ts1 && io.fromRXDAT.write.ready) {
         val _groupValidMask = FillInterleaved(group / nrBeat, wMsk_rxdat_ts1)
         require(_groupValidMask.getWidth == groupValidMask.getWidth)
 
