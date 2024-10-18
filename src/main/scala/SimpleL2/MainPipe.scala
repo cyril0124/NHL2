@@ -449,7 +449,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
          */
         isFwdSnoop_s3,
         task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty /* snpHitWriteBack needs to read Directory but snpHitReq does not */,
-        meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty
+        (meta_s3.isDirty || task_s3.retToSrc || !task_s3.retToSrc && meta_s3.isDirty || task_s3.snpGotDirty) && !CHIOpcodeSNP.isSnpMakeInvalidX(task_s3.opcode)
     )
     val snpNeedData_mshr_s3 = mpTask_snpresp_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT
     val snpChnlReqOK_s3     = !task_s3.isMshrTask && !(task_s3.snpHitReq && task_s3.readTempDs) && isSnoop_s3 && task_s3.isChannelB && !mshrAlloc_b_s3 && !mshrRealloc_s3 && valid_s3 // Can ack snoop request without allocating MSHR, Snoop miss did not need mshr, response with SnpResp_I
