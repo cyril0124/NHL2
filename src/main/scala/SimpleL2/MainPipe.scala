@@ -641,7 +641,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
                             )
                         )
                     ),
-                    snprespPassDirty_s3
+                    snprespPassDirty_s3 && !CHIOpcodeSNP.isSnpMakeInvalidX(task_s3.opcode)
                 )
             )
         )
