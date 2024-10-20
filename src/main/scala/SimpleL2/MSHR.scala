@@ -650,7 +650,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.channel     := Mux(snprespNeedData, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := snprespNeedData && !releaseGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
-    mpTask_snpresp.bits.updateDir   := hasValidProbeAck && !isRealloc || isSnpFwd && (isSnpToB && !dirResp.meta.isBranch || isSnpToN) // Update directory info when then received ProbeAck params are not all NtoN.
+    mpTask_snpresp.bits.updateDir   := hasValidProbeAck && !isRealloc || !hasValidProbeAck && isSnpToN || isSnpFwd && (isSnpToB && !dirResp.meta.isBranch || isSnpToN) // Update directory info when then received ProbeAck params are not all NtoN.
     mpTask_snpresp.bits.newMetaEntry := DirectoryMetaEntryNoTag(
         dirty = snprespFinalDirty,
         state = snprespFinalState,
