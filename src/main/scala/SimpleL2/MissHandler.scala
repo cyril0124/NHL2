@@ -4,12 +4,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.SeqToAugmentedSeq
+import xs.utils.ResetRRArbiter
 import Utils.GenerateVerilog
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
 import SimpleL2.chi._
 import SimpleL2.chi.CHIOpcodeRSP._
-import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class MshrAllocBundle(implicit p: Parameters) extends L2Bundle {
     val req      = new TaskBundle
@@ -81,7 +82,7 @@ class MissHandler()(implicit p: Parameters) extends L2Module {
     val rxrsp             = io.resps.rxrsp
     val rxrspIsPCrdGrant  = rxrsp.bits.chiOpcode === PCrdGrant
     val pCrdGrantMatchVec = VecInit(mshrs.map(m => m.io.pCrdRetryInfo.valid && m.io.pCrdRetryInfo.pCrdType === rxrsp.bits.pCrdType && m.io.pCrdRetryInfo.srcID === rxrsp.bits.srcID)).asUInt
-    val pCrdGrantArb      = Module(new RRArbiter(Bool(), nrMSHR)) // If there is more than one MSHR that matches the PCrdGrant, use a round-robin arbiter to choose one MSHR for the PCrdGrant go in. This would be a fair policy for each MSHR.
+    val pCrdGrantArb      = Module(new ResetRRArbiter(Bool(), nrMSHR)) // If there is more than one MSHR that matches the PCrdGrant, use a round-robin arbiter to choose one MSHR for the PCrdGrant go in. This would be a fair policy for each MSHR.
     val pCrdGrantMatchOH  = UIntToOH(pCrdGrantArb.io.chosen)(nrMSHR - 1, 0)
     val rxrspMatchOH      = Mux(rxrspIsPCrdGrant, pCrdGrantMatchOH, UIntToOH(rxrsp.bits.txnID)(nrMSHR - 1, 0))
     pCrdGrantArb.io.in.zipWithIndex.foreach { case (in, i) =>

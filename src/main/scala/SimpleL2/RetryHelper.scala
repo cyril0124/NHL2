@@ -3,6 +3,7 @@ package SimpleL2
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
+import xs.utils.ResetRRArbiter
 import SimpleL2.Configs._
 import SimpleL2.chi._
 import SimpleL2.chi.CHIOpcodeRSP._
@@ -30,7 +31,7 @@ class RetryHelper(implicit p: Parameters) extends L2Module {
     /** PCrdGrant needs to match the pCrdRetryInfoVec provided by each [[Slice]] to determine which [[Slice]] to send the PCrdGrant to. */
     val rxrspIsPCrdGrant  = rxrsp.bits.opcode === PCrdGrant
     val pCrdGrantMatchVec = VecInit(io.pCrdRetryInfoVecs.map(s => s.map(r => r.pCrdType === rxrsp.bits.pCrdType && r.srcID === rxrsp.bits.srcID && r.valid).reduce(_ || _))).asUInt
-    val pCrdGrantArb      = Module(new RRArbiter(Bool(), nrSlice)) // If there is more than one Slice that matches the PCrdGrant, use a round-robin arbiter to choose one Slice for the PCrdGrant go in. This would be a fair policy for each Slice.
+    val pCrdGrantArb      = Module(new ResetRRArbiter(Bool(), nrSlice)) // If there is more than one Slice that matches the PCrdGrant, use a round-robin arbiter to choose one Slice for the PCrdGrant go in. This would be a fair policy for each Slice.
     val pCrdGrantSliceID  = pCrdGrantArb.io.chosen
     pCrdGrantArb.io.out.ready := true.B
     pCrdGrantArb.io.in.zipWithIndex.foreach { case (in, i) =>
@@ -110,7 +111,7 @@ class RetryHelper(implicit p: Parameters) extends L2Module {
 
     /** The resend PCrdGrant can also match multiple valid [[Slice]]s. To handle this, we should round-robin choose one [[Slice]] to consume the PCrdGrant transaction. */
     val pCrdGrantMatchVec_resend = VecInit(io.pCrdRetryInfoVecs.map(s => s.map(r => r.pCrdType === resendPCrdGrant.bits.pCrdType && r.srcID === resendPCrdGrant.bits.srcID && r.valid).reduce(_ || _))).asUInt
-    val pCrdGrantArb_resend      = Module(new RRArbiter(Bool(), nrSlice)) // If there is more than one Slice that matches the PCrdGrant, use a round-robin arbiter to choose one Slice for the PCrdGrant go in. This would be a fair policy for each Slice.
+    val pCrdGrantArb_resend      = Module(new ResetRRArbiter(Bool(), nrSlice)) // If there is more than one Slice that matches the PCrdGrant, use a round-robin arbiter to choose one Slice for the PCrdGrant go in. This would be a fair policy for each Slice.
     val pCrdGrantSliceID_resend  = pCrdGrantArb_resend.io.chosen
     pCrdGrantArb_resend.io.out.ready := io.rxrspOut.ready
     pCrdGrantArb_resend.io.in.zipWithIndex.foreach { case (in, i) =>
