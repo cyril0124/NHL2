@@ -23,7 +23,7 @@ class SinkA()(implicit p: Parameters) extends L2Module {
 
     if (enablePrefetch) {
         val (tag, set, offset) = parseAddress(io.a.bits.address)
-        assert(offset === 0.U)
+        assert(!(io.a.fire && offset =/= 0.U))
 
         io.task.valid        := io.a.valid || io.prefetchReqOpt.get.valid
         io.task.bits.channel := L2Channel.ChannelA
@@ -64,7 +64,7 @@ class SinkA()(implicit p: Parameters) extends L2Module {
         }
     } else {
         val (tag, set, offset) = parseAddress(io.a.bits.address)
-        assert(offset === 0.U)
+        assert(!(io.a.fire && offset =/= 0.U))
 
         io.task.valid        := io.a.valid
         io.task.bits.channel := L2Channel.ChannelA

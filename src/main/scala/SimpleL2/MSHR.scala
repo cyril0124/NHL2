@@ -390,7 +390,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         }
     }
     assert(!(!state.s_evict && !state.s_wb))
-    assert(PopCount(lastReqState) <= 1.U, "lastReqState should have only one valid bit!")
+    assert(!(valid && PopCount(lastReqState) > 1.U), "lastReqState should have only one valid bit!")
 
     /**
      * ------------------------------------------------------- 

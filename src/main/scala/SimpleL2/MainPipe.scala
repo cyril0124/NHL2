@@ -325,7 +325,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
                 mshrAllocStates.w_comp       := false.B
                 mshrAllocStates.s_compack    := false.B
             }.otherwise {
-                assert(isAcquireBlock_s3 || isGet_s3 || isPrefetch_s3, "opcode:%x channel:%x", task_s3.opcode, task_s3.channel)
+                when(valid_s3) {
+                    assert(isAcquireBlock_s3 || isGet_s3 || isPrefetch_s3, "opcode:%x channel:%x", task_s3.opcode, task_s3.channel)
+                }
+
                 mshrAllocStates.s_read          := false.B
                 mshrAllocStates.w_compdat       := false.B
                 mshrAllocStates.w_compdat_first := false.B
@@ -584,11 +587,13 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             mpTask_refill_s3                                                                 -> DataDestination.SourceD
         )
     )
-    assert(
-        PopCount(Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)) <= 1.U,
-        "multiple ds read! %b",
-        Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)
-    )
+    when(valid_s3) {
+        assert(
+            PopCount(Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)) <= 1.U,
+            "multiple ds read! %b",
+            Cat(readOnHit_s3, readToTempDS_s3, readOnCopyBack_s3, readOnSnpOK_s3)
+        )
+    }
 
     val valid_cbwrdata_mp_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && valid_s3
     val valid_compdata_mp_s3 = isFwdSnoop_s3 && task_s3.channel === CHIChannel.TXDAT && valid_s3 && supportDCT.B
