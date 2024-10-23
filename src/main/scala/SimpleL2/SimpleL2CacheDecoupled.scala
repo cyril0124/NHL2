@@ -17,7 +17,7 @@ import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
 
-class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters) extends LazyModule with HasL2Param {
+class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLEdgeIn] = None)(implicit p: Parameters) extends LazyModule with HasL2Param {
     val xfer   = TransferSizes(blockBytes, blockBytes)
     val atom   = TransferSizes(1, beatBytes)
     val access = TransferSizes(1, blockBytes)
@@ -55,7 +55,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 
     lazy val module = new Impl
     class Impl extends LazyModuleImp(this) {
-        def finalEdgeIn = sinkNodes.head.in.head._2
+        def finalEdgeIn = tlEdgeInOpt.getOrElse(sinkNodes.head.in.head._2)
 
         val l2ToTlbParams: Parameters = p.alterPartial { case EdgeInKey =>
             finalEdgeIn
@@ -109,7 +109,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
 
         println(s"node size: ${sinkNodes.length}")
         sinkNodes.zipWithIndex.foreach { case (node, i) =>
-            val edgeIn   = node.in.head._2
+            val edgeIn   = tlEdgeInOpt.getOrElse(node.in.head._2)
             val bundleIn = node.in.head._1
             edgeIn.client.clients.filter(_.supports.probe).foreach { c =>
                 println(s"[node_$i][TL-C ] client_name:${c.name} sourceId_start:${c.sourceId.start} sourceId_end:${c.sourceId.end}")
@@ -122,7 +122,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_")(implicit p: Parameters)
         val linkMonitor = Module(new LinkMonitorDecoupled())
         val slices = (0 until nrSlice).map { i =>
             Module(new Slice()(p.alterPartial { case EdgeInKey =>
-                sinkNodes(i).in.head._2
+                tlEdgeInOpt.getOrElse(sinkNodes(i).in.head._2)
             }))
         }
 
