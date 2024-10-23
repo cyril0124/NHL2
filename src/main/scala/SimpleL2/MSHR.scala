@@ -1263,7 +1263,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * Read resissue is work with reallocation which is triggered by the Snoop that cannot be handled by the TXDAT at stage 2.
      */
     val snpMatchReqAddr = valid && !io.status.willFree && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr
-    when(snoopMatchReqAddr) {
+    when(snpMatchReqAddr) {
         val nested = io.nested.snoop
 
         when(nested.toN) {
