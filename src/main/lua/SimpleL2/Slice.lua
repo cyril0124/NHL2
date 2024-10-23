@@ -5404,9 +5404,9 @@ local test_snoop_hit_req = env.register_test_case "test_snoop_hit_req" {
                 end,
                 function ()
                     -- snpHitReq nested toN
-                    env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) and mshrs[0].snoopMatchReqAddr:is(1) end)
+                    env.expect_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) and mshrs[0].snpMatchReqAddr:is(1) end)
                     env.negedge()
-                    env.expect_not_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) and mshrs[0].snoopMatchReqAddr:is(1) end)
+                    env.expect_not_happen_until(10, function () return mshrs[0].io_nested_snoop_toN:is(1) and mshrs[0].snpMatchReqAddr:is(1) end)
                 end,
                 function ()
                     env.expect_not_happen_until(10, function() return mp.valid_s4:is(1) end)

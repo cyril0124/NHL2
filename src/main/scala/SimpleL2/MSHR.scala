@@ -1262,7 +1262,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      *  the read reissue is required beacuse the data will be snooped back.
      * Read resissue is work with reallocation which is triggered by the Snoop that cannot be handled by the TXDAT at stage 2.
      */
-    val snoopMatchReqAddr = valid && !io.status.willFree && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr
+    val snpMatchReqAddr = valid && !io.status.willFree && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr
     when(snoopMatchReqAddr) {
         val nested = io.nested.snoop
 
@@ -1317,7 +1317,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      */
     when(io.alloc_s3.fire) {
         getSnpNestedReq_opt.foreach(_ := false.B)
-    }.elsewhen(snoopMatchReqAddr && (io.nested.snoop.toN || io.nested.snoop.toB)) {
+    }.elsewhen(snpMatchReqAddr && (io.nested.snoop.toN || io.nested.snoop.toB)) {
         getSnpNestedReq_opt.foreach(_ := true.B)
     }.elsewhen(getSnpNestedReq_opt.getOrElse(false.B) || state.w_snpresp_sent) {
         getSnpNestedReq_opt.foreach(_ := false.B)
