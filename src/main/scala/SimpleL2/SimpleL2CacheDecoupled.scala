@@ -43,7 +43,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLE
         minLatency = 2,
         responseFields = Nil,
         requestKeys = Seq(TLNanhuBusKey),
-        endSinkId = idsAll * (1 << bankBits)
+        endSinkId = idsAll
     )
 
     val sinkNodes = Seq.fill(nrSlice) { TLManagerNode(Seq(managerParameters)) }

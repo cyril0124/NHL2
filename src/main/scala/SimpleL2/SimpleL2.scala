@@ -110,7 +110,7 @@ class SimpleL2Cache(parentName: String = "L2_")(implicit p: Parameters) extends 
         minLatency = 2,
         responseFields = Nil,
         requestKeys = Seq(TLNanhuBusKey),
-        endSinkId = idsAll * (1 << bankBits)
+        endSinkId = idsAll
     )
 
     val sinkNodes = Seq.fill(nrSlice) { TLManagerNode(Seq(managerParameters)) }
