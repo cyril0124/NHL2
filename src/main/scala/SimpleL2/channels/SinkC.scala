@@ -64,7 +64,7 @@ class SinkC()(implicit p: Parameters) extends L2Module {
 
     val blockDsWrite_s1    = WireInit(false.B)
     val (tag, set, offset) = parseAddress(c.bits.address)
-    assert(!(io.c.fire && offset =/= 0.U), "offset is not zero")
+    assert(!(c.fire && offset =/= 0.U), "offset is not zero")
 
     val isRelease      = c.bits.opcode(1)
     val hasData        = c.bits.opcode(0)
