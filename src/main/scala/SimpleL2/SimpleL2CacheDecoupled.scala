@@ -17,7 +17,7 @@ import SimpleL2.Configs._
 import SimpleL2.chi._
 import Utils.GenerateVerilog
 
-class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLEdgeIn] = None)(implicit p: Parameters) extends LazyModule with HasL2Param {
+class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLEdgeIn] = None, clientSourceIdOpt: Option[Seq[Seq[Int]]] = None)(implicit p: Parameters) extends LazyModule with HasL2Param {
     val xfer   = TransferSizes(blockBytes, blockBytes)
     val atom   = TransferSizes(1, beatBytes)
     val access = TransferSizes(1, blockBytes)
@@ -121,8 +121,10 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLE
 
         val linkMonitor = Module(new LinkMonitorDecoupled())
         val slices = (0 until nrSlice).map { i =>
-            Module(new Slice()(p.alterPartial { case EdgeInKey =>
-                tlEdgeInOpt.getOrElse(sinkNodes(i).in.head._2)
+            Module(new Slice()(p.alterPartial {
+                case EdgeInKey =>
+                    tlEdgeInOpt.getOrElse(sinkNodes(i).in.head._2)
+                case L2ParamKey => p(L2ParamKey).copy(clientSourceIdOpt = clientSourceIdOpt)
             }))
         }
 
@@ -158,10 +160,17 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLE
                 slice.io.prefetchReqOpt.get <> prefetchReqArb.io.out
             }
 
+            def getClientBitOH_prefetch(sourceId: UInt) = {
+                if (clientSourceIdOpt.isDefined)
+                    getClientBitOH(sourceId, clientSourceIdOpt.get)
+                else
+                    getClientBitOH(sourceId, finalEdgeIn)
+            }
+
             /** Prefetch Train */
             val prefetchTrain    = WireInit(0.U.asTypeOf(slices.head.io.prefetchTrainOpt.get.cloneType))
             val prefetchTrainArb = Module(new FastArbiter(slices.head.io.prefetchTrainOpt.get.bits.cloneType, nrSlice))
-            val trainClientOH    = getClientBitOH(prefetchTrain.bits.source, finalEdgeIn)
+            val trainClientOH    = getClientBitOH_prefetch(prefetchTrain.bits.source)
             prefetchTrainArb.io.in <> slices.map(_.io.prefetchTrainOpt.get)
             prefetchTrain          <> prefetchTrainArb.io.out
             prefetchTrain.ready    := prefetchersOpt.map(_.get.io.train.ready).reduce(_ || _)
@@ -177,7 +186,7 @@ class SimpleL2CacheDecoupled(parentName: String = "L2_", tlEdgeInOpt: Option[TLE
             /** Prefetch Resp */
             val prefetchResp    = WireInit(0.U.asTypeOf(slices.head.io.prefetchRespOpt.get.cloneType))
             val prefetchRespArb = Module(new FastArbiter(slices.head.io.prefetchRespOpt.get.bits.cloneType, nrSlice))
-            val respClientOH    = getClientBitOH(prefetchResp.bits.source, finalEdgeIn)
+            val respClientOH    = getClientBitOH_prefetch(prefetchResp.bits.source)
             prefetchRespArb.io.in <> slices.map(_.io.prefetchRespOpt.get)
             prefetchResp          <> prefetchRespArb.io.out
             prefetchResp.ready    := prefetchersOpt.map(_.get.io.resp.ready).reduce(_ || _)

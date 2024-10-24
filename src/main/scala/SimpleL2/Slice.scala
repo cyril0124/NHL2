@@ -48,6 +48,9 @@ class Slice()(implicit p: Parameters) extends L2Module {
     println(s"[${this.getClass().toString()}] supportDCT:${supportDCT}")
     println(s"[${this.getClass().toString()}] optParam:${optParam}")
     println(s"[${this.getClass().toString()}] TaskBundle bits:${(new TaskBundle).getWidth}")
+    if (clientSourceIdOpt.isDefined) {
+        println(s"[${this.getClass().toString()}] ${l2param.name} use clientSourceId: ${clientSourceIdOpt.get.map(_.toList)}")
+    }
 
     if (l2param.useDiplomacy) {
         val _nrClients = edgeIn.client.clients.count(_.supports.probe)

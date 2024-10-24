@@ -61,9 +61,10 @@ case class L2Param(
     rxsnpCreditMAX: Int = 2,
     rxdatCreditMAX: Int = 2,
     prefetchParams: Seq[SimpleL2.prefetch.PrefetchParameters] = Nil,
-    replacementPolicy: String = "plru", // Option: "random", "plru", "lru"
-    dataEccCode: String = "secded",     // Option: "none", "identity", "parity", "sec", "secded"
-    useDiplomacy: Boolean = false       // If use diplomacy, EdgeInKey should be passed in
+    replacementPolicy: String = "plru",             // Option: "random", "plru", "lru"
+    dataEccCode: String = "secded",                 // Option: "none", "identity", "parity", "sec", "secded"
+    useDiplomacy: Boolean = false,                  // If use diplomacy, EdgeInKey should be passed in
+    clientSourceIdOpt: Option[Seq[Seq[Int]]] = None // User defined sourceIds for the L1 clients that support `Probe` operation. Each is an unique sourceId range with no overlap
 ) {
     require(isPow2(ways))
     require(isPow2(sets))
@@ -164,6 +165,21 @@ trait HasL2Param {
     def hasPrefetchSrc = prefetchParams.exists(_.hasPrefetchSrc)
     def hartIdLen: Int = p(MaxHartIdBits)
 
+    val clientSourceIdOpt = if (l2param.clientSourceIdOpt.isDefined) {
+        val clientSourceId = l2param.clientSourceIdOpt.get
+        // Check for id overlap
+        val sets = clientSourceId.map(_.toSet).reduce(_ & _)
+        require(!sets.nonEmpty, s"clientSourceIdOpt has id overlap! => ${sets} origin ids: ${clientSourceId}")
+
+        // clientSourceId should match the number of clients
+        require(
+            nrClients == clientSourceId.length,
+            s"clientSourceId should match the number of clients! ${clientSourceId.length} =/= nrClients:${nrClients}"
+        )
+
+        Some(clientSourceId.map(_.sorted))
+    } else None
+
     def tlBundleParams: TLBundleParameters = if (l2param.useDiplomacy) {
         edgeIn.bundle
     } else {
@@ -200,19 +216,47 @@ trait HasL2Param {
         assert(in.getWidth == width)
     }
 
-    def getClientBitOH(sourceId: UInt, edgeIn: TLEdgeIn): UInt = {
+    def isConsecutive(seq: Seq[Int]): Boolean = {
+        seq.sliding(2).forall { case Seq(a, b) => b - a == 1 }
+    }
+
+    def getClientBitOH(sourceId: UInt, clientSourceId: Seq[Seq[Int]]): UInt = {
+        val isConsecutiveId = clientSourceId.map(isConsecutive).reduce(_ && _)
         Cat(
-            edgeIn.client.clients
-                .filter(_.supports.probe)
-                .map(c => {
-                    c.sourceId.contains(sourceId).asInstanceOf[Bool]
-                })
-                .reverse
+            clientSourceId.map { ids =>
+                if (ids.length == 0) {
+                    false.B
+                } else if (ids.length == 1) {
+                    sourceId === ids.head.U
+                } else {
+                    if (isConsecutiveId) {
+                        val x     = sourceId
+                        val start = ids.head
+                        val end   = ids.last
+                        require(end > start)
+
+                        // find index of largest different bit
+                        val largestDeltaBit   = log2Floor(start ^ (end - 1))
+                        val smallestCommonBit = largestDeltaBit + 1 // may not exist in x
+                        val uncommonMask      = (1 << smallestCommonBit) - 1
+                        val uncommonBits      = (x | 0.U(smallestCommonBit.W))(largestDeltaBit, 0)
+                        // the prefix must match exactly (note: may shift ALL bits away)
+                        (x >> smallestCommonBit) === (start >> smallestCommonBit).U &&
+                        // firrtl constant prop range analysis can eliminate these two:
+                        (start & uncommonMask).U <= uncommonBits &&
+                        uncommonBits <= ((end - 1) & uncommonMask).U
+                    } else {
+                        Cat(ids.map(id => sourceId === id.U)).orR
+                    }
+                }
+            }.reverse
         )
     }
 
-    def getClientBitOH(sourceId: UInt): UInt = {
-        if (l2param.useDiplomacy) {
+    def getClientBitOH(sourceId: UInt, edgeIn: TLEdgeIn): UInt = {
+        if (clientSourceIdOpt.isDefined) {
+            getClientBitOH(sourceId, clientSourceIdOpt.get)
+        } else {
             Cat(
                 edgeIn.client.clients
                     .filter(_.supports.probe)
@@ -221,6 +265,23 @@ trait HasL2Param {
                     })
                     .reverse
             )
+        }
+    }
+
+    def getClientBitOH(sourceId: UInt): UInt = {
+        if (l2param.useDiplomacy) {
+            if (clientSourceIdOpt.isDefined) {
+                getClientBitOH(sourceId, clientSourceIdOpt.get)
+            } else {
+                Cat(
+                    edgeIn.client.clients
+                        .filter(_.supports.probe)
+                        .map(c => {
+                            c.sourceId.contains(sourceId).asInstanceOf[Bool]
+                        })
+                        .reverse
+                )
+            }
         } else {
             if (nrClients == 1) {
                 1.U(1.W)
@@ -252,18 +313,31 @@ trait HasL2Param {
 
     def clientOHToSource(clientBitOH: UInt): UInt = {
         if (l2param.useDiplomacy) {
-            if (nrClients <= 1) {
-                edgeIn.client.clients.filter(_.supports.probe).map(c => c.sourceId.start).head.U
+            if (clientSourceIdOpt.isDefined) {
+                val clientSourceId = clientSourceIdOpt.get
+                if (nrClients <= 1) {
+                    require(clientSourceId.length == 1)
+                    clientSourceId.head.head.U
+                } else {
+                    Mux1H(
+                        clientBitOH,
+                        clientSourceId.map(ids => ids.head.U)
+                    )
+                }
             } else {
-                Mux1H(
-                    clientBitOH,
-                    edgeIn.client.clients
-                        .filter(_.supports.probe)
-                        .map(c => c.sourceId.start.U)
-                )
+                if (nrClients <= 1) {
+                    edgeIn.client.clients.filter(_.supports.probe).map(c => c.sourceId.start).head.U
+                } else {
+                    Mux1H(
+                        clientBitOH,
+                        edgeIn.client.clients
+                            .filter(_.supports.probe)
+                            .map(c => c.sourceId.start.U)
+                    )
+                }
             }
         } else {
-            Mux(clientBitOH === "b10".U, 16.U, 0.U)
+            Mux(clientBitOH === "b10".U, 16.U, 0.U) // Only for test
         }
     }
 
