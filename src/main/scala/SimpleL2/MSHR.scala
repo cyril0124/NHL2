@@ -335,9 +335,15 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mayCancelWb    := mayCancelEvict
 
     io.tasks.txreq <> DontCare
-    io.tasks.txreq.valid := (!state.s_pcrdreturn || !state.s_read ||
-        !state.s_makeunique ||
-        (!state.s_evict && !mayChangeEvict && !mayCancelEvict || !state.s_wb && !mayCancelWb) && state.w_rprobeack) && state.s_snpresp && state.w_snpresp_sent // Evict/WriteBackFull should wait for refill and probeack finish
+    io.tasks.txreq.valid := state.s_snpresp && state.w_snpresp_sent &&
+        !(!state.s_makeunique && !state.w_evict_comp) && // If there is a pending Evict which has not received Comp response,
+        (                                                // then we should not send MakeUnique.
+            !state.s_pcrdreturn ||
+                !state.s_read ||
+                !state.s_makeunique ||
+                (!state.s_evict && !mayChangeEvict && !mayCancelEvict || !state.s_wb && !mayCancelWb) && state.w_rprobeack // Evict/WriteBackFull should wait for refill and probeack finish
+        )
+
     io.tasks.txreq.bits.opcode := PriorityMux(
         Seq(
             !state.s_pcrdreturn -> PCrdReturn,
