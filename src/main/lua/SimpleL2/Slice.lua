@@ -1781,7 +1781,7 @@ local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
                 chi_txreq:dump()
 
                 env.negedge()
-                    chi_rxrsp:comp(0, 5)
+                    chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
             end
         }
         
@@ -1933,7 +1933,7 @@ local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_ev
                 end)
                     chi_txreq:dump()
                 env.negedge()
-                    chi_rxrsp:comp(0, 5)
+                    chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
             end
         }
         
@@ -3365,7 +3365,7 @@ local test_replresp_retry = env.register_test_case "test_replresp_retry" {
 
         env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
         env.negedge()
-        chi_rxrsp:comp(0, 5)
+        chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
 
         env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xdead end)
         env.expect_happen_until(10, function() return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.GrantData) and tl_d.bits.data:get()[1] == 0xbeef end)
@@ -3905,7 +3905,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -3982,7 +3982,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4043,7 +4043,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4120,7 +4120,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4182,7 +4182,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4259,7 +4259,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4322,7 +4322,7 @@ local test_snoop_nested_evict = env.register_test_case "test_snoop_nested_evict"
             end
 
             env.negedge()
-                chi_rxrsp:comp(0, 3)
+                chi_rxrsp:comp(0, 3, CHIResp.I) -- Comp for Evict
             
             verilua "appendTasks" {
                 function ()
@@ -4436,7 +4436,7 @@ local test_release_nested_probe = env.register_test_case "test_release_nested_pr
             verilua "appendTasks" {
                 function ()
                     env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
-                    chi_rxrsp:comp(0, 5)
+                    chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
                 end
             }
             tl_c:probeack(probe_address, TLParam.BtoN, 16)
@@ -4559,7 +4559,7 @@ local test_multi_probe = env.register_test_case "test_multi_probe" {
             verilua "appendTasks" {
                 function()
                     env.expect_happen_until(10, function () return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) end)
-                    chi_rxrsp:comp(0, 5)
+                    chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
                 end
             }
             tl_c:probeack(probe_address, TLParam.BtoN, 16) -- core 1
@@ -4690,7 +4690,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             mp.io_mshrNested_s3_snoop_toN:expect(1)
             env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.SnpResp) end)
 
-            chi_rxrsp:comp(0, 0)
+            chi_rxrsp:comp(0, 0, CHIResp.UC)
             env.expect_happen_until(10, function() return tl_d:fire() end)
             env.negedge()
                 tl_e:grantack(0)
@@ -4721,7 +4721,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             chi_txrsp.bits.resp:expect(CHIResp.SC)
 
             env.negedge()
-                chi_rxrsp:comp(0, 5) -- dbID = 5
+                chi_rxrsp:comp(0, 5, CHIResp.UC) -- dbID = 5
             env.negedge(10)
                 tl_e:grantack(0)
             env.negedge(20)
@@ -4746,7 +4746,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             chi_txrsp.bits.resp:expect(CHIResp.I)
 
             env.negedge()
-                chi_rxrsp:comp(0, 5) -- dbID = 5
+                chi_rxrsp:comp(0, 5, CHIResp.UC) -- dbID = 5
             env.negedge(10)
                 tl_e:grantack(0)
             env.negedge(20)
@@ -4851,7 +4851,7 @@ local test_snoop_nested_read = env.register_test_case "test_snoop_nested_read" {
             end
             env.negedge(10)
 
-            chi_rxrsp:comp(0, 5)
+            chi_rxrsp:comp(0, 5, CHIResp.UC)
 
             verilua "appendTasks" {
                 function ()
@@ -6770,7 +6770,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                     }
 
                     env.negedge(30)
-                    chi_rxrsp:comp(0, 0)
+                    chi_rxrsp:comp(0, 0, CHIResp.UC)
                     env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
                     env.negedge()
                     tl_e:grantack(0)
@@ -6971,7 +6971,7 @@ local test_fwd_snoop = env.register_test_case "test_fwd_snoop" {
                 }
 
                 env.negedge(30)
-                chi_rxrsp:comp(0, 0)
+                chi_rxrsp:comp(0, 0, CHIResp.UC)
                 env.expect_happen_until(10, function () return tl_d:fire() and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
                 env.negedge()
                 tl_e:grantack(0)

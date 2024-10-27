@@ -646,7 +646,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_snpresp.bits.txnID       := snpTxnID
     mpTask_snpresp.bits.isCHIOpcode := true.B
     mpTask_snpresp.bits.opcode      := Mux(snprespNeedData, SnpRespData, SnpResp)
-    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)                            // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
+    mpTask_snpresp.bits.resp        := stateToResp(snprespFinalState, snprespFinalDirty, snprespPassDirty)                                                             // In SnpResp*, resp indicates the final cacheline state after receiving the Snp* transaction.
     mpTask_snpresp.bits.channel     := Mux(snprespNeedData, CHIChannel.TXDAT, CHIChannel.TXRSP)
     mpTask_snpresp.bits.readTempDs  := snprespNeedData && !releaseGotDirty
     mpTask_snpresp.bits.tempDsDest  := Mux(dirResp.hit && needProbe && probeGotDirty, DataDestination.TXDAT | DataDestination.DataStorage, DataDestination.TXDAT)
@@ -859,8 +859,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         rspSrcID := rxrsp.bits.srcID
 
         val opcode = rxrsp.bits.chiOpcode
+        val resp   = rxrsp.bits.resp
         when(opcode === Comp) {
-            state.w_comp       := true.B
+            when(resp =/= Resp.I) {
+                // Comp for read transactions are usually not equal to 0(Resp.I)
+                state.w_comp := true.B
+            }
             state.w_evict_comp := true.B
         }.elsewhen(opcode === CompDBIDResp) {
             state.w_compdbid := true.B
