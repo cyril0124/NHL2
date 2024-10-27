@@ -33,7 +33,8 @@ case class L2OptimizationParam(
     rxrspHasLatch: Boolean = true,
     sinkaStallOnReqArb: Boolean = false,
     mshrStallOnReqArb: Boolean = false,
-    latchTempDsToDs: Boolean = true // Whether to latch the refill data from TempDataStorage to DataStorage for one cycle. If it is true, it will eliminate the timing path of refilling data from TempDataStorage to DataStorage when data ECC is enabled.
+    latchTempDsToDs: Boolean = true, // Whether to latch the refill data from TempDataStorage to DataStorage for one cycle. If it is true, it will eliminate the timing path of refilling data from TempDataStorage to DataStorage when data ECC is enabled.
+    useFlatDataSRAM: Boolean = true
 )
 
 case class L2Param(

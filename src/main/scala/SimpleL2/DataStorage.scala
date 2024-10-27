@@ -73,34 +73,78 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
 
     println(s"[${this.getClass().toString()}] eccProtectBits: ${eccProtectBits} dataEccBits: ${dataEccBits} eccEnable: ${enableDataECC}")
 
-    /**
-     * Each cacheline(64-byte) should be seperated into groups of 16-bytes(128-bits) beacuse SRAM provided by foundary is typically less than 144-bits wide.
-     * And we also need extra 8-bits for every 8-bytes to store ECC bits. The final SRAM bits = [8-bytes + 8-bits(ECC)] * 2 = 144-bits.
-     *                                   way_0                                                          way_1                        ...
-     *        SRAM_0                                SRAM_1    SRAM_2    SRAM_3         SRAM_4      SRAM_5    SRAM_6     SRAM_7       ...
-     * |-------------------------------------------------------------------------|  |-------------------------------------------|        
-     * | [8-bytes + 8-bits(ECC)] * 2 = 144-bits | 144-bits | 144-bits | 144-bits |  | 144-bits | 144-bits | 144-bits | 144-bits |    ...
-     * |-------------------------------------------------------------------------|  |-------------------------------------------| 
-     *                                       .                                                   .  
-     *                                       .                                                   .
-     *                                       .                                                   .
-     * 
-     */
     val groupBytes = 16                      // TODO: parameterize
     val group      = blockBytes / groupBytes // 64 / 16 = 4, each CacheLine is splited into 4 groups of data bytes
-    val dataSRAMs = Seq.fill(ways) {
-        Seq.fill(group) {
+    val dataSRAMs_flat = if (optParam.useFlatDataSRAM) {
+        println(s"[${this.getClass().toString()}] DataSRAM depth: ${sets * ways} DataSRAM banks: ${group} DataSRAM bank width: ${(groupBytes / 8) * dataWithECCBits}")
+
+        /**
+         *  Flat DataSRAM:
+         *
+         *  [8-bytes + 8-bits(ECC)] * 2 = 144-bits
+         *                                   
+         *     SRAM_0     SRAM_1    SRAM_2    SRAM_3
+         * |-------------------------------------------|          
+         * | 144-bits | 144-bits | 144-bits | 144-bits | set_0, way_0
+         * |-------------------------------------------|
+         * | 144-bits | 144-bits | 144-bits | 144-bits | set_0, way_1
+         * |-------------------------------------------|
+         *                       .
+         *                       .
+         *                       .
+         * |-------------------------------------------|          
+         * | 144-bits | 144-bits | 144-bits | 144-bits | set_N way_0
+         * |-------------------------------------------|
+         * | 144-bits | 144-bits | 144-bits | 144-bits | set_N, way_1
+         * |-------------------------------------------|
+         *                       .
+         *                       .
+         *                       .
+         */
+        Some(Seq.fill(group) {
             Module(
                 new SRAMTemplate(
                     gen = Vec(groupBytes / 8, UInt(dataWithECCBits.W)),
-                    set = sets,
+                    set = sets * ways,
                     way = 1,
                     singlePort = true,
                     multicycle = 2
                 )
             )
-        }
-    }
+        })
+    } else None
+    val dataSRAMs = if (!optParam.useFlatDataSRAM) {
+        println(s"[${this.getClass().toString()}] DataSRAM depth: ${sets} DataSRAM banks: ${group * ways} DataSRAM bank width: ${(groupBytes / 8) * dataWithECCBits}")
+
+        /**
+         * Each cacheline(64-byte) should be seperated into groups of 16-bytes(128-bits) beacuse SRAM provided by foundary is typically less than 144-bits wide.
+         * And we also need extra 8-bits for every 8-bytes to store ECC bits. The final SRAM bits = [8-bytes + 8-bits(ECC)] * 2 = 144-bits.
+         *                                   way_0                                                          way_1                        ...
+         *        SRAM_0                                SRAM_1    SRAM_2    SRAM_3         SRAM_4      SRAM_5    SRAM_6     SRAM_7       ...
+         * |-------------------------------------------------------------------------|  |-------------------------------------------|        
+         * | [8-bytes + 8-bits(ECC)] * 2 = 144-bits | 144-bits | 144-bits | 144-bits |  | 144-bits | 144-bits | 144-bits | 144-bits |    ...
+         * |-------------------------------------------------------------------------|  |-------------------------------------------| 
+         *                                       .                                                   .  
+         *                                       .                                                   .
+         *                                       .                                                   .
+         * 
+         */
+        Some(
+            Seq.fill(ways) {
+                Seq.fill(group) {
+                    Module(
+                        new SRAMTemplate(
+                            gen = Vec(groupBytes / 8, UInt(dataWithECCBits.W)),
+                            set = sets,
+                            way = 1,
+                            singlePort = true,
+                            multicycle = 2
+                        )
+                    )
+                }
+            }
+        )
+    } else None
 
     println(s"[${this.getClass().toString()}] dataSRAMs entry bits: ${Vec(groupBytes / 8, UInt(dataWithECCBits.W)).getWidth}")
 
@@ -154,24 +198,45 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     _assert(PopCount(Cat(wen_sinkC_s3, wen_refill_s3)) <= 1.U, "multiple write! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
     assert(!(wen_s3 && ren_s3 && wayConflict), "read and write at the same time with wayConflict! wen_sinkC_s3:%d, wen_refill_s3:%d", wen_sinkC_s3, wen_refill_s3)
 
-    dataSRAMs.zipWithIndex.foreach { case (srams, wayIdx) =>
-        val wrWayEn = wrWayOH_s3(wayIdx)
-        val rdWayEn = rdWayOH_s3(wayIdx)
+    if (optParam.useFlatDataSRAM) {
+        val wrIdx_s3 = Cat(OHToUInt(wrWayOH_s3), wrSet_s3)
+        val rdIdx_s3 = Cat(OHToUInt(rdWayOH_s3), rdSet_s3)
 
-        srams.zipWithIndex.foreach { case (sram, groupIdx) =>
-            sram.io.w.req.valid       := wen_s3 && wrWayEn
-            sram.io.w.req.bits.setIdx := wrSet_s3
+        dataSRAMs_flat.get.zipWithIndex.foreach { case (sram, groupIdx) =>
+            sram.io.w.req.valid       := wen_s3
+            sram.io.w.req.bits.setIdx := wrIdx_s3
             sram.io.w.req.bits.waymask.foreach(_ := 1.U)
             (0 until (groupBytes / eccProtectBytes)).foreach { i =>
                 val wrGroupDatas = wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx)
                 sram.io.w.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
             }
 
-            sram.io.r.req.valid       := ren_s3 && rdWayEn
-            sram.io.r.req.bits.setIdx := rdSet_s3
+            sram.io.r.req.valid       := ren_s3
+            sram.io.r.req.bits.setIdx := rdIdx_s3
 
             _assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
             _assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+        }
+    } else {
+        dataSRAMs.get.zipWithIndex.foreach { case (srams, wayIdx) =>
+            val wrWayEn = wrWayOH_s3(wayIdx)
+            val rdWayEn = rdWayOH_s3(wayIdx)
+
+            srams.zipWithIndex.foreach { case (sram, groupIdx) =>
+                sram.io.w.req.valid       := wen_s3 && wrWayEn
+                sram.io.w.req.bits.setIdx := wrSet_s3
+                sram.io.w.req.bits.waymask.foreach(_ := 1.U)
+                (0 until (groupBytes / eccProtectBytes)).foreach { i =>
+                    val wrGroupDatas = wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx)
+                    sram.io.w.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
+                }
+
+                sram.io.r.req.valid       := ren_s3 && rdWayEn
+                sram.io.r.req.bits.setIdx := rdSet_s3
+
+                _assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
+                _assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+            }
         }
     }
 
@@ -222,13 +287,28 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdDest_s5       = RegEnable(rdDest_s4, ren_s4)
     val rdMshrIdx_s5    = RegEnable(rdMshrIdx_s4, ren_s4)
     val fire_s5         = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
-    val rdDataRawVec_s5 = VecInit(dataSRAMs.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.r.resp.data(0))) })
-    val rdDataRaw_s5    = Mux1H(rdWayOH_s5, rdDataRawVec_s5)
-    val rdDataVec_s5 = VecInit(rdDataRaw_s5.map { dataVec =>
-        VecInit(dataVec.map { d =>
-            dataCode.decode(d).uncorrected
-        }).asUInt
-    })
+    val rdDataRawVec_s5 = if (optParam.useFlatDataSRAM) None else Some(VecInit(dataSRAMs.get.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.r.resp.data(0))) }))
+    val rdDataRaw_s5    = if (optParam.useFlatDataSRAM) VecInit(dataSRAMs_flat.get.map(_.io.r.resp.data(0))) else Mux1H(rdWayOH_s5, rdDataRawVec_s5.get)
+    val rdDataVec_s5 = if (optParam.useFlatDataSRAM) {
+        VecInit(rdDataRaw_s5.map { dataVec =>
+            VecInit(dataVec.map { d =>
+                dataCode.decode(d).uncorrected
+            }).asUInt
+        })
+    } else {
+        VecInit(rdDataRaw_s5.map { dataVec =>
+            VecInit(dataVec.map { d =>
+                dataCode.decode(d).uncorrected
+            }).asUInt
+        })
+    }
+
+    if (!optParam.useFlatDataSRAM) {
+        require(rdDataRawVec_s5.get.head.length == group)
+        require(rdDataRawVec_s5.get.length == ways)
+    }
+    require(rdDataRaw_s5.length == group)
+    require(rdDataVec_s5.length == group)
 
     rdData_s5                      := rdDataVec_s5.asUInt
     io.toTempDS.write_s5.valid     := rdDest_s5 === DataDestination.TempDataStorage && ren_s5
