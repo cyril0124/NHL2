@@ -230,6 +230,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val releaseGotDirty     = RegInit(false.B)
     val gotT                = RegInit(false.B)
     val replGotDirty        = RegInit(false.B)                                                                                                // gotDirty for replacement cache line
+    val isAcquireProbe      = RegInit(false.B)                                                                                                // is acquire triggered Probe
     val needProbe           = RegInit(false.B)
     val needRead            = RegInit(false.B)
     val needPromote         = RegInit(false.B)
@@ -269,6 +270,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         req     := allocReq
         dirResp := allocDirResp
         state   := allocState
+
+        isAcquireProbe := !allocState.s_aprobe
 
         needProbe   := !allocState.s_aprobe | !allocState.s_sprobe | !allocState.s_rprobe
         needRead    := !allocState.s_read
@@ -1391,7 +1394,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         !(needWb && gotWbResp) &&         // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
         !io.status.waitProbeAck           // Does not wait for any ProbeAck
     }
-    io.status.gotDirtyData := gotDirty || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
+    io.status.gotDirtyData    := gotDirty || probeGotDirty && isAcquireProbe || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))

@@ -287,7 +287,7 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
     stallOnPendingSnpHitReq_s2        := hasPendingSnpHitReq_s2_dup && snpHitReqVec_s1.orR
     arbTaskSnoop_dup_s1               := arbTaskSnoop
     arbTaskSnoop.bits.snpHitWriteBack := snpHitWriteBackVec_s1.orR
-    arbTaskSnoop.bits.snpGotDirty     := snpGotDirtyVec_s1.orR
+    arbTaskSnoop.bits.snpGotDirty     := snpGotDirtyVec_s1.orR // available when snpHitReq is asserted
     arbTaskSnoop.bits.snpHitReq       := snpHitReqVec_s1.orR
     arbTaskSnoop.bits.snpHitMshrId    := OHToUInt(snpHitReqVec_s1)
     arbTaskSnoop.bits.readTempDs      := Mux1H(snpHitReqVec_s1, io.mshrStatus.map(_.gotDirtyData)) || taskSnoop_s1.retToSrc && !CHIOpcodeSNP.isSnpXFwd(taskSnoop_s1.opcode)
