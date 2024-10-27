@@ -290,17 +290,19 @@ local function build_channel(tl_prefix, chi_prefix)
         | valid
         | ready
         | opcode
+        | resp
         | txnID
         | dbID
         | srcID
         | pCrdType
     ]]):bundle {hier = cfg.top, is_decoupled = true, prefix = chi_prefix .. "rxrsp_", name = "chi_rxrsp"}
     
-    chi_rxrsp.comp = function (this, txn_id, db_id)
+    chi_rxrsp.comp = function (this, txn_id, db_id, resp)
         env.negedge()
             chi_rxrsp.bits.txnID:set(txn_id)
             chi_rxrsp.bits.opcode:set(OpcodeRSP.Comp)
             chi_rxrsp.bits.dbID:set(db_id)
+            chi_rxrsp.bits.resp:set(resp or 0)
             chi_rxrsp.valid:set(1)
         env.negedge()
             chi_rxrsp.valid:set(0)
