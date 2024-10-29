@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xs.utils.Code
-import xs.utils.sram.SRAMTemplate
+import xs.utils.sram.SinglePortSramTemplate
 import Utils.{GenerateVerilog, LeakChecker}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -103,12 +103,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
          */
         Some(Seq.fill(group) {
             Module(
-                new SRAMTemplate(
+                new SinglePortSramTemplate(
                     gen = Vec(groupBytes / 8, UInt(dataWithECCBits.W)),
                     set = sets * ways,
                     way = 1,
-                    singlePort = true,
-                    multicycle = 2
+                    setup = 1,
+                    latency = 2
                 )
             )
         })
@@ -133,12 +133,12 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
             Seq.fill(ways) {
                 Seq.fill(group) {
                     Module(
-                        new SRAMTemplate(
+                        new SinglePortSramTemplate(
                             gen = Vec(groupBytes / 8, UInt(dataWithECCBits.W)),
                             set = sets,
                             way = 1,
-                            singlePort = true,
-                            multicycle = 2
+                            setup = 1,
+                            latency = 2
                         )
                     )
                 }
@@ -203,19 +203,16 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
         val rdIdx_s3 = Cat(OHToUInt(rdWayOH_s3), rdSet_s3)
 
         dataSRAMs_flat.get.zipWithIndex.foreach { case (sram, groupIdx) =>
-            sram.io.w.req.valid       := wen_s3
-            sram.io.w.req.bits.setIdx := wrIdx_s3
-            sram.io.w.req.bits.waymask.foreach(_ := 1.U)
+            sram.io.req.valid      := wen_s3 || ren_s3
+            sram.io.req.bits.write := wen_s3
+            sram.io.req.bits.addr  := Mux(wen_s3, wrIdx_s3, rdIdx_s3)
+            sram.io.req.bits.mask.foreach(_ := 1.U)
             (0 until (groupBytes / eccProtectBytes)).foreach { i =>
                 val wrGroupDatas = wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx)
-                sram.io.w.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
+                sram.io.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
             }
 
-            sram.io.r.req.valid       := ren_s3
-            sram.io.r.req.bits.setIdx := rdIdx_s3
-
-            _assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
-            _assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+            _assert(!(sram.io.req.valid && !sram.io.req.ready), "dataSRAM request not ready!")
         }
     } else {
         dataSRAMs.get.zipWithIndex.foreach { case (srams, wayIdx) =>
@@ -223,19 +220,16 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
             val rdWayEn = rdWayOH_s3(wayIdx)
 
             srams.zipWithIndex.foreach { case (sram, groupIdx) =>
-                sram.io.w.req.valid       := wen_s3 && wrWayEn
-                sram.io.w.req.bits.setIdx := wrSet_s3
-                sram.io.w.req.bits.waymask.foreach(_ := 1.U)
+                sram.io.req.valid      := wen_s3 && wrWayEn
+                sram.io.req.bits.write := wen_s3
+                sram.io.req.bits.addr  := Mux(wen_s3, wrSet_s3, rdSet_s3)
+                sram.io.req.bits.mask.foreach(_ := 1.U)
                 (0 until (groupBytes / eccProtectBytes)).foreach { i =>
                     val wrGroupDatas = wrData_s3(groupBytes * 8 * (groupIdx + 1) - 1, groupBytes * 8 * groupIdx)
-                    sram.io.w.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
+                    sram.io.req.bits.data(0)(i) := dataCode.encode(wrGroupDatas(eccProtectBytes * 8 * (i + 1) - 1, eccProtectBytes * 8 * i))
                 }
 
-                sram.io.r.req.valid       := ren_s3 && rdWayEn
-                sram.io.r.req.bits.setIdx := rdSet_s3
-
-                _assert(!(sram.io.w.req.valid && !sram.io.w.req.ready), "dataSRAM write request not ready!")
-                _assert(!(sram.io.r.req.valid && !sram.io.r.req.ready), "dataSRAM read request not ready!")
+                _assert(!(sram.io.req.valid && !sram.io.req.ready), "dataSRAM request not ready!")
             }
         }
     }
@@ -287,8 +281,8 @@ class DataStorage()(implicit p: Parameters) extends L2Module {
     val rdDest_s5       = RegEnable(rdDest_s4, ren_s4)
     val rdMshrIdx_s5    = RegEnable(rdMshrIdx_s4, ren_s4)
     val fire_s5         = ren_s5 && rdDest_s5 =/= DataDestination.TempDataStorage
-    val rdDataRawVec_s5 = if (optParam.useFlatDataSRAM) None else Some(VecInit(dataSRAMs.get.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.r.resp.data(0))) }))
-    val rdDataRaw_s5    = if (optParam.useFlatDataSRAM) VecInit(dataSRAMs_flat.get.map(_.io.r.resp.data(0))) else Mux1H(rdWayOH_s5, rdDataRawVec_s5.get)
+    val rdDataRawVec_s5 = if (optParam.useFlatDataSRAM) None else Some(VecInit(dataSRAMs.get.zipWithIndex.map { case (srams, wayIdx) => VecInit(srams.map(_.io.resp.bits.data(0))) }))
+    val rdDataRaw_s5    = if (optParam.useFlatDataSRAM) VecInit(dataSRAMs_flat.get.map(_.io.resp.bits.data(0))) else Mux1H(rdWayOH_s5, rdDataRawVec_s5.get)
     val rdDataVec_s5 = if (optParam.useFlatDataSRAM) {
         VecInit(rdDataRaw_s5.map { dataVec =>
             VecInit(dataVec.map { d =>

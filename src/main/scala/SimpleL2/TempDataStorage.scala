@@ -98,7 +98,7 @@ class TempDataStorage()(implicit p: Parameters) extends L2Module {
                 set = nrMSHR,
                 way = 1,
                 singlePort = true,
-                multicycle = 1
+                setup = 1
             )
         )
     }
