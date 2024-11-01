@@ -250,12 +250,12 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val isAcquireBlock_s3 = task_s3.opcode === AcquireBlock && task_s3.isChannelA
     val isAcquirePerm_s3  = task_s3.opcode === AcquirePerm && task_s3.isChannelA
     val isAcquire_s3      = isAcquireBlock_s3 || isAcquirePerm_s3
-    val isPrefetch_s3     = task_s3.opcode === Hint && task_s3.isChannelA                                                                   // TODO: Prefetch
-    val cacheAlias_s3     = isAcquire_s3 && hit_s3 && isReqClient_s3 && meta_s3.aliasOpt.getOrElse(0.U) =/= task_s3.aliasOpt.getOrElse(0.U) // TODO: Cache Alias
+    val isPrefetch_s3     = task_s3.opcode === Hint && task_s3.isChannelA
+    val cacheAlias_s3     = isAcquire_s3 && hit_s3 && isReqClient_s3 && meta_s3.aliasOpt.getOrElse(0.U) =/= task_s3.aliasOpt.getOrElse(0.U)
     val isSnpToN_s3       = CHIOpcodeSNP.isSnpToN(task_s3.opcode) && task_s3.isChannelB
     val isSnpToB_s3       = CHIOpcodeSNP.isSnpToB(task_s3.opcode) && task_s3.isChannelB
     val isSnpOnceX_s3     = CHIOpcodeSNP.isSnpOnceX(task_s3.opcode) && task_s3.isChannelB
-    val isSnoop_s3        = isSnpToB_s3 || isSnpToN_s3 || isSnpOnceX_s3                                                                     // TODO: Other opcode
+    val isSnoop_s3        = isSnpToB_s3 || isSnpToN_s3 || isSnpOnceX_s3
     val isFwdSnoop_s3     = CHIOpcodeSNP.isSnpXFwd(task_s3.opcode) && supportDCT.B
     val isReleaseData_s3  = task_s3.opcode === ReleaseData && task_s3.isChannelC
     val isRelease_s3      = task_s3.opcode === Release && task_s3.isChannelC
@@ -399,7 +399,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.mshrNested_s3.set              := task_s3.set
     io.mshrNested_s3.tag              := task_s3.tag
     io.mshrNested_s3.source           := task_s3.source
-    io.mshrNested_s3.snoop.cleanDirty := io.mshrNested_s3.snoop.toN || io.mshrNested_s3.snoop.toB // TODO:
+    io.mshrNested_s3.snoop.cleanDirty := io.mshrNested_s3.snoop.toN || io.mshrNested_s3.snoop.toB
     io.mshrNested_s3.snoop.toN := (isSnpToN_s3 && ((!mshrAlloc_b_s3 && hit_s3) || task_s3.snpHitReq && Mux(
         mshrRealloc_s3,
         io.mshrAlloc_s3.ready,
@@ -465,8 +465,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     snpReplay_dup_s3 := snpReplay_s3
 
     /** Deal with acquire/get reqeuests */
-    val noSpaceForNonDataResp_s3 = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U                                                                                      // No space for ReleaseAck to send out to SourceD
-    val acquireReplay_s3         = !mshrAlloc_s3 && ((isAcquireBlock_s3 || isGet_s3) && !hasValidDataBuf_s6s7 || isAcquirePerm_s3 && noSpaceForNonDataResp_s3) && valid_s3 // TODO: prefetch
+    val noSpaceForNonDataResp_s3 = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U // No space for ReleaseAck to send out to SourceD
+    val acquireReplay_s3         = !mshrAlloc_s3 && ((isAcquireBlock_s3 || isGet_s3) && !hasValidDataBuf_s6s7 || isAcquirePerm_s3 && noSpaceForNonDataResp_s3) && valid_s3
     val getReplay_s3             = isGet_s3 && !mshrAlloc_s3 && !hasValidDataBuf_s6s7 && valid_s3
 
     /** Deal with mshr cbwrdata */
@@ -837,10 +837,10 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     io.txdat_s6s7.bits        := DontCare
     io.txdat_s6s7.bits.tgtID  := Mux(valid_s7 && isTXDAT_s7, task_s7.tgtID, task_s6.tgtID)
     io.txdat_s6s7.bits.txnID  := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID)
-    io.txdat_s6s7.bits.dbID   := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID) // TODO:
+    io.txdat_s6s7.bits.dbID   := Mux(valid_s7 && isTXDAT_s7, task_s7.txnID, task_s6.txnID)
     io.txdat_s6s7.bits.be     := Fill(beatBytes, 1.U)
     io.txdat_s6s7.bits.opcode := Mux(valid_s7 && isTXDAT_s7, task_s7.opcode, task_s6.opcode)
-    io.txdat_s6s7.bits.resp   := Mux(valid_s7 && isTXDAT_s7, task_s7.resp, task_s6.resp)
+    io.txdat_s6s7.bits.resp   := Mux(valid_s7 && isTXDAT_s7, task_s7.resp, task_s6.resp) // For WriteData responses, this field indicates the state of the data in the Request Node when the data is sent.
 
     // TODO: DCT
     // io.txdat_s6s7.bits.txnID   := Mux(isCompData_s2, task_s2.fwdTxnID_opt.getOrElse(0.U), task_s2.txnID)
