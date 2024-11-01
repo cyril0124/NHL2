@@ -82,14 +82,14 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_rprobeack  = Bool()
     val w_evict_comp = Bool()
     val w_compdbid   = Bool()
-    val w_comp_first = Bool()
 
-    val waitProbeAck  = Bool()
-    val waitGrantAck  = Bool()
-    val replGotDirty  = Bool()
-    val isChannelA    = Bool()
-    val reqAllowSnoop = Bool()
-    val gotDirtyData  = Bool() // TempDS has dirty data
+    val waitProbeAck    = Bool()
+    val waitGrantAck    = Bool()
+    val replGotDirty    = Bool()
+    val isChannelA      = Bool()
+    val reqAllowSnoop   = Bool()
+    val hasPendingGrant = Bool()
+    val gotDirtyData    = Bool() // TempDS has dirty data
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -1381,7 +1381,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_rprobeack  := state.w_rprobeack
     io.status.w_evict_comp := state.w_evict_comp
     io.status.w_compdbid   := state.w_compdbid
-    io.status.w_comp_first := state.w_compdat_first && state.w_comp
 
     io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.waitGrantAck := state.s_grant && state.w_grant_sent && !state.w_grantack
@@ -1414,6 +1413,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         !(needWb && gotWbResp) &&         // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
         !io.status.waitProbeAck           // Does not wait for any ProbeAck
     }
+    io.status.hasPendingGrant := !state.s_grant && !state.w_grant_sent // Valid when the Snoop has toN property
     io.status.gotDirtyData    := gotDirty || probeGotDirty && isAcquireProbe || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))

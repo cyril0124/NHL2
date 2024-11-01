@@ -250,14 +250,22 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
      * After MSHR receives the first beat of CompData, and before L2 receives GrantAck from L1, snoop of X should be **blocked**, 
      * because a slave should not issue a Probe if there is a pending GrantAck on the block according to TileLink spec.
      */
-    val reqBlockSnp_forSnoop = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && !s.reqAllowSnoop }).asUInt.orR
+    def reqBlockSnp_forSnoop(snpOpcode: UInt): Bool = {
+        // If there exists a pending Grant/GrantData, snoop with toN property should not be processed and should wait
+        // for finish of the Grant/GrantData.
+        // TODO: wait GrantAck?
+        def waitPendingGrant(hasPendingGrant: Bool): Bool = {
+            CHIOpcodeSNP.isSnpToN(snpOpcode) && hasPendingGrant
+        }
+        VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && (!s.reqAllowSnoop || s.reqAllowSnoop && !s.w_replResp && waitPendingGrant(s.hasPendingGrant)) }).asUInt.orR
+    }
 
     val mshrBlockSnp_forSnoop = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
 
     val blockB_mayReadDS     = mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
     val setConflict_forSnoop = setConflict("B", io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
 
-    blockB_s1 := reqBlockSnp_forSnoop || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
+    blockB_s1 := reqBlockSnp_forSnoop(taskSnoop_s1.opcode) || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
 
     val noSpaceForNonDataResp = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U // No space for ReleaseAck to send out to SourceD
 
