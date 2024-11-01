@@ -347,7 +347,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         //     mshrAllocStates.w_rprobeack       := false.B
         //     mshrAllocStates.w_rprobeack_first := false.B
         // }
-    }.elsewhen(task_s3.isChannelB) {
+    }
+
+    when(task_s3.isChannelB) {
         mshrAllocStates.s_snpresp      := false.B
         mshrAllocStates.w_snpresp_sent := false.B
 
@@ -361,7 +363,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
             mshrAllocStates.s_compdat      := false.B
             mshrAllocStates.w_compdat_sent := false.B
         }
-    }.elsewhen(task_s3.isChannelC) {
+    }
+
+    when(task_s3.isChannelC) {
         // TODO: Release should always hit
     }
 

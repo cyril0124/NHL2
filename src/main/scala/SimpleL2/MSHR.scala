@@ -827,6 +827,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val rxdatFirstData  = RegInit(false.B)
     val rxdatSecondData = RegInit(false.B)
     when(rxdat.fire) {
+        val opcode       = rxdat.bits.chiOpcode
         val isFirstData  = rxdat.bits.dataID === "b00".U
         val isSecondData = rxdat.bits.dataID === "b10".U
 
@@ -844,22 +845,27 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             rxdatFirstData  := false.B
             rxdatSecondData := false.B
 
-            state.w_compdat := true.B
-
-            when(rxdat.bits.chiOpcode === CompData) {
-                gotCompData := true.B
-
-                gotT       := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
-                gotDirty   := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
-                datDBID    := rxdat.bits.dbID
-                datSrcID   := rxdat.bits.srcID
-                datHomeNID := rxdat.bits.homeNID
+            when(opcode === CompData) {
+                state.w_compdat := true.B
+                gotCompData     := true.B
             }
+
+            gotT       := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
+            gotDirty   := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
+            datDBID    := rxdat.bits.dbID
+            datSrcID   := rxdat.bits.srcID
+            datHomeNID := rxdat.bits.homeNID
         }.otherwise {
-            state.w_compdat_first := true.B
+            when(opcode === CompData) {
+                state.w_compdat_first := true.B
+            }
+        }
+
+        when(opcode =/= CompData) {
+            assert(false.B, "Unknown rxdat opcode => %x", opcode)
         }
     }
-    assert(!(rxdat.fire && state.w_compdat), s"mshr is not watting for rxdat")
+    assert(!(rxdat.fire && state.w_compdat), s"mshr is not watting for rxdat, allowed rxdat transaction: CompData")
 
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
@@ -875,9 +881,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_comp := true.B
             }
             state.w_evict_comp := true.B
-        }.elsewhen(opcode === CompDBIDResp) {
+        }
+
+        when(opcode === CompDBIDResp) {
             state.w_compdbid := true.B
-        }.elsewhen(opcode === RetryAck) {
+        }
+
+        when(opcode === RetryAck) {
             gotRetry      := true.B
             retryPCrdType := rxrsp.bits.pCrdType
             retrySrcID    := rxrsp.bits.srcID
@@ -885,14 +895,18 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             assert(!gotRetry, "gotRetry has been set!")
             assert(!gotPCrdReturn, "gotPCrdReturn should be set after receivng RetryAck")
             assert(lastReqState.orR)
-        }.elsewhen(opcode === PCrdGrant) {
+        }
+
+        when(opcode === PCrdGrant) {
             gotPCrdReturn  := true.B
             returnPCrdType := rxrsp.bits.pCrdType
 
             assert(gotRetry, "PCrdGrant should arrive after RetryAck") // If PCrdGrant arrives at L2 before RetryAck, it should be reordered in MissHandler
             assert(!gotPCrdReturn, "gotPCrdReturn has been set!")
             assert(lastReqState.orR)
-        }.otherwise {
+        }
+
+        when(opcode =/= Comp && opcode =/= CompDBIDResp && opcode =/= RetryAck && opcode =/= PCrdGrant) {
             assert(false.B, "Unknown rxrsp opcode => %x", opcode)
         }
     }
