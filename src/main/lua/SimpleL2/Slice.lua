@@ -2658,9 +2658,9 @@ local test_snoop_unique = env.register_test_case "test_snoop_unique" {
                 chi_txdat.bits.opcode:expect(OpcodeDAT.SnpRespData)
                 chi_txdat.bits.dbID:expect(txn_id)
                 chi_txdat.bits.resp:expect(CHIResp.I)
-                expect.equal(chi_txdat.bits.data:get()[1], 0x1dead)
+                chi_txdat.bits.data:expect_hex_str("0x1dead")
             env.negedge()
-                expect.equal(chi_txdat.bits.data:get()[1], 0x1beef)
+                chi_txdat.bits.data:expect_hex_str("0x1beef")
         end
 
         -- 
@@ -3707,9 +3707,14 @@ local test_snoop_nested_writebackfull = env.register_test_case "test_snoop_neste
                     env.expect_happen_until(10, function () return mp.io_dirWrite_s3_valid:is(1) end)
                 end
             }
-            local dataID, opcode, resp = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp
-            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
-            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) end)
+
+            -- If the cache line state is UC or SC after the Snoop response is sent, a Request Node is permitted to not send
+            -- valid CopyBack Data. If the Request Node decides not to send valid CopyBack Data, the cache state in the
+            -- CopyBackWriteData or CompAck response must be I. Additionally, for a CopyBackWriteData response, all
+            -- BE bits must be deasserted, and the corresponding data must be set to 0.
+            local dataID, opcode, resp, be, data = chi_txdat.bits.dataID, chi_txdat.bits.opcode, chi_txdat.bits.resp, chi_txdat.bits.be, chi_txdat.bits.data
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x00) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) and be:is(0) and data:is_hex_str("0x0") end)
+            env.expect_happen_until(10, function () return chi_txdat:fire() and dataID:is(0x02) and opcode:is(OpcodeDAT.CopyBackWrData) and resp:is(CHIResp.I) and be:is(0) and data:is_hex_str("0x0") end)
             env.negedge()
             tl_e:grantack(0)  
         end

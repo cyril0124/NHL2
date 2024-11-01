@@ -470,8 +470,9 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     val getReplay_s3             = isGet_s3 && !mshrAlloc_s3 && !hasValidDataBuf_s6s7 && valid_s3
 
     /** Deal with mshr cbwrdata */
-    val isCopyBack_s3    = task_s3.isMshrTask && task_s3.isCHIOpcode && task_s3.opcode === CopyBackWrData
-    val copyBackRetry_s3 = isCopyBack_s3 && !hasValidDataBuf_s6s7 && valid_s3
+    val isCopyBack_s3      = task_s3.isMshrTask && task_s3.isCHIOpcode && task_s3.opcode === CopyBackWrData
+    val copyBackRetry_s3   = isCopyBack_s3 && !hasValidDataBuf_s6s7 && valid_s3
+    val copyBackIsValid_s3 = isCopyBack_s3 && task_s3.resp =/= Resp.I
 
     /** Deal with mshr refill */
     val refillNeedData_mp_s3 = mpTask_refill_s3 && (task_s3.opcode === GrantData || task_s3.opcode === AccessAckData)
@@ -572,7 +573,7 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
     /** read data from [[DataStorage]] */
     val readToTempDS_s3   = io.mshrAlloc_s3.fire && (needProbeOnHit_a_s3 || needReadOnHit_a_s3 || needProbe_b_s3 || needDCT_s3) // Read data into TempDataStorage
     val readOnHit_s3      = hit_s3 && (isAcquireBlock_s3 && !acquireReplay_s3 || isGet_s3 && !getReplay_s3) && !mshrAlloc_s3
-    val readOnCopyBack_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && !copyBackRetry_s3
+    val readOnCopyBack_s3 = isCopyBack_s3 && task_s3.channel === CHIChannel.TXDAT && !copyBackRetry_s3 && copyBackIsValid_s3
     val readOnCompData_s3 = isCompData_s3 && !task_s3.readTempDs && task_s3.channel === CHIChannel.TXDAT && !compDataRetry_s3 && supportDCT.B
     val readOnSnpOK_s3    = snpNeedData_b_s3 && !mshrAlloc_s3 && !snpReplay_s3
     val readOnMpTask_s3   = !task_s3.readTempDs && (mpTask_snpresp_s3 && task_s3.channel === CHIChannel.TXDAT && !snpRetry_s3 || mpTask_refill_s3 && refillNeedData_mp_s3 && !refillRetry_s3)
