@@ -1477,11 +1477,15 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         this.io.status.elements.foreach { case (name, data) =>
             printf(cf"io.status.$name: $data%x\n")
         }
-        printf(cf"addr_reqTag:${addr_reqTag_debug}%x\n")
-        printf(cf"addr_metaTag:${addr_metaTag_debug}%x\n")
         printf(cf"channel:${req.channel}\n")
         printf(cf"isCHIOpcode:${req.isCHIOpcode}\n")
         printf(cf"opcode:${req.opcode}\n")
+
+        (0 until nrSlice).foreach { slice =>
+            printf(cf"addr_reqTag for slices_${slice}:${Cat(io.status.reqTag, io.status.set, slice.U(bankBits.W), 0.U(6.W))}%x\n")
+            printf(cf"addr_metaTag for slices_${slice}:${Cat(io.status.metaTag, io.status.set, slice.U(bankBits.W), 0.U(6.W))}%x\n\n")
+        }
+
     }
 }
 
