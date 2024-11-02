@@ -55,6 +55,12 @@ class MshrFsmState()(implicit p: Parameters) extends L2Bundle {
     val w_comp            = Bool() // comp for read transaction
     val w_evict_comp      = Bool() // comp for evict transaction
     val w_replResp        = Bool()
+
+    // Seperate Data and Response from Home
+    // Response from Home, Data from Subordinate
+    val w_respsepdata       = Bool() // from RSP channel
+    val w_datasepresp       = Bool() // from DAT channel
+    val w_datasepresp_first = Bool()
 }
 
 class MshrInfo()(implicit p: Parameters) extends L2Bundle {
@@ -224,7 +230,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val returnPCrdType = RegInit(0.U(4.W))
     val retryIsReissue = RegInit(false.B)
 
-    val gotCompData         = RegInit(false.B)
+    val gotRefilledData     = RegInit(false.B)
     val gotDirty            = RegInit(false.B)
     val getSnpNestedReq_opt = if (optParam.mshrStallOnReqArb) None else Some(RegInit(false.B))
     val releaseGotDirty     = RegInit(false.B)
@@ -287,7 +293,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         returnPCrdType := 0.U
         retryIsReissue := false.B
 
-        gotCompData     := false.B
+        gotRefilledData := false.B
         gotT            := false.B
         gotDirty        := false.B
         releaseGotDirty := false.B
@@ -518,7 +524,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mpTask_refill.bits.isReplTask  := !dirResp.hit && !meta.isInvalid && !state.w_replResp
     mpTask_refill.bits.updateDir   := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
     mpTask_refill.bits.tempDsDest := Mux(
-        gotCompData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty,
+        gotRefilledData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty,
         /** For TRUNK state, dirty data will be written into [[DataStorage]] after receiving ProbeAckData */
         DataDestination.SourceD | DataDestination.DataStorage,
         DataDestination.SourceD
@@ -647,7 +653,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val snprespNeedData = Mux(
         isRealloc,
         snpGotDirty || snpRetToSrc,
-        gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotCompData /* gotCompData is for SnpHitReq and need mshr realloc */
+        gotDirty || probeGotDirty || snpRetToSrc || meta.isDirty || gotRefilledData /* gotRefilledData is for SnpHitReq and need mshr realloc */
     ) && !isSnpMakeInvalidX
     val hasValidProbeAck = VecInit(probeAckParams.zip(meta.clientsOH.asBools).map { case (probeAck, en) => en && probeAck =/= NtoN }).asUInt.orR
     mpTask_snpresp.valid            := !state.s_snpresp && state.w_sprobeack && state.s_compdat && state.w_compdat_sent
@@ -847,25 +853,48 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
             when(opcode === CompData) {
                 state.w_compdat := true.B
-                gotCompData     := true.B
+
+                state.w_respsepdata := true.B
+                state.w_datasepresp := true.B
+
+                gotRefilledData := true.B
+                datDBID         := rxdat.bits.dbID
+            }
+
+            when(opcode === DataSepResp) {
+                state.w_datasepresp := true.B
+
+                when(state.w_respsepdata) {
+                    // CompData == DataSepResp + RespSepData
+                    state.w_compdat := true.B
+                }
+
+                gotRefilledData := true.B
             }
 
             gotT       := rxdat.bits.resp === Resp.UC || rxdat.bits.resp === Resp.UC_PD
             gotDirty   := rxdat.bits.resp === Resp.UC_PD || rxdat.bits.resp === Resp.SC_PD
-            datDBID    := rxdat.bits.dbID
             datSrcID   := rxdat.bits.srcID
             datHomeNID := rxdat.bits.homeNID
-        }.otherwise {
+        }.otherwise { // First data beat of the rxdat transaction
             when(opcode === CompData) {
                 state.w_compdat_first := true.B
+
+                state.w_datasepresp_first := true.B
+            }
+
+            when(opcode === DataSepResp) {
+                state.w_compdat_first := true.B
+
+                state.w_datasepresp_first := true.B
             }
         }
 
-        when(opcode =/= CompData) {
-            assert(false.B, "Unknown rxdat opcode => %x", opcode)
+        when(opcode =/= CompData && opcode =/= DataSepResp) {
+            assert(false.B, "Unknown rxdat opcode => %d", opcode)
         }
     }
-    assert(!(rxdat.fire && state.w_compdat), s"mshr is not watting for rxdat, allowed rxdat transaction: CompData")
+    assert(!(rxdat.fire && state.w_compdat && state.w_datasepresp), s"mshr is not watting for rxdat, allowed rxdat transaction: CompData, DataSepResp")
 
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
@@ -881,6 +910,17 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_comp := true.B
             }
             state.w_evict_comp := true.B
+        }
+
+        when(opcode === RespSepData) {
+            state.w_respsepdata := true.B
+
+            when(state.w_datasepresp) {
+                // CompData == DataSepResp + RespSepData
+                state.w_compdat := true.B
+
+                datDBID := rxrsp.bits.dbID // Reuse datDBID to save the DBID value from seperate data response
+            }
         }
 
         when(opcode === CompDBIDResp) {
@@ -906,7 +946,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
             assert(lastReqState.orR)
         }
 
-        when(opcode =/= Comp && opcode =/= CompDBIDResp && opcode =/= RetryAck && opcode =/= PCrdGrant) {
+        when(opcode =/= Comp && opcode =/= CompDBIDResp && opcode =/= RetryAck && opcode =/= PCrdGrant && opcode =/= RespSepData) {
             assert(false.B, "Unknown rxrsp opcode => %x", opcode)
         }
     }
@@ -1090,7 +1130,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     when(nestedMatch) {
         val nested = io.nested.snoop
         when(nested.cleanDirty) {
-            // gotCompData := false.B // gotCompData is for reqAddr not for metaAddr
             meta.state := MixedState.cleanDirty(meta.state)
         }
 
@@ -1301,6 +1340,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_compdat       := false.B
                 state.w_compdat_first := false.B
                 state.s_compack       := false.B
+
+                state.w_respsepdata       := false.B
+                state.w_datasepresp       := false.B
+                state.w_datasepresp_first := false.B
+
                 assert(state.s_read)
             }
 
@@ -1321,6 +1365,11 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                     state.w_compdat       := false.B
                     state.w_compdat_first := false.B
                     state.s_compack       := false.B
+
+                    state.w_respsepdata       := false.B
+                    state.w_datasepresp       := false.B
+                    state.w_datasepresp_first := false.B
+
                     assert(state.s_read)
                 }
                 assert(state.s_read)
@@ -1402,7 +1451,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
     val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent || !state.s_hintack
-    val gotCompResp      = state.w_comp && state.w_compdat_first
+    val gotCompResp      = state.w_comp && state.w_compdat_first && state.w_datasepresp_first
     val isAcquireHit     = dirResp.hit && req.isChannelA
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.

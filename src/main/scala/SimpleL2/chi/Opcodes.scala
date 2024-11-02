@@ -75,6 +75,7 @@ object CHIOpcodeRSP {
     val PCrdGrant      = 0x7.U(width.W)
     val ReadReceipt    = 0x8.U(width.W)
     val SnpRespFwded   = 0x9.U(width.W)
+    val RespSepData    = 0xb.U(width.W)
 }
 
 object CHIOpcodeSNP {
@@ -198,6 +199,7 @@ object CHIOpcodeDAT {
     val SnpRespDataPtl           = 0x5.U(width.W)
     val SnpRespDataFwded         = 0x6.U(width.W)
     val WriteDataCancel          = 0x7.U(width.W)
+    val DataSepResp              = 0xb.U(width.W)
     val NonCopyBackWrDataCompAck = 0xc.U(width.W)
 
     def widthCheck(opcode: UInt): Unit = { require(opcode.getWidth >= width) }

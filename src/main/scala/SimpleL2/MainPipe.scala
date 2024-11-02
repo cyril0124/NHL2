@@ -333,6 +333,11 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
                 mshrAllocStates.w_compdat       := false.B
                 mshrAllocStates.w_compdat_first := false.B
                 mshrAllocStates.s_compack       := false.B
+
+                // Also support seperate response and data
+                mshrAllocStates.w_respsepdata       := false.B
+                mshrAllocStates.w_datasepresp       := false.B
+                mshrAllocStates.w_datasepresp_first := false.B
             }
         }
 
