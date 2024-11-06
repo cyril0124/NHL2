@@ -46,8 +46,9 @@ class TXDAT()(implicit p: Parameters) extends L2Module {
     skidBuffer.io.enq.bits.txdat := txdat
     skidBuffer.io.enq.bits.data  := Mux(io.task_s6s7.valid, io.data_s6s7.bits, io.data_s2.bits)
 
-    val isValidTXDAT = !(io.task_s2.fire && io.task_s2.bits.resp === Resp.I && io.task_s2.bits.opcode === CopyBackWrData) && !(io.task_s6s7.fire && io.task_s6s7.bits.resp === Resp.I && io.task_s6s7.bits.opcode === CopyBackWrData)
-    when(isValidTXDAT) {
+    val isValidTXDAT_s2   = !(io.task_s2.bits.resp === Resp.I && io.task_s2.bits.opcode === CopyBackWrData) && io.task_s2.fire
+    val isValidTXDAT_s6s7 = !(io.task_s6s7.bits.resp === Resp.I && io.task_s6s7.bits.opcode === CopyBackWrData) && io.task_s6s7.fire
+    when(isValidTXDAT_s2 || isValidTXDAT_s6s7) {
         assert(!(io.task_s2.fire && !io.data_s2.fire), "data_s2 should arrive with task_s2!")
         assert(!(io.data_s2.fire && !io.task_s2.fire), "task_s2 should arrive with data_s2!")
         assert(!(io.task_s6s7.fire && !io.data_s6s7.fire), "data_s6s7 should arrive with task_s6s7!")
