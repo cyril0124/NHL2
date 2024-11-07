@@ -549,7 +549,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 Fill(nrClients, false.B),
                 Seq(
                     (reqIsGet)                 -> Mux(dirResp.hit, meta.clientsOH, Fill(nrClients, false.B)),
-                    (reqIsPrefetch)            -> meta.clientsOH,
                     (reqIsAcquire && reqNeedT) -> reqClientOH,
                     (reqIsAcquire && reqNeedB) -> Mux(dirResp.hit, meta.clientsOH | reqClientOH, reqClientOH)
                 )
