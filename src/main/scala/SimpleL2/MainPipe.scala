@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
+import xs.utils.perf._
 import Utils.{GenerateVerilog, MultiDontTouch}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -904,6 +905,62 @@ class MainPipe()(implicit p: Parameters) extends L2Module {
         train.bits.pfsource   := DontCare    // TODO: only for TopDown?
         train.bits.reqsource  := DontCare    // TODO: only for TopDown?
         train.bits.vaddr.foreach(_ := task_s3.vaddrOpt.getOrElse(0.U))
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Performance counters
+    // -----------------------------------------------------------------------------------------
+    def isChannelTask_s3(chnl: String, isReplay: Boolean = false) = {
+        val isChannel = if (chnl == "A") {
+            task_s3.isChannelA
+        } else if (chnl == "B") {
+            task_s3.isChannelB
+        } else if (chnl == "C") {
+            task_s3.isChannelC
+        } else {
+            assert(false, "Unknown channel")
+            false.B
+        }
+
+        if (isReplay) {
+            isChannel && !task_s3.isMshrTask && task_s3.isReplayTask && valid_s3
+        } else {
+            isChannel && !task_s3.isMshrTask && !task_s3.isReplayTask && valid_s3
+        }
+    }
+
+    XSPerfAccumulate("sinkA_req_cnt", isChannelTask_s3("A"))
+    XSPerfAccumulate("snoop_req_cnt", isChannelTask_s3("B"))
+    XSPerfAccumulate("sinkC_req_cnt", isChannelTask_s3("C"))
+    XSPerfAccumulate("sinkA_replay_req_cnt", isChannelTask_s3("A", true))
+    XSPerfAccumulate("snoop_replay_req_cnt", isChannelTask_s3("B", true))
+
+    XSPerfAccumulate("sinkA_hit_cnt", isChannelTask_s3("A") && dirResp_s3.hit)
+    XSPerfAccumulate("sinkA_miss_cnt", isChannelTask_s3("A") && !dirResp_s3.hit)
+    XSPerfAccumulate("snoop_hit_cnt", isChannelTask_s3("B") && dirResp_s3.hit)
+    XSPerfAccumulate("snoop_miss_cnt", isChannelTask_s3("B") && !dirResp_s3.hit)
+
+    XSPerfAccumulate("acquire_hit_cnt", isChannelTask_s3("A") && dirResp_s3.hit && (task_s3.opcode === AcquireBlock || task_s3.opcode === AcquirePerm))
+    XSPerfAccumulate("acquire_miss_cnt", isChannelTask_s3("A") && !dirResp_s3.hit && (task_s3.opcode === AcquireBlock || task_s3.opcode === AcquirePerm))
+    XSPerfAccumulate("get_hit_cnt", isChannelTask_s3("A") && dirResp_s3.hit && task_s3.opcode === Get)
+    XSPerfAccumulate("get_miss_cnt", isChannelTask_s3("A") && !dirResp_s3.hit && task_s3.opcode === Get)
+
+    XSPerfHistogram("sinkA_req_access_way", perfCnt = OHToUInt(dirResp_s3.wayOH), enable = isChannelTask_s3("A"), start = 0, stop = ways, step = 1)
+    XSPerfHistogram("sinkA_req_hit_way", perfCnt = OHToUInt(dirResp_s3.wayOH), enable = isChannelTask_s3("A") && dirResp_s3.hit, start = 0, stop = ways, step = 1)
+
+    XSPerfAccumulate("snoop_hit_req_cnt", isChannelTask_s3("B") && task_s3.snpHitReq)
+    XSPerfAccumulate("snoop_hit_wb_cnt", isChannelTask_s3("B") && task_s3.snpHitWriteBack)
+
+    XSPerfAccumulate("mshr_full_cnt", io.mshrAlloc_s3.valid && !io.mshrAlloc_s3.ready)
+    XSPerfAccumulate("txdat_s2_stall_cnt", io.txdat_s2.valid && !io.txdat_s2.ready)
+    XSPerfAccumulate("txrsp_s4_stall_cnt", io.txrsp_s4.valid && !io.txrsp_s4.ready)
+
+    XSPerfAccumulate("mshr_snpRetry_s4_cnt", io.retryTasks.stage4.valid && io.retryTasks.stage4.bits.isRetry_s4 && snpRetry_s4)
+    XSPerfAccumulate("mshr_copyBackRetry_s4_cnt", io.retryTasks.stage4.valid && io.retryTasks.stage4.bits.isRetry_s4 && copyBackRetry_s4)
+    XSPerfAccumulate("mshr_refillRetry_s4_cnt", io.retryTasks.stage4.valid && io.retryTasks.stage4.bits.isRetry_s4 && refillRetry_s4)
+    XSPerfAccumulate("replay_s4_cnt", io.replay_s4.valid)
+    if (!optParam.sinkaStallOnReqArb) {
+        XSPerfAccumulate("reqBufReplay_s4_cnt", io.reqBufReplay_s4_opt.get.valid)
     }
 
     dontTouch(io)

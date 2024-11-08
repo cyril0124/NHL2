@@ -6,7 +6,7 @@ import chisel3.experimental.SourceInfo
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import xs.utils.perf._
 import xs.utils.tl.{ReqSourceKey, TLNanhuBusKey, TLNanhuUserBundle, TLUserKey, TLUserParams}
 import Utils.{GenerateVerilog, IDPool}
 import SimpleL2.Configs._
@@ -304,7 +304,14 @@ object Slice extends App {
                 ),
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true))
             )
-        case DebugOptionsKey => DebugOptions()
+
+        // case DebugOptionsKey => DebugOptions(EnablePerfDebug = true)
+        // case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = true, enablePerfDB = false, perfDBHartID = 0)
+        // case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = true, fpgaPlatform = false)
+
+        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
+        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
+        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     GenerateVerilog(args, () => new Slice()(config), name = "Slice", release = false, split = true)
