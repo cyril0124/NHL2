@@ -89,12 +89,13 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_evict_comp = Bool()
     val w_compdbid   = Bool()
 
-    val waitProbeAck    = Bool()
     val replGotDirty    = Bool()
     val isChannelA      = Bool()
     val reqAllowSnoop   = Bool()
     val hasPendingGrant = Bool()
     val gotDirtyData    = Bool() // TempDS has dirty data
+
+    val waitProbeAck = Bool() // for assertion use only
 }
 
 class MshrTasks()(implicit p: Parameters) extends L2Bundle {
@@ -1425,6 +1426,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val evictNotSent     = !state.s_evict
     val wbNotSent        = !state.s_wb
     val getValidReplResp = io.replResp_s3.fire && !io.replResp_s3.bits.retry && valid
+    val waitProbeAck     = !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
     io.status.valid     := valid
     io.status.willFree  := willFree
     io.status.set       := req.set
@@ -1443,7 +1445,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.status.w_evict_comp := state.w_evict_comp
     io.status.w_compdbid   := state.w_compdbid
 
-    io.status.waitProbeAck := !state.w_rprobeack || !state.w_aprobeack || !state.w_sprobeack
+    io.status.waitProbeAck := waitProbeAck // for assertion use only
     io.status.replGotDirty := replGotDirty
     io.status.isChannelA   := req.isChannelA
 
