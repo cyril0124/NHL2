@@ -214,11 +214,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val reallocOpcode   = RegInit(0.U(req.opcode.getWidth.W))
     val reallocRetToSrc = RegInit(false.B)
 
-    val rspDBID    = RegInit(0.U(chiBundleParams.dbIdBits.W))
-    val rspSrcID   = RegInit(0.U(chiBundleParams.nodeIdBits.W))
-    val datDBID    = RegInit(0.U(chiBundleParams.dbIdBits.W))
-    val datSrcID   = RegInit(0.U(chiBundleParams.nodeIdBits.W))
-    val datHomeNID = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val rspDBID_wb  = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val rspDBID     = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val rspSrcID_wb = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val rspSrcID    = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val datDBID     = RegInit(0.U(chiBundleParams.dbIdBits.W))
+    val datSrcID    = RegInit(0.U(chiBundleParams.nodeIdBits.W))
+    val datHomeNID  = RegInit(0.U(chiBundleParams.nodeIdBits.W))
 
     // Registers for retry retry
     val lastReqState   = RegInit(0.U(4.W)) // A register to store the last fired txreq transaction.
@@ -339,6 +341,10 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     mayCancelEvict := RegNext(req.set === io.earlyNested.set && (meta.tag === io.earlyNested.tag || io.replResp_s3.valid && io.replResp_s3.bits.meta.tag === io.earlyNested.tag) && io.earlyNested.isSnpToN)
     mayCancelWb    := mayCancelEvict
 
+    val txreqIsWb  = io.tasks.txreq.bits.opcode === Evict || io.tasks.txreq.bits.opcode === WriteBackFull
+    val txreqTxnID = Mux(!state.s_pcrdreturn, 0.U, Mux(txreqIsWb, Cat(1.U(1.W), io.id), io.id)) // For PCrdReturn, txnID is not used and must be set to 0. For WriteBack like transactions, provide a unique txnID
+    require((mshrBits + 1) <= chiBundleParams.nodeIdBits, s"mshrBits: $mshrBits nodeIdBits:${chiBundleParams.nodeIdBits}") // We have an extra 1 bit for WriteBack like transaction. It is necessary to check the bit width of the nodeIdBits and mshrBits
+
     io.tasks.txreq <> DontCare
     io.tasks.txreq.valid := state.s_snpresp && state.w_snpresp_sent &&
         !(!state.s_makeunique && !state.w_evict_comp) && // If there is a pending Evict which has not received Comp response,
@@ -373,7 +379,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     io.tasks.txreq.bits.snpAttr    := true.B
     io.tasks.txreq.bits.tgtID      := Mux(gotRetry, retrySrcID, DontCare)
     io.tasks.txreq.bits.srcID      := DontCare                             // This value will be assigned in output chi port
-    io.tasks.txreq.bits.txnID      := Mux(!state.s_pcrdreturn, 0.U, io.id) // For PCrdReturn, txnID is not used and must be set to 0
+    io.tasks.txreq.bits.txnID      := txreqTxnID
     io.tasks.txreq.bits.allowRetry := !gotRetry                            // The AllowRetry field should be set to 1 if the transaction is first issued(except for PrefetchTgt), and 0 if the transaction is being retried.
     io.tasks.txreq.bits.pCrdType   := retryPCrdType                        // If the transaction is the first issued, the PCrdType field should be set to 0b0000
     when(io.tasks.txreq.fire) {
@@ -565,8 +571,8 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     /** Send CopyBack task to [[MainPipe]], including: WriteBackFull */
     mpTask_wbdata.valid            := !state.s_cbwrdata && state.s_snpresp && state.w_compdbid
-    mpTask_wbdata.bits.tgtID       := rspSrcID
-    mpTask_wbdata.bits.txnID       := rspDBID
+    mpTask_wbdata.bits.tgtID       := rspSrcID_wb
+    mpTask_wbdata.bits.txnID       := rspDBID_wb
     mpTask_wbdata.bits.isCHIOpcode := true.B
     mpTask_wbdata.bits.opcode      := CopyBackWrData
     mpTask_wbdata.bits.channel     := CHIChannel.TXDAT
@@ -897,17 +903,22 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     /** Receive [[RXRSP]] response, including: Comp */
     val rxrsp = io.resps.rxrsp
     when(rxrsp.fire) {
-        rspDBID  := rxrsp.bits.dbID
-        rspSrcID := rxrsp.bits.srcID
-
         val opcode = rxrsp.bits.chiOpcode
         val resp   = rxrsp.bits.resp
         when(opcode === Comp) {
             when(resp =/= Resp.I) {
-                // Comp for read transactions are usually not equal to 0(Resp.I)
+                // `Comp` for read transactions are usually NOT equal to 0(Resp.I)
                 state.w_comp := true.B
+
+                rspDBID  := rxrsp.bits.dbID
+                rspSrcID := rxrsp.bits.srcID
+            }.otherwise {
+                // `Comp` response for `Evict` request always has its `resp` set as `I`
+                rspDBID_wb  := rxrsp.bits.dbID
+                rspSrcID_wb := rxrsp.bits.srcID
+
+                state.w_evict_comp := true.B
             }
-            state.w_evict_comp := true.B
         }
 
         when(opcode === RespSepData) {
@@ -923,6 +934,9 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         when(opcode === CompDBIDResp) {
             state.w_compdbid := true.B
+
+            rspDBID_wb  := rxrsp.bits.dbID
+            rspSrcID_wb := rxrsp.bits.srcID
         }
 
         when(opcode === RetryAck) {
