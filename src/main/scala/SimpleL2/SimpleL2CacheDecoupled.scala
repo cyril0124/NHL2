@@ -10,7 +10,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
-import xs.utils.perf.{DebugOptions, DebugOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
+import xs.utils.perf._
 import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey, TLUserKey, TLUserParams}
 import xs.utils.FastArbiter
 import SimpleL2.Configs._
@@ -389,8 +389,7 @@ object SimpleL2CacheDecoupled extends App {
     xs.utils.Constantin.init(false)
 
     val config = new Config((_, _, _) => {
-        case DebugOptionsKey => DebugOptions()
-        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 4,
@@ -402,7 +401,9 @@ object SimpleL2CacheDecoupled extends App {
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true), SimpleL2.prefetch.PrefetchReceiverParams())
             )
 
+        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
         case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
+        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapperDecoupled(idRangeMax = 64, nodeID = 12)(p)))(config)
