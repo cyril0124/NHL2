@@ -221,13 +221,18 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
 
     def mshrBlockSnp(set: UInt, tag: UInt): UInt = {
         VecInit(io.mshrStatus.map { s =>
-            s.valid && s.set === set && (s.metaTag === tag && !s.dirHit && s.w_replResp && !s.w_rprobeack) // Snoop nested WrteBackFull/Evict, mshr is waitting for ProbeAck since dirty data may exist in upstream cache.
+            // IHI0050G: B4.11.1
+            // If the pending request is a CopyBack request, the following additional requirements apply:
+            //   - Request transaction flow must be completed after receiving the CompDBIDResp or Comp response.
+            val waitWbResp = (!s.w_evict_comp || !s.w_compdbid)
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && s.w_replResp && !s.w_rprobeack && waitWbResp // Snoop nested WrteBackFull/Evict, mshr is waitting for ProbeAck since dirty data may exist in upstream cache.
         }).asUInt
     }
 
     def snpHitWriteBack(set: UInt, tag: UInt): UInt = {
         val matchVec = VecInit(io.mshrStatus.map { s =>
-            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && (!s.w_evict_comp || !s.w_compdbid)
+            val waitWbResp = (!s.w_evict_comp || !s.w_compdbid)
+            s.valid && s.set === set && s.metaTag === tag && !s.dirHit && !s.state.isInvalid && s.w_replResp && s.w_rprobeack && waitWbResp
         }).asUInt
         matchVec
     }
@@ -250,22 +255,12 @@ class RequestArbiter()(implicit p: Parameters) extends L2Module {
      * After MSHR receives the first beat of CompData, and before L2 receives GrantAck from L1, snoop of X should be **blocked**, 
      * because a slave should not issue a Probe if there is a pending GrantAck on the block according to TileLink spec.
      */
-    def reqBlockSnp_forSnoop(snpOpcode: UInt): Bool = {
-        // If there exists a pending Grant/GrantData, snoop with toN property should not be processed and should wait
-        // for finish of the Grant/GrantData.
-        // TODO: wait GrantAck?
-        def waitPendingGrant(hasPendingGrant: Bool): Bool = {
-            CHIOpcodeSNP.isSnpToN(snpOpcode) && hasPendingGrant
-        }
-        VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && (!s.reqAllowSnoop || s.reqAllowSnoop && !s.w_replResp && waitPendingGrant(s.hasPendingGrant)) }).asUInt.orR
-    }
+    val reqBlockSnpVec_forSnoop = VecInit(io.mshrStatus.map { s => s.valid && s.set === taskSnoop_s1.set && s.reqTag === taskSnoop_s1.tag && !s.willFree && !s.reqAllowSnoop }).asUInt
+    val mshrBlockSnp_forSnoop   = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
+    val setConflict_forSnoop    = setConflict("B", io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
+    val blockB_mayReadDS        = mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
 
-    val mshrBlockSnp_forSnoop = mshrBlockSnp(taskSnoop_s1.set, taskSnoop_s1.tag).orR
-
-    val blockB_mayReadDS     = mayReadDS_s2 || willWriteDS_s2 || Mux(latchTempDsToDs.B, willRefillDS_s2e || willRefillDS_s2, willRefillDS_s2)
-    val setConflict_forSnoop = setConflict("B", io.taskSnoop_s1.bits.set, io.taskSnoop_s1.bits.tag)
-
-    blockB_s1 := reqBlockSnp_forSnoop(taskSnoop_s1.opcode) || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
+    blockB_s1 := reqBlockSnpVec_forSnoop.orR || mshrBlockSnp_forSnoop || blockB_mayReadDS || io.fromSinkC.willWriteDS_s1 || setConflict_forSnoop
 
     val noSpaceForNonDataResp = io.nonDataRespCnt >= (nrNonDataSourceDEntry - 1).U // No space for ReleaseAck to send out to SourceD
 

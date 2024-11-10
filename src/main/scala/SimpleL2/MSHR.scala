@@ -89,11 +89,10 @@ class MshrStatus()(implicit p: Parameters) extends L2Bundle {
     val w_evict_comp = Bool()
     val w_compdbid   = Bool()
 
-    val replGotDirty    = Bool()
-    val isChannelA      = Bool()
-    val reqAllowSnoop   = Bool()
-    val hasPendingGrant = Bool()
-    val gotDirtyData    = Bool() // TempDS has dirty data
+    val replGotDirty  = Bool()
+    val isChannelA    = Bool()
+    val reqAllowSnoop = Bool()
+    val gotDirtyData  = Bool() // TempDS has dirty data
 
     val waitProbeAck = Bool() // for assertion use only
 }
@@ -1341,7 +1340,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      *  the read reissue is required beacuse the data will be snooped back.
      * Read resissue is work with reallocation which is triggered by the Snoop that cannot be handled by the TXDAT at stage 2.
      */
-    val snpMatchReqAddr = valid && !io.status.willFree && io.nested.set === req.set && io.nested.tag === req.tag && state.w_replResp && !io.nested.isMshr
+    val snpMatchReqAddr = valid && !io.status.willFree && io.nested.set === req.set && io.nested.tag === req.tag && !io.nested.isMshr
     when(snpMatchReqAddr) {
         val nested = io.nested.snoop
 
@@ -1463,20 +1462,29 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     val gotReplProbeAck  = state.s_rprobe && state.w_rprobeack
     val gotWbResp        = state.w_compdbid && state.w_evict_comp
-    val hasPendingRefill = !state.s_grant && !state.w_grant_sent || !state.s_accessack && !state.w_accessack_sent || !state.s_hintack
+    val hasPendingRefill = !state.s_grant || !state.w_grant_sent || !state.s_accessack || !state.w_accessack_sent || !state.s_hintack || !state.w_grantack
     val gotCompResp      = state.w_comp && state.w_compdat_first && state.w_datasepresp_first
     val isAcquireHit     = dirResp.hit && req.isChannelA
     io.status.reqAllowSnoop := {
         // If reqAllowSnoop is true and the MSHR already got refill from downstream, a incoming Snoop may cause ReadReissue.
-        tempDsWriteFinish &&
+        tempDsWriteFinish &&              // It is possible that Nested Snoop needs data(e.g. retToSrc or snpGotDirty). This flag indicates that the data has been written back to TempDataStorage
         !(isAcquireHit && gotCompResp) && // If the request is a hit and needT/needB Acquire, we should block the same address Snoop to avoid doing extra Probe for some Snoop(e.g. SnpUnique).
-        hasPendingRefill &&               // Does not grant to upstream cache
         gotReplProbeAck &&                // Already got replace ProbeAck(After that we could determine whether to use Evict or WriteBackFull)
         !(needWb && gotWbResp) &&         // Does not get write back resp from downstream cache(the write back may be stalled by the same address Snoop)
-        !io.status.waitProbeAck           // Does not wait for any ProbeAck
+        !waitProbeAck &&                  // Does not wait for any ProbeAck
+        hasPendingRefill && (             // Does not grant to upstream cache
+            // IHI0050G: B4.11.1
+            //  If a pending request to the same cache line is present at the RN-F and the pending request has not received any response packets:
+            //      - The Snoop request must be processed normally.
+            //      - The cache state must transition as applicable for each Snoop request type.
+            //      - (TODO: Not check for forwarded requests) The cached data or CopyBack request data must be returned with the Snoop response, or forwarded to the Requester, if required by the Snoop request type, Snoop request attributes, and cache state.
+            //  If a pending request to the same cache line is present at the RN-F and the pending request has received at least one Data response packet or a RespSepData response:
+            //      - The RN-F must wait to receive all Data response packets before responding to the Snoop request.
+            //      - Snoop should be processed normally after receiving all Data response packets.
+            !state.w_comp || !state.w_compdat_first || !state.w_datasepresp_first || !state.s_cbwrdata || !state.w_evict_comp
+        )
     }
-    io.status.hasPendingGrant := !state.s_grant && !state.w_grant_sent // Valid when the Snoop has toN property
-    io.status.gotDirtyData    := gotDirty || probeGotDirty && isAcquireProbe || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
+    io.status.gotDirtyData := gotDirty || probeGotDirty && isAcquireProbe || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty
 
     val addr_reqTag_debug  = Cat(io.status.reqTag, io.status.set, 0.U(6.W))
     val addr_metaTag_debug = Cat(io.status.metaTag, io.status.set, 0.U(6.W))
