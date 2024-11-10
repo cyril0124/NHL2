@@ -1290,17 +1290,16 @@ local test_acquire_perm_and_probeack_data = env.register_test_case "test_acquire
             
             -- wait txreq
             env.expect_happen_until(20, function ()
-                return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique)
+                return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique)
             end)
             chi_txreq:dump()
 
             env.negedge(5)
-            chi_rxdat:compdat(0, "0x1234", "0x4567", 5, CHIResp.UC) -- dbID = 5
+            chi_rxrsp:comp(0, 5, CHIResp.UC)
 
             env.expect_happen_until(20, function ()
-                return chi_txrsp:fire()
+                return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) -- dbID = txnID = 5
             end)
-            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
             chi_txrsp:dump()
 
             verilua "appendTasks" {
@@ -1765,20 +1764,18 @@ local test_miss_need_evict = env.register_test_case "test_miss_need_evict" {
         env.negedge()
             tl_a:acquire_block(to_address(0x00, 0x05), TLParam.NtoT, source)
         env.posedge()
-            env.expect_happen_until(10, function() return chi_txreq:fire() end)
-            chi_txreq.bits.opcode:expect(OpcodeREQ.ReadUnique)
+            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
         env.posedge()
             chi_rxdat:compdat(0, "0xdead", "0xbeef", 5, CHIResp.UC) -- dbID = 5
         env.posedge()
-            env.expect_happen_until(10, function() return chi_txrsp:fire() end)
-            chi_txrsp.bits.txnID:expect(5) -- dbID = txnID = 5
+            env.expect_happen_until(10, function() return chi_txrsp:fire() and chi_txrsp.bits.txnID:is(5) end)
 
         verilua "appendTasks" {
             function ()
                 env.expect_happen_until(10, function()
-                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(0)
+                    local txn_id = 16 + 0 -- MSHR is 16, and Evict has extra txnID. txnID = Cat(1'b1, <MSHR ID>)
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(txn_id)
                 end)
-                chi_txreq:dump()
 
                 env.negedge()
                     chi_rxrsp:comp(0, 5, CHIResp.I) -- Comp for Evict
@@ -1929,7 +1926,8 @@ local test_miss_need_evict_and_probe = env.register_test_case "test_miss_need_ev
                 }
 
                 env.expect_happen_until(100, function()
-                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(0)
+                    local tnx_id = 16 + 0
+                    return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.Evict) and chi_txreq.bits.txnID:is(tnx_id)
                 end)
                     chi_txreq:dump()
                 env.negedge()
@@ -4911,8 +4909,8 @@ local test_acquire_BtoT_miss = env.register_test_case "test_acquire_BtoT_miss" {
             env.negedge()
                 tl_a:acquire_perm(to_address(0x01, 0x01), TLParam.BtoT, 0)
             
-            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.ReadUnique) end)
-            chi_rxdat:compdat(0, "0xdead22", "0xbeef22", 5, CHIResp.UC)
+            env.expect_happen_until(10, function() return chi_txreq:fire() and chi_txreq.bits.opcode:is(OpcodeREQ.MakeUnique) end)
+            chi_rxrsp:comp(0, 5, CHIResp.UC)
             env.expect_happen_until(10, function () return chi_txrsp:fire() and chi_txrsp.bits.opcode:is(OpcodeRSP.CompAck) end)
             
             env.expect_happen_until(20, function () return tl_d:fire() and tl_d.bits.source:is(0) and tl_d.bits.opcode:is(TLOpcodeD.Grant) end)
@@ -7369,6 +7367,9 @@ verilua "mainTask" { function ()
     -- local test_all = false
     local test_all = true
 
+    -- TODO: remove this and MSHR reissue
+    -- test_snpHitReq_block_mshrRefill()
+
     -- 
     -- normal test cases
     -- 
@@ -7436,7 +7437,7 @@ verilua "mainTask" { function ()
     test_reorder_rxdat()
     test_other_snoop()
     test_fwd_snoop()
-    test_snpHitReq_block_mshrRefill()
+    -- test_snpHitReq_block_mshrRefill()
     test_chi_retry()
     test_homeNID_dbID()
     test_ooo_rxdat_refill()

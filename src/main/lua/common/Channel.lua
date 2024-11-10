@@ -339,6 +339,17 @@ local function build_channel(tl_prefix, chi_prefix)
         env.negedge()
             chi_rxrsp.valid:set(0)
     end
+
+    chi_rxrsp.resp_sep_data = function (this, txn_id, db_id, resp)
+        env.negedge()
+            chi_rxrsp.bits.txnID:set(txn_id)
+            chi_rxrsp.bits.opcode:set(OpcodeRSP.RespSepData)
+            chi_rxrsp.bits.dbID:set(db_id)
+            chi_rxrsp.bits.resp:set(assert(resp))
+            chi_rxrsp.valid:set(1)
+        env.negedge()
+            chi_rxrsp.valid:set(0)
+    end
     
     local chi_rxdat = ([[
         | valid
@@ -359,6 +370,24 @@ local function build_channel(tl_prefix, chi_prefix)
             chi_rxdat.bits.txnID:set(txn_id)
             chi_rxdat.bits.dataID:set(0)
             chi_rxdat.bits.opcode:set(OpcodeDAT.CompData)
+            chi_rxdat.bits.data:set_str(data_str_0)
+            chi_rxdat.bits.dbID:set(dbID)
+            chi_rxdat.bits.resp:set(resp)
+            chi_rxdat.valid:set(1)
+        env.negedge()
+            chi_rxdat.bits.data:set_str(data_str_1)
+            chi_rxdat.bits.dataID:set(2) -- last data beat
+        env.negedge()
+            chi_rxdat.valid:set(0)
+    end
+
+    chi_rxdat.data_sep_resp = function (this, txn_id, data_str_0, data_str_1, dbID, resp)
+        local dbID = dbID or 0
+        local resp = resp or CHIResp.I
+        env.negedge()
+            chi_rxdat.bits.txnID:set(txn_id)
+            chi_rxdat.bits.dataID:set(0)
+            chi_rxdat.bits.opcode:set(OpcodeDAT.DataSepResp)
             chi_rxdat.bits.data:set_str(data_str_0)
             chi_rxdat.bits.dbID:set(dbID)
             chi_rxdat.bits.resp:set(resp)

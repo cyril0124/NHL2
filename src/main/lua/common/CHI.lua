@@ -57,6 +57,7 @@ local OpcodeRSP = setmetatable({
     DBIDResp        = 0x06,
     PCrdGrant       = 0x07,
     ReadReceipt     = 0x08,
+    RespSepData     = 0x0B,
 }, { __call = enum_search })
 
 
