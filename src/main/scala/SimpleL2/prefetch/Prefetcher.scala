@@ -23,7 +23,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tilelink._
 import xs.utils.{HasCircularQueuePtrHelper, RegNextN, ValidIODelay, Pipeline, ParallelPriorityMux}
-import xs.utils.perf.{XSPerfAccumulate, XSPerfHistogram}
+import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
 import SimpleL2.Configs._
 
@@ -180,7 +180,7 @@ class PrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   }))
 }
 
-class PrefetchQueue(implicit p: Parameters) extends PrefetchModule {
+class PrefetchQueue(implicit p: Parameters) extends PrefetchModule with HasPerfLogging {
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(new PrefetchReq))
     val deq = DecoupledIO(new PrefetchReq)

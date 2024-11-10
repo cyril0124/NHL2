@@ -20,7 +20,7 @@ package SimpleL2.prefetch
 
 import xs.utils.tl.MemReqSource
 import xs.utils.sram.SRAMTemplate
-import xs.utils.perf.XSPerfAccumulate
+import xs.utils.perf.HasPerfLogging
 import xs.utils.{ChiselDB, Constantin, ParallelPriorityMux, RRArbiterInit}
 import org.chipsalliance.cde.config.Parameters
 import chisel3.DontCare.:=
@@ -108,7 +108,7 @@ trait HasBOPParams extends HasPrefetcherHelper {
 }
 
 abstract class BOPBundle(implicit val p: Parameters) extends Bundle with HasBOPParams
-abstract class BOPModule(implicit val p: Parameters) extends Module with HasBOPParams
+abstract class BOPModule(implicit val p: Parameters) extends Module with HasBOPParams with HasPerfLogging
 
 class ScoreTableEntry(implicit p: Parameters) extends BOPBundle {
   // val offset = UInt(offsetWidth.W)

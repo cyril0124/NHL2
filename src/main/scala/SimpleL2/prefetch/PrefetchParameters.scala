@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import SimpleL2.Configs._
+import xs.utils.perf.HasPerfLogging
 import xs.utils.tl.MemReqSource
 
 trait PrefetchParameters {
@@ -35,7 +36,7 @@ trait HasPrefetchParameters extends HasL2Param {
 }
 
 abstract class PrefetchBundle(implicit val p: Parameters) extends Bundle with HasPrefetchParameters
-abstract class PrefetchModule(implicit val p: Parameters) extends Module with HasPrefetchParameters
+abstract class PrefetchModule(implicit val p: Parameters) extends Module with HasPrefetchParameters with HasPerfLogging
 
 object PfSource extends Enumeration {
   val NoWhere = Value("NoWhere")

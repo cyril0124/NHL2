@@ -304,14 +304,7 @@ object Slice extends App {
                 ),
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true))
             )
-
-        // case DebugOptionsKey => DebugOptions(EnablePerfDebug = true)
-        // case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = true, enablePerfDB = false, perfDBHartID = 0)
-        // case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = true, fpgaPlatform = false)
-
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
+        case DebugOptionsKey => DebugOptions()
     })
 
     GenerateVerilog(args, () => new Slice()(config), name = "Slice", release = false, split = true)

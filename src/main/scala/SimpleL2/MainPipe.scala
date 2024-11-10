@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import xs.utils.perf._
+import xs.utils.perf.HasPerfLogging
 import Utils.{GenerateVerilog, MultiDontTouch}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -37,7 +37,7 @@ class MpMshrRetryTasks()(implicit p: Parameters) extends L2Bundle {
     val stage4    = ValidIO(new MshrRetryStage4)
 }
 
-class MainPipe()(implicit p: Parameters) extends L2Module {
+class MainPipe()(implicit p: Parameters) extends L2Module with HasPerfLogging {
     val io = IO(new Bundle {
 
         /** Stage 2 */

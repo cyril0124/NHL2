@@ -11,7 +11,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.tile.MaxHartIdBits
-import xs.utils.perf._
+import xs.utils.perf.{DebugOptionsKey, DebugOptions}
 import xs.utils.tl.{TLNanhuBusField, TLNanhuBusKey, TLUserKey, TLUserParams}
 import xs.utils.FastArbiter
 import SimpleL2.Configs._
@@ -42,12 +42,9 @@ object _assert {
 
 object DefaultConfig {
     def apply() = new Config((_, _, _) => {
-        case TLUserKey             => TLUserParams(aliasBits = 2, vaddrBits = 48)
-        case L2ParamKey            => L2Param()
-        case DebugOptionsKey       => DebugOptions()
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case L2ParamKey      => L2Param()
+        case DebugOptionsKey => DebugOptions()
     })
 }
 
@@ -493,9 +490,6 @@ object SimpleL2Cache extends App {
                 nrClients = nrCore,
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true), SimpleL2.prefetch.PrefetchReceiverParams())
             )
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     val top = DisableMonitors(p => LazyModule(new SimpleL2CacheWrapper(idRangeMax = 64, nodeID = nodeID, hasEndpoint = true)(p)))(config)
@@ -508,7 +502,8 @@ object SimpleL2CacheFinal extends App {
     val nodeID = 12
 
     val config_256kb_8way_2slice_1core = new Config((_, _, _) => {
-        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
@@ -517,13 +512,11 @@ object SimpleL2CacheFinal extends App {
                 useDiplomacy = true,
                 nrClients = 1
             )
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     val config_256kb_8way_4slice_1core = new Config((_, _, _) => {
-        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
@@ -532,13 +525,11 @@ object SimpleL2CacheFinal extends App {
                 useDiplomacy = true,
                 nrClients = 1
             )
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     val config_128kb_8way_2slice_1core = new Config((_, _, _) => {
-        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
@@ -547,14 +538,11 @@ object SimpleL2CacheFinal extends App {
                 useDiplomacy = true,
                 nrClients = 1
             )
-        case DebugOptionsKey       => DebugOptions()
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     val config_1024kb_8way_2slice_2core = new Config((_, _, _) => {
-        case TLUserKey => TLUserParams(aliasBits = 2, vaddrBits = 48)
+        case DebugOptionsKey => DebugOptions()
+        case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey =>
             L2Param(
                 ways = 8,
@@ -563,9 +551,6 @@ object SimpleL2CacheFinal extends App {
                 useDiplomacy = true,
                 nrClients = 2
             )
-        case DebugOptionsKey       => DebugOptions(EnablePerfDebug = false)
-        case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
-        case LogUtilsOptionsKey    => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = false)
     })
 
     // 256-KB, 8-way, 2 slice, 1 core
