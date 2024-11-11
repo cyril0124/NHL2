@@ -372,7 +372,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         )
     )
     io.tasks.txreq.bits.addr       := Cat(Mux(!state.s_read || !state.s_makeunique, req.tag, meta.tag), req.set, 0.U(6.W))
-    io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique // TODO: only for Read not for Evict
+    io.tasks.txreq.bits.expCompAck := !state.s_read || !state.s_makeunique // Only for Read* not for Evict
     io.tasks.txreq.bits.size       := log2Ceil(blockBytes).U
     io.tasks.txreq.bits.order      := Order.None                           // No ordering required
     io.tasks.txreq.bits.memAttr    := MemAttr(allocate = !state.s_wb, cacheable = true.B, device = false.B, ewa = true.B)
@@ -486,7 +486,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
         task.bits.source     := req.source
         task.bits.set        := req.set
         task.bits.tag        := req.tag
-        task.bits.wayOH      := dirResp.wayOH // TODO:
+        task.bits.wayOH      := dirResp.wayOH
 
         task.bits.getSnpNestedReq_opt.foreach(_ := getSnpNestedReq_opt.getOrElse(false.B))
     }
@@ -501,14 +501,13 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     val mpAccessAck         = !state.s_accessack
     val mpHintAck           = !state.s_hintack                                           // send HintAck for prefetch
 
-    // TODO: mshrOpcodes: update directory, write TempDataStorage data in to DataStorage
     mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck || mpHintAck) &&
         (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
-        (state.s_read && state.w_compdat && state.s_compack) && // wait read finish
-        (state.s_makeunique && state.w_comp && state.s_compack) &&
-        (state.s_aprobe && state.w_aprobeack) &&  // need to wait for aProbe to finish (cause by Acquire)
-        (state.s_snpresp && state.w_snpresp_sent) // need to wait for snpresp to finish (cause by realloc)
+        (state.s_read && state.w_compdat && state.s_compack) &&    // wait for Read* finish
+        (state.s_makeunique && state.w_comp && state.s_compack) && // wait for MakeUnique finish
+        (state.s_aprobe && state.w_aprobeack) &&                   // wait for aProbe finish (cause by Acquire)
+        (state.s_snpresp && state.w_snpresp_sent)                  // wait for snpresp finish (cause by realloc)
     mpTask_refill.bits.opcode := MuxCase(DontCare, Seq((req.opcode === AcquireBlock) -> GrantData, (req.opcode === AcquirePerm) -> Grant, (req.opcode === Get) -> AccessAckData, (req.opcode === Hint) -> HintAck));
     mpTask_refill.bits.param := Mux(
         reqIsGet || reqIsPrefetch,
@@ -1068,7 +1067,6 @@ class MSHR()(implicit p: Parameters) extends L2Module {
                 state.w_cbwrdata_sent := false.B
             }
         }.otherwise {
-            // TODO:
             assert(false.B, "TODO:")
         }
     }
