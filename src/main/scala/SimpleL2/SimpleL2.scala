@@ -44,7 +44,7 @@ object DefaultConfig {
     def apply() = new Config((_, _, _) => {
         case TLUserKey       => TLUserParams(aliasBits = 2, vaddrBits = 48)
         case L2ParamKey      => L2Param()
-        case DebugOptionsKey => DebugOptions()
+        case DebugOptionsKey => DebugOptions(EnablePerfDebug = false)
     })
 }
 

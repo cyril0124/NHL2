@@ -304,7 +304,7 @@ object Slice extends App {
                 ),
                 prefetchParams = Seq(SimpleL2.prefetch.BOPParameters(virtualTrain = true))
             )
-        case DebugOptionsKey => DebugOptions()
+        case DebugOptionsKey => DebugOptions(EnablePerfDebug = false)
     })
 
     GenerateVerilog(args, () => new Slice()(config), name = "Slice", release = false, split = true)

@@ -525,7 +525,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     )
     mpTask_refill.bits.isCHIOpcode := false.B
     mpTask_refill.bits.readTempDs  := needTempDsData
-    mpTask_refill.bits.isReplTask  := !dirResp.hit && !meta.isInvalid && !state.w_replResp
+    mpTask_refill.bits.isReplTask  := false.B
     mpTask_refill.bits.updateDir   := !reqIsGet || reqIsGet && needProbe || !dirResp.hit
     mpTask_refill.bits.tempDsDest := Mux(
         gotRefilledData || probeGotDirty || dirResp.hit && dirResp.meta.isDirty || releaseGotDirty,
@@ -723,7 +723,12 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
         assert(
             PopCount(Cat(mpTask_refill.valid, mpTask_wbdata.valid, mpTask_repl.valid, mpTask_snpresp.valid, mpTask_compdat.valid)) <= 1.U,
-            "multiple mpTasks are valid at the same time"
+            "Multiple mpTasks are valid at the same time. mpTask_refill:%d mpTask_wbdata:%d mpTask_repl:%d mpTask_snpresp:%d mpTask_compdat:%d",
+            mpTask_refill.valid,
+            mpTask_wbdata.valid,
+            mpTask_repl.valid,
+            mpTask_snpresp.valid,
+            mpTask_compdat.valid
         )
     }
 

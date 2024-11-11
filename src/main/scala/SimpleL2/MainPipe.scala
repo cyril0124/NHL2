@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink.TLPermissions._
-import xs.utils.perf.HasPerfLogging
+import xs.utils.perf.{HasPerfLogging, DebugOptionsKey}
 import Utils.{GenerateVerilog, MultiDontTouch}
 import SimpleL2.Configs._
 import SimpleL2.Bundles._
@@ -910,6 +910,8 @@ class MainPipe()(implicit p: Parameters) extends L2Module with HasPerfLogging {
     // -----------------------------------------------------------------------------------------
     // Performance counters
     // -----------------------------------------------------------------------------------------
+    println(s"[${this.getClass().toString()}] perfEnable:${p(DebugOptionsKey).EnablePerfDebug && !p(DebugOptionsKey).FPGAPlatform}")
+
     def isChannelTask_s3(chnl: String, isReplay: Boolean = false) = {
         val isChannel = if (chnl == "A") {
             task_s3.isChannelA
