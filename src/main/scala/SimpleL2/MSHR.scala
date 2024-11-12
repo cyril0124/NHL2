@@ -418,7 +418,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
      * -------------------------------------------------------
      */
     io.tasks.txrsp               <> DontCare
-    io.tasks.txrsp.valid         := !state.s_compack && state.w_compdat && state.w_comp
+    io.tasks.txrsp.valid         := !state.s_compack && state.w_compdat && state.w_comp && state.w_replResp && state.s_cbwrdata && state.w_evict_comp
     io.tasks.txrsp.bits.opcode   := CompAck
     io.tasks.txrsp.bits.respErr  := RespErr.NormalOkay
     io.tasks.txrsp.bits.pCrdType := DontCare
@@ -503,7 +503,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
 
     mpTask_refill.valid := valid &&
         (mpGrant || mpAccessAck || mpHintAck) &&
-        (state.w_replResp && state.w_rprobeack && state.s_wb && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
+        (state.w_replResp && state.w_rprobeack && state.s_cbwrdata && state.w_cbwrdata_sent && state.s_evict && state.w_evict_comp) && // wait for WriteBackFull(replacement operations) finish. It is unnecessary to wait for Evict to complete, since Evict does not need to read the DataStorage; hence, mpTask_refill could be fired without worrying whether the refilled data will replace the victim data in DataStorage
         (state.s_read && state.w_compdat && state.s_compack) &&    // wait for Read* finish
         (state.s_makeunique && state.w_comp && state.s_compack) && // wait for MakeUnique finish
         (state.s_aprobe && state.w_aprobeack) &&                   // wait for aProbe finish (cause by Acquire)
@@ -680,7 +680,7 @@ class MSHR()(implicit p: Parameters) extends L2Module {
     assert(!(valid && snprespPassDirty && snprespFinalDirty))
     assert(!(isSnpFwd && req.isChannelB && !dirResp.hit), "Snp[*]Fwd must hit!")
 
-    mpTask_repl.valid           := !state.s_repl && !state.w_replResp && state.s_read && state.s_makeunique && state.w_comp && state.w_compdat && state.s_compack
+    mpTask_repl.valid           := !state.s_repl && !state.w_replResp && state.s_read && state.s_makeunique && state.w_comp && state.w_compdat
     mpTask_repl.bits.isReplTask := true.B
     mpTask_repl.bits.readTempDs := false.B
     mpTask_repl.bits.updateDir  := false.B
